@@ -1,0 +1,371 @@
+"""
+Master Configuration File for AllInKeys System
+Format: Python constants + booleans
+Everything here can be toggled or redefined by the user
+"""
+
+import os
+from datetime import datetime
+
+# ===================== 🔌 SYSTEM PATHS ==========================
+# All paths are absolute by default. Change as needed.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+LOG_DIR = os.path.join(BASE_DIR, "../Logs")
+CSV_DIR = os.path.join(BASE_DIR, "../CSVs")
+DOWNLOAD_DIR = os.path.join(BASE_DIR, "../Downloads")
+VANITY_OUTPUT_DIR = os.path.join(BASE_DIR, "../VanityOutput")
+CHECKPOINT_PATH = os.path.join(LOG_DIR, "restore_checkpoint.json")
+MATCHES_DIR = os.path.join(BASE_DIR, "../Matches")
+SOUND_CLIPS_DIR = os.path.join(BASE_DIR, "../Alerts/Sounds")
+
+# ===================== 🔁 CHECKPOINTING ==========================
+CHECKPOINT_ENABLED = True
+CHECKPOINT_INTERVAL_SECONDS = 30  # 0.5 minutes
+MAX_CHECKPOINT_HISTORY = 3  # Number of checkpoint snapshots to keep
+
+# ===================== 🧬 KEYGEN SETTINGS =========================
+USE_GPU = True
+ROTATE_AT_MB = 500
+ROTATE_AT_LINES = 1_000_000
+MAX_BATCH_SIZE = 100000
+START_BATCH_ID = 0
+USE_CUSTOM_SEEDS = False
+
+# ===================== 🚀 VANITY SEARCH CONFIG ====================
+VANITYSEARCH_PATH = "D:/Downloads/VanitySearch.exe"
+PATTERN = "1**"  # Only search for addresses starting with '1'
+VANITYSEARCH_GPU_INDEX = [0]  # Default to GPU 0; override at runtime
+USE_CPU_FALLBACK = True
+
+# ===================== 🧠 ALTCOIN DERIVATION =======================
+ALTCOIN_GPUS_INDEX = [1]  # Index(es) for altcoin_derive.py
+ENABLE_ALTCOIN_DERIVATION = True
+ENABLE_SEED_VERIFICATION = True
+#ALTCOIN_LIST 
+btc = True
+eth = True
+doge = True
+ltc = True
+dash = True
+bch = True
+rvn = False
+pep = False
+
+CSV_MAX_SIZE_MB = 250
+CSV_MAX_ROWS = 100_000
+
+# ===================== 📊 DASHBOARD SETTINGS =======================
+SHOW_BATCHES_COMPLETED = True # Shows how many batches were created
+SHOW_CURRENT_SEED_INDEX = True # Shows Current Derivation Seed Index 
+SHOW_KEYS_PER_SEC = True # Shows How Many Keys/Sec Your Generating
+SHOW_AVG_KEYGEN_FILE_TIME = True
+SHOW_AVG_CSV_FILE_CHECK_TIME = True
+SHOW_CSV_CHECK_QUEUE_FILE_COUNT = True # How many files waiting to be checked
+SHOW_Progress_bar_CURRENT_CSV = True # a progress indicator for current filename being checked
+SHOW_CSV_RECHECK_QUEUE_FILE_COUNT = TRUE # How many files waiting to be rechecked against todays UNIQUE
+SHOW_Progress_bar_CURRENT_CSV_RECHECK  #Progress bar for current filename being rechecked
+SHOW_CPU_USAGE_STATS = True
+SHOW_RAM_USAGE_STATS = True #shows system performance metric about RAM
+SHOW_NVIDIA_GPU_STATS = True # Shows % load on GPU, VRAM Usage/Total, GPU Temp, GPU Fan Speed % one set of data per index id
+SHOW_AMD_GPU_STATS = True # Shows % load on GPU, VRAM Usage/Total, GPU Temp, GPU Fan Speed % one set of data per index id
+SHOW_Backlog_Files_in_queue_Count = True #Number of files in backlog from vanity search awaiting altcoin derivation and csv saving 
+SHOW_Backlog_Process_Time_Until_Caught_Up = True # how long until backlog is completely cleared
+SHOW_Average_time_per_backlog_file = True  # Altcoin_derive from txt to csv average completion time
+SHOW_Progress_Bar_Current_Backlog_Filename_processing = True  
+SHOW_Buttons to Start/Stop/Pause/Resume/Load Checkpoint file = True
+SHOW_VANITY_SEARCH_STATS = False #Shows MKeys/Sec per GPU/CPU
+SHOW_DISK_FREE = True # shows how much disk space remains
+SHOW_SAVE_DIRECTORIES = True
+LOGS = LOG_DIR #Defined in System Path Section
+DOWNLOADS = DOWNLOAD_DIR #Defined in System Path Section
+CSV = CSV_DIR #Defined in System Path Section
+MATCHES = MATCHES_DIR #Defined in System Path Section
+CHECKPOINT = CHECKPOINT_PATH #Defined in System Path Section
+VANITY SEARCH = VANITY_OUTPUT_DIR #Defined in System Path Section
+SHOW_UPTIME = True  # shows how long the program has been running
+SHOW_MATCHES_TODAY = True # total number of addresses that matched a funded list today, will likely be 0 most days
+BTC = True
+DOGE = True
+DASH = True
+LTC = True
+BCH = True
+RVN = False
+PEP = False
+ETH = True
+SHOW_MATCHES_LIFETIME = True # total number of addresses that matched a funded list lifetime
+BTC = True
+DOGE = True
+DASH = True
+LTC = True
+BCH = True
+RVN = False
+PEP = False
+ETH = True
+SHOW_KEYS_GENERATED_TODAY = True #shows How many Hex Keys Have Been Generated today, Each Hex creates 2 address for each coin
+SHOW_KEYS_GENERATED_LIFETIME = True #shows How many Hex Keys Have Been Generated lifetime, Each Hex creates 2 address for each coin
+SHOW_CSV_PROGRESS = True # shows progress bar of current csv being created
+SHOW_CSV_CREATED_TODAY = True # Shows the total number of CSV files created Today
+SHOW_CSV_CREATED_LIFETIME = True # Shows the total number of CSV files created lifetime
+SHOW_ADDRESS_CREATED_COUNTS_TODAY = True #Shows the total number of combined addresses created across all coins, compressed and uncompressed
+# Which Address Counts Created Today Do You Want Shown on Dashboard? True makes them display, turn off with False
+BTC = True
+DOGE = True
+DASH = True
+LTC = True
+BCH = True
+RVN = False
+PEP = False
+ETH = True
+SHOW_ADDRESS_COUNTS_LIFETIME = True
+# Which Address Counts Created Lifetime Do You Want Shown on Dashboard? True makes them display, turn off with False
+BTC = True
+DOGE = True
+DASH = True
+LTC = True
+BCH = True
+RVN = False
+PEP = False
+ETH = True
+SHOW_NEW_CSV_CHECKED_TODAY_TOTAL = True # shows csv_day_one_checks total
+SHOW_CSV_RECHECKED_TOTAL_TODAY = True # how many CSV files were checked today against their corresponding Unique address list
+SHOW_ADDRESS_CHECKED_COUNTS_TODAY = True
+BTC = True
+DOGE = True
+DASH = True
+LTC = True
+BCH = True
+RVN = False
+PEP = False
+ETH = True
+SHOW_ADDRESS_CHECKED_COUNTS_LIFETIME = True
+BTC = True
+DOGE = True
+DASH = True
+LTC = True
+BCH = True
+RVN = False
+PEP = False
+ETH = True
+
+
+# ===================== 📊 DASHBOARD ALERT SETTINGS =======================
+# Displays the alerts that have all config details added and are turned on currently 
+# if you turn one on and its not showing on dash board GUI as a Successfully set alert 
+# than its not properly configured. Add Details to the config parameters and uncomment all related parameters
+SHOW_ALERTS_SUCCESSFULLY_CONFIGURED_TYPES = True
+
+#Use If You Want To Toggle on and off alert types with Checkboxes from GUI if properly configured
+# It will display in Alerts Successfully Set Field on GUI
+SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES = True
+
+# If you pause one process for another to catch up, when the current running tasks run out of work, 
+# paused processes will Restart to create more work
+ENABLE_AUTO_RESUME_DEPENDENCIES = True
+
+Disk Free: ___ GB | Full in: (time until disk full)  
+
+
+State of Program: Running/Paused/Stopped/Error/Warning
+Current Processes Running: 
+
+# ===================== 📊 DASHBOARD BUTTON SETTINGS =======================
+
+VANITY_SEARCH_BUTTON_CONTROL = True
+Start Button = True
+Stop Button = True
+Pause Button = True
+Resume Button = True
+ALTCOIN_BUTTON_CONTROL = True
+Start_Button = True
+Stop_Button = True
+Pause_Button = True
+Resume_Button = True
+CSV_CHECK_BUTTON_CONTROL = True
+Start_Button = True
+Stop_Button = True
+Pause_Button = True
+Resume_Button = True
+CSV_RECHECK_BUTTON_CONTROL = True 
+Start_Button = True
+Stop_Button = True
+Pause_Button = True
+Resume_Button = True
+ALERTS_BUTTON_CONTROL = True
+Start_Button = True
+Stop_Button = True
+Pause_Button = True
+Resume_Button = True
+
+OPEN_CONFIG_FILE_FROM_DASHBOARD = TRUE
+
+
+SHOW_REFRESH_DASHBOARD_DATA_BUTTON = True
+
+SHOW_DELETE_DASHBOARD_DATA_BUTTON = True
+# delete which type of data checkboxes for
+Vanity_search_logs = True
+CSV_Files = True
+System_Logs = True
+CSV_Checking_Logs = True
+
+
+# ===================== 🌍 COIN ADDRESS SOURCES ======================
+COIN_DOWNLOAD_URLS = {
+    "btc": "http://addresses.loyce.club/Bitcoin_addresses_LATEST.txt.gz",
+    "doge": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Dogecoin/Latest_Dogecoin_Addresses.tsv.gz",
+    "ltc": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Litecoin/Latest_Litecoin_Addresses.tsv.gz",
+    "eth": "https://raw.githubusercontent.com/Pymmdrza/Rich-Address-Wallet/refs/heads/main/ETHEREUM/EthRich.txt",
+    "bch": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/BitcoinCash/Latest_BitcoinCash_Addresses.tsv.gz",
+#    "rvn": "https://example.com/rvn.tsv.gz",
+    "dash": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Dash/Latest_Dash_Addresses.tsv.gz",
+#   "pep": "https://example.com/pep.tsv.gz"
+}
+
+FILTER_ONLY_P2PKH = True  # Remove bc1 / 3 addresses for now (true = only "1" prefix)
+
+# ===================== 🛑 CSV CHECKING =============================
+ENABLE_DAY_ONE_CHECKS = True # checks all newly created address files against the complete list of addresses with balance for each coin
+ENABLE_DAILY_UNIQUE_RECHECK = True # rechecks all previously checked addresses against the daily list of brand new funded addresses that werent in previous list 
+
+# ===================== 🔔 ALERTS + NOTIFICATIONS ====================
+ENABLE_ALERTS = True
+
+#Plays an Audio Alert from a file.  
+ENABLE_AUDIO_ALERT_LOCAL = True
+
+# Provide file path to your audio alert file supports .wav .aiff .mp3
+ALERT_SOUND_FILE = os.path.join(SOUND_CLIPS_DIR, "gondor_alert.wav")
+
+# Creates a desktop pop over window with text and flashes between two colors to alert of a match
+ENABLE_DESKTOP_WINDOW_ALERT = True
+
+#Choose the Hex values for the color of the desktop window alert
+ALERT_POPUP_COLOR_1 = "#FF0000"
+ALERT_POPUP_COLOR_2 = "#000000"
+
+# Sets the Text for the Pop Up Window Message
+ALERT_PHRASE = "The Beacons Have Been Lit, Gondor Calls for Aid!"
+
+# 🔔 Alert Methods (Set to True and fill in credentials)  
+
+# If you want match alerts sent with encrypted info fill in your public PGP Key, keep your Private PGP Key Private
+# Use Good OpSec.  Only Used if encryption of sent messages is enabled
+
+# PGP_PUBLIC_KEY = "paste your Public PGP Key here"  
+
+#Sends Email Alert of Match Information, match details can be encrypted with PGP if desired
+#if using use a burner email best to use non gmail addresses for sender, dont give your primary
+# email credentials to randomly downloaded softwares, use good OpSec
+
+ALERT_EMAIL_ENABLED = False
+
+# Uncomment Parameters and Fill With Your Details to Use
+
+# ALERT_EMAIL_SENDER = "your.sender@gmail.com"
+# ALERT_EMAIL_PASSWORD = "your-password"
+# ALERT_EMAIL_RECIPIENTS = ["recipient@example.com"]
+# INCLUDE_MATCH_INFO = True
+# ENCRYPTED_MESSAGE = True
+
+
+ALERT_TELEGRAM_ENABLED = False
+
+# Uncomment Parameters and Fill With Your Details to Use
+
+# TELEGRAM_BOT_TOKEN = ""
+# TELEGRAM_CHAT_ID = ""
+# INCLUDE_MATCH_INFO = True
+# ENCRYPTED_MESSAGE = True
+
+# Uncomment Parameters and Fill With Your Details to Use
+
+ALERT_SMS_ENABLED = False
+
+# TWILIO_SID = "Add Twilio SID here"
+# TWILIO_AUTH_TOKEN = "Put Your Twilio Token HERE"
+# TWILIO_FROM_NUMBER = "Phone Number Sending SMS"
+# TWILIO_TO_NUMBER = "Phone Number to recieve SMS"
+# INCLUDE_MATCH_INFO = True
+# ENCRYPTED_MESSAGE = True
+
+# Uncomment Parameters and Fill With Your Details to Use
+
+ALERT_DISCORD_ENABLED = False
+
+# DISCORD_WEBHOOK_URL = "add your webhook URL"
+# INCLUDE_MATCH_INFO = True
+# ENCRYPTED_MESSAGE = True
+
+# Allows alerts with Smart Home Integration, trigger alarms, lights, garage doors, sprinklers, Dog Treat Dispenser, etc
+# Uncomment Parameters and Fill With Your Details to Use
+
+ALERT_HOME_ASSISTANT_ENABLED = False
+
+# HOME_ASSISTANT_WEBHOOK = "Add Home Assistant Webhook URL"
+
+# Uncomment Parameters and Fill With Your Details to Use
+
+ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE = False
+
+# ICLOUD_LOGIN = "youremail@icloud.com"
+# ICLOUD_PASSWORD = "password"
+# ICLOUD_DRIVE = "...file/path/on/icloud/"
+# INCLUDE_MATCH_INFO = True
+# ENCRYPTED_MESSAGE = True
+
+ALERT_SAVE_MATCHES_TO_GOOGLE_DRIVE = False
+
+# GOOGLE_DRIVE_LOGIN = "youremail@gmail.com"
+# GOOGLE_DRIVE_PASSWORD = "password"
+# GOOGLE_DRIVE_FILE_PATH = "...file/path/on/gdrive"
+# INCLUDE_MATCH_INFO = True
+# ENCRYPTED_MESSAGE = True
+
+ALERT_SAVE_MATCHES_TO_DROPBOX = False
+
+# DROPBOX_LOGIN = "youremail@gmail.com"
+# DROPBOX_PASSWORD = "password"
+# DROPBOX_FILE_PATH = "...file/path/on/dropbox"
+# INCLUDE_MATCH_INFO = True
+# ENCRYPTED_MESSAGE = True
+
+ALERT_SAVE_MATCHES_TO_LOCAL_FILE = True
+
+FILE_PATH = "os.path.join(BASE_DIR, "../Matches")"
+INCLUDE_MATCH_INFO = True
+ENCRYPTED_MESSAGE = False
+
+
+# ===================== 📜 LOGGING ================================
+LOG_LEVEL = "INFO"  # Options: INFO, DEBUG, WARN, ERROR, TRACE
+LOG_TO_FILE = True
+LOG_TO_CONSOLE = True
+
+# ===================== 🔐 SECURITY / RESET PROTECTION ============
+DASHBOARD_RESET_PASSWORD = "ChangeThisPassword"
+DELETE_CONFIRMATION_PASSWORD = "ChangeThisPassword"
+
+# ===================== 💵 DONATION INFO (Shown on Launch) =========
+SHOW_DONATION_MESSAGE = True
+DONATION_ADDRESSES = {
+    "BTC": "18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y",
+    "DOGE": "DPoHJNbYHEuvNHyCFcUnvtTVmRDMNgnAs5",
+    "LTC": "LNmgLkonXtecopmGauqsDFvci4XQTZAWmg",
+    "ETH" "BSC" "ERC-20": "0xCb8B2937D60c47438562A2E53d08B85865B57741",
+    "XRP": "rNEq4vB5yAKNj52UzNwok4TJKSQuHXQNnc",
+    "XMR": "43DUJ1MA7Mv1n4BTRHemEbDmvYzMysVt2djHnjGzrHZBb4WgMDtQHWh51ZfbcVwHP8We6pML4f1Q7SNEtveYCk4HDdb14ik",
+	"SOL" - "wNR4sffGQwvK4vh6cgxPhhoN71wQT5gdn2Ksy7ueBYa",
+	"ADA" - "addr1qye3f4jszpwcdwz2dzn8lcgjjfsllfyrd7zypmmjx9h6a3nyuw3zpuku8w3kpe47t83pgd8tq4yz9sqndxyv4g2py8nsseve6s",
+	"DASH" - "XrHT9dWzXW3yxcyeUQKhc9yocTFw2iFj3b",
+	"RVN" - "R9StG74J6q15iyxvXySEghF7FbKKJBKRQB",
+	"ZEC" - "t1RBJ6BVrPuiZ5Gq2Wh8SAMkSSK9aqd3xvh",
+	"BTG" - "GRt4a119DHFSN9oGGw1tGwUzg5qtNCprCH",
+	"PEP" - "PbCiPTNrYaCgv1aqNCds5n7Q73znGrTkgp",
+	"BCH" "BSV" - "bitcoincash:qpnyvtz65u9nf4ddd0wewjrge4jedu7l2sayuy09fw",
+	"XLM" - "GBGMRI6Z3JFMEZSUSZROASNLWOIDLRAUEX5RNAVCAFC7A52X5HCG5UYJ"
+}
+
+# Timestamp for startup log
+LAUNCH_TIMESTAMP = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+

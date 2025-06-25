@@ -1,0 +1,28 @@
+# Ignore Python cache and logs
+__pycache__/
+*.pyc
+*.log
+
+# Ignore temporary/OS files
+.DS_Store
+Thumbs.db
+
+# Ignore virtual environments and large folders
+env/
+venv/
+*.zip
+*.tar
+*.gz
+*.mp4
+*.mov
+*.sqlite
+*.db
+*.csv
+
+# Ignore anything else you know you don’t need tracked
+
+# Ignore all files inside Downloads/
+Downloads/*
+
+# But allow the folder itself and any placeholder file
+!Downloads/.gitkeep

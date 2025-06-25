@@ -1,0 +1,13 @@
+requests
+psutil
+pyperclip
+pgpy
+pynvml
+openpyxl
+tk
+tqdm
+pyttsx3
+pyaudio
+soundfile
+pycryptodome
+py-cpuinfo

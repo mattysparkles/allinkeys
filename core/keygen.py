@@ -1,0 +1,186 @@
+# core/keygen.py
+
+import os
+import sys
+import time
+import subprocess
+import threading
+import logging
+import secrets
+from datetime import datetime
+from config.settings import (
+    VANITYSEARCH_PATH,
+    VANITY_OUTPUT_DIR,
+    VANITY_PATTERN,
+    BATCH_SIZE,
+    ADDR_PER_FILE,
+    LOGGING_ENABLED,
+    CHECKPOINT_PATH,
+    MAX_OUTPUT_FILE_SIZE,
+    MAX_OUTPUT_LINES,
+    ROTATE_INTERVAL_SECONDS
+)
+sys.stdout.reconfigure(encoding='utf-8')  # ✅ Safe print emojis on Win terminal
+
+from config.constants import SECP256K1_ORDER
+from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
+
+# Runtime trackers
+total_keys_generated = 0
+keygen_start_time = time.time()
+last_output_file = None
+
+# Used to track current batch progress
+KEYGEN_STATE = {
+    "batch_id": 0,
+    "index_within_batch": 0,
+    "last_seed": None
+}
+
+# Setup logging
+logger = logging.getLogger("KeyGen")
+logger.setLevel(logging.INFO)
+
+if LOGGING_ENABLED:
+    handler = logging.FileHandler("keygen.log", encoding='utf-8')
+    formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+
+def keygen_progress():
+    elapsed_seconds = int(time.time() - keygen_start_time)
+    elapsed_time_str = str(datetime.utcfromtimestamp(elapsed_seconds).strftime('%H:%M:%S'))
+    return {
+        "total_keys_generated": total_keys_generated,
+        "current_batch_id": KEYGEN_STATE["batch_id"],
+        "index_within_batch": KEYGEN_STATE["index_within_batch"],
+        "last_seed": KEYGEN_STATE["last_seed"],
+        "elapsed_time": elapsed_time_str,
+        "start_timestamp": datetime.utcfromtimestamp(keygen_start_time).isoformat() + "Z"
+    }
+
+
+def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1024000):
+    """
+    Deterministically generate a seed from batch_id and index, ensuring ≥ 2^128.
+    """
+    seed = batch_id * batch_size + index_within_batch
+    min_val = 1 << 128
+    if seed < min_val:
+        seed += min_val
+    if seed >= SECP256K1_ORDER:
+        return None
+    return seed
+
+
+def generate_random_seed(min_bits=128):
+    """
+    Generate a cryptographically secure random seed that's at least 2^128.
+    """
+    min_val = 1 << min_bits
+    range_span = SECP256K1_ORDER - min_val
+    return secrets.randbelow(range_span) + min_val
+
+
+def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
+    global total_keys_generated, last_output_file
+    file_index = 0
+    seed_int = initial_seed_int
+
+    while True:
+        # Make filename seed portion compact but meaningful
+        hex_seed_full = hex(seed_int)[2:].rjust(64, "0")
+        hex_seed_short = hex(seed_int)[2:].lstrip("0")[:8] or "00000000"
+
+        current_output_path = os.path.join(
+            VANITY_OUTPUT_DIR,
+            f"batch_{batch_id}_part_{file_index}_seed_{hex_seed_short}.txt"
+        )
+        last_output_file = current_output_path
+
+        cmd = [
+            VANITYSEARCH_PATH,
+            "-s", hex_seed_full,
+            "-gpu",
+            "-o", current_output_path,
+            "-u", VANITY_PATTERN
+        ]
+
+        logger.info(f"🧬 Starting VanitySearch: seed={hex_seed_full} → {current_output_path}")
+
+        with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=outfile,
+                stderr=subprocess.DEVNULL
+            )
+
+            def terminate_after_interval(p):
+                time.sleep(ROTATE_INTERVAL_SECONDS)
+                if p.poll() is None:
+                    logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
+                    p.terminate()
+
+            timer_thread = threading.Thread(target=terminate_after_interval, args=(proc,))
+            timer_thread.start()
+            proc.wait()
+            timer_thread.join()
+
+        # File has closed. Count lines written
+        if os.path.exists(current_output_path):
+            try:
+                with open(current_output_path, 'r', encoding='utf-8') as f:
+                    lines = sum(1 for _ in f)
+                    total_keys_generated += lines
+                    logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
+
+        # Prepare next rotation: new file index + new random seed (≥ 2^128)
+        file_index += 1
+        seed_int = generate_random_seed()
+        logger.info(f"🔁 Rotating to new seed: {hex(seed_int)[2:].rjust(64, '0')} | New file index: {file_index}")
+
+
+def start_keygen_loop():
+    """
+    Main execution loop. Resumes from checkpoint if exists.
+    """
+    if not os.path.exists(VANITY_OUTPUT_DIR):
+        os.makedirs(VANITY_OUTPUT_DIR)
+
+    checkpoint = load_checkpoint()
+    KEYGEN_STATE["batch_id"] = checkpoint.get("batch_id", 0)
+    KEYGEN_STATE["index_within_batch"] = checkpoint.get("index_within_batch", 0)
+
+    logger.info("✅ Checkpoint loaded successfully" if checkpoint else "🚀 Starting new keygen loop")
+
+    try:
+        while True:
+            for index in range(KEYGEN_STATE["index_within_batch"], BATCH_SIZE):
+                seed = generate_seed_from_batch(KEYGEN_STATE["batch_id"], index)
+                if seed is None:
+                    continue
+
+                KEYGEN_STATE["index_within_batch"] = index
+                KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
+                run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index)
+
+                save_checkpoint({
+                    "batch_id": KEYGEN_STATE["batch_id"],
+                    "index_within_batch": index + 1
+                })
+
+            # Finished full batch
+            KEYGEN_STATE["batch_id"] += 1
+            KEYGEN_STATE["index_within_batch"] = 0
+            save_checkpoint({
+                "batch_id": KEYGEN_STATE["batch_id"],
+                "index_within_batch": 0
+            })
+
+    except KeyboardInterrupt:
+        logger.info("🛑 Keygen loop interrupted by user. Exiting cleanly.")
+    except Exception as e:
+        logger.error(f"❌ Unexpected error: {e}")

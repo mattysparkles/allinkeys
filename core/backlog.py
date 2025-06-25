@@ -1,0 +1,206 @@
+# core/backlog.py
+
+import os
+import csv
+import time
+from datetime import datetime
+
+from core.altcoin_derive import derive_altcoin_addresses_from_hex, convert_txt_to_csv
+from config.settings import VANITY_OUTPUT_DIR, CSV_DIR
+from core.logger import log_message
+
+# === Extra Config for Custom Batch Parsing Mode ===
+LOG_DIR = r"P:\ALLINKEYS\KeyGen\Project\modular\logs"
+CSV_BASE_DIR = r"P:\ALLINKEYS\KeyGen\Project\modular\output\csv"
+BATCH_LOG = os.path.join(LOG_DIR, "backlog_history.log")
+MAX_CSV_MB = 750
+SKIP_FILE_NAME = "batch_0_part_0_seed_10000000.txt"
+SKIP_FILE_MIN_SIZE_KB = 250_000  # Skip anything < 250MB
+
+os.makedirs(CSV_BASE_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
+
+def log(msg):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {msg}")
+
+def start_backlog_conversion_loop():
+    log_message("📦 Backlog converter started...", "INFO")
+
+    while True:
+        try:
+            files = [f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")]
+            for file in files:
+                txt_path = os.path.join(VANITY_OUTPUT_DIR, file)
+                output_path = os.path.join(CSV_DIR, file.replace(".txt", ".csv"))
+
+                # Skip files actively being written
+                if (
+                    file == SKIP_FILE_NAME or
+                    os.path.getsize(txt_path) < SKIP_FILE_MIN_SIZE_KB * 1024
+                ):
+                    log_message(f"⏭️ Skipping {file} (in use or too small)", "DEBUG")
+                    continue
+
+                try:
+                    if "part_" in file and "_seed_" in file:
+                        batch_id = int(file.split("_")[1])
+                    else:
+                        batch_id = None
+                except Exception as e:
+                    log_message(f"⚠️ Could not extract batch_id from {file}: {e}", "WARNING")
+                    batch_id = None
+
+                if not os.path.exists(output_path):
+                    log_message(f"🔁 Converting {file} to CSV...", "INFO")
+                    convert_txt_to_csv(txt_path, batch_id)
+
+                    if os.path.exists(output_path):
+                        try:
+                            os.remove(txt_path)
+                            log_message(f"🧹 Deleted original .txt file: {file}", "INFO")
+                        except Exception as e:
+                            log_message(f"⚠️ Could not delete {file}: {e}", "WARNING")
+                else:
+                    log_message(f"✅ Already converted: {file}", "DEBUG")
+
+        except Exception as e:
+            log_message(f"❌ Error in backlog conversion loop: {e}", "ERROR")
+
+        time.sleep(180)  # Update later to ROTATE_INTERVAL_SECONDS if needed
+
+
+# === Legacy Logging Mode Functions ===
+
+def get_parsed_log():
+    if not os.path.exists(BATCH_LOG):
+        return set()
+    with open(BATCH_LOG, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f if line.strip())
+
+def append_to_log(filename):
+    with open(BATCH_LOG, "a", encoding="utf-8") as f:
+        f.write(filename + "\n")
+
+def get_file_size_mb(path):
+    return os.path.getsize(path) / (1024 * 1024)
+
+def open_new_csv_writer(index):
+    folder = os.path.join(CSV_BASE_DIR, f"Batch_{index:03d}")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"keys_batch_{index:05d}.csv")
+    f = open(path, "w", newline="", encoding="utf-8")
+    writer = csv.DictWriter(f, fieldnames=[
+        "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
+        "doge_C", "doge_U", "bch_C", "bch_U", "eth", "dash_C", "dash_U",
+        "private_key", "compressed_address", "uncompressed_address", "batch_id", "index"
+    ])
+    writer.writeheader()
+    return f, writer, path
+
+def parse_vanity_file(txt_file, batch_id):
+    with open(txt_file, "r", encoding="utf-8") as f:
+        lines = [line.strip() for line in f if line.strip()]
+
+    log(f"📄 {len(lines):,} lines read from {os.path.basename(txt_file)}")
+
+    parsed_count = 0
+    csv_index = len([f for _, _, files in os.walk(CSV_BASE_DIR) for f in files if f.endswith(".csv")])
+
+    address_tally = {k: 0 for k in [
+        "btc_C", "btc_U", "ltc_C", "ltc_U", "doge_C", "doge_U", "bch_C", "bch_U", "eth", "dash_C", "dash_U"
+    ]}
+
+    f, writer, path = open_new_csv_writer(csv_index)
+
+    i = 0
+    while i < len(lines):
+        if not lines[i].startswith("PubAddress:") or i + 2 >= len(lines):
+            i += 1
+            continue
+
+        try:
+            addr_line = lines[i]
+            wif_line = lines[i + 1]
+            hex_line = lines[i + 2]
+
+            compressed_address = addr_line.replace("PubAddress:", "").strip()
+            wif = wif_line.replace("Priv (WIF):", "").replace("p2pkh:", "").strip()
+            hex_seed = hex_line.replace("Priv (HEX):", "").replace("0x", "").strip().zfill(64)
+            seed = int(hex_seed, 16)
+
+            altcoins = derive_altcoin_addresses_from_hex(hex_seed)
+
+            for k in address_tally:
+                if altcoins.get(k):
+                    address_tally[k] += 1
+
+            row = {
+                "original_seed": seed,
+                "hex_key": hex_seed,
+                "btc_C": altcoins.get("btc_C", ""),
+                "btc_U": altcoins.get("btc_U", ""),
+                "ltc_C": altcoins.get("ltc_C", ""),
+                "ltc_U": altcoins.get("ltc_U", ""),
+                "doge_C": altcoins.get("doge_C", ""),
+                "doge_U": altcoins.get("doge_U", ""),
+                "bch_C": altcoins.get("bch_C", ""),
+                "bch_U": altcoins.get("bch_U", ""),
+                "eth": altcoins.get("eth", ""),
+                "dash_C": altcoins.get("dash_C", ""),
+                "dash_U": altcoins.get("dash_U", ""),
+                "private_key": wif,
+                "compressed_address": compressed_address,
+                "uncompressed_address": "",
+                "batch_id": batch_id,
+                "index": parsed_count
+            }
+
+            writer.writerow(row)
+            parsed_count += 1
+
+            if parsed_count % 2000 == 0:
+                f.flush()
+                size_mb = get_file_size_mb(path)
+                log(f"🧾 Written {parsed_count} rows, file size: {size_mb:.2f}MB")
+
+                if size_mb >= MAX_CSV_MB:
+                    f.close()
+                    csv_index += 1
+                    f, writer, path = open_new_csv_writer(csv_index)
+
+            i += 3
+        except Exception as e:
+            log(f"⚠️ Error at line {i}: {e}")
+            i += 1
+
+    f.close()
+    log(f"✅ Done. {parsed_count:,} rows written.")
+    for coin, count in address_tally.items():
+        log(f"🔢 {coin.upper()} addresses: {count:,}")
+
+    return parsed_count
+
+def main():
+    parsed_files = get_parsed_log()
+    files = sorted(f for f in os.listdir(LOG_DIR) if f.endswith(".txt") and f.startswith("vanitysearch_batch_"))
+
+    for txt in files:
+        if txt in parsed_files:
+            continue
+
+        path = os.path.join(LOG_DIR, txt)
+        log(f"\n🚀 Processing {txt}...")
+
+        try:
+            batch_id = int(txt.split("_")[2])
+            written = parse_vanity_file(path, batch_id)
+            if written:
+                append_to_log(txt)
+                os.remove(path)
+                log(f"🧹 Removed {txt}")
+        except Exception as e:
+            log(f"❌ Failed to process {txt}: {e}")
+
+if __name__ == "__main__":
+    main()
