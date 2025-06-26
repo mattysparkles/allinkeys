@@ -29,21 +29,35 @@ from core.logger import log_message
 def alert_match(match_data, test_mode=False):
     """
     Sends alerts through all enabled channels.
-    If test_mode=True, simulate a test match.
+    Accepts either:
+        - A dict with match details (coin, address, timestamp, etc.)
+        - A dict with {"encrypted": "<PGP-encoded string>"} for PGP/cloud upload only
     """
+    if not isinstance(match_data, dict):
+        log_message("❌ Malformed alert_match call — expected dict.", "ERROR")
+        return
+
+    # Handle PGP-only encrypted blob
+    if "encrypted" in match_data:
+        try:
+            timestamp = time.strftime('%Y-%m-%d_%H-%M-%S')
+            filename = f"encrypted_match_{timestamp}.pgp"
+            full_path = os.path.join(MATCH_LOG_DIR, filename)
+            with open(full_path, "w") as f:
+                f.write(match_data["encrypted"])
+            log_message(f"☁ Encrypted match stored to: {filename}", "INFO")
+        except Exception as e:
+            log_message(f"❌ Failed to store encrypted match: {e}", "ERROR")
+        return
 
     timestamp = match_data.get("timestamp") or time.strftime('%Y-%m-%d %H:%M:%S')
     coin = match_data.get("coin", "BTC")
     address = match_data.get("address", match_data.get("btc_U", "unknown"))
     csv_file = match_data.get("csv_file", "unknown")
-    privkey = match_data.get("privkey", None)
+    privkey = match_data.get("privkey", "N/A")
     alert_type = "TEST MATCH" if test_mode else "MATCH FOUND"
 
-    if test_mode:
-        match_data["alert_type"] = alert_type
-
-    match_text = f"[{timestamp}] {alert_type}!\nCoin: {coin}\nAddress: {address}\nCSV: {csv_file}"
-
+    match_text = f"[{timestamp}] {alert_type}!\nCoin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey}"
     log_message(f"🚨 {alert_type}: {address} (File: {csv_file})")
 
     # 🖥️ Desktop Window Alert
@@ -148,7 +162,7 @@ def alert_match(match_data, test_mode=False):
         except Exception as e:
             print(f"PGP/cloud upload error: {e}")
 
-    # 📜 Local log fallback
+    # 📜 Local match log
     try:
         log_path = os.path.join(MATCH_LOG_DIR, "matches.log")
         with open(log_path, 'a') as f:
@@ -167,9 +181,6 @@ def trigger_startup_alerts():
 
     try:
         log_message("📣 Triggering startup alerts...", "INFO")
-        # Extend to trigger startup message via desired channels
-        # alert_email("AllInKeys started.")
-        # alert_telegram("🚀 AllInKeys running.")
-        # etc...
+        # Extend to alert channels if needed
     except Exception as e:
         log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
