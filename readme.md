@@ -167,6 +167,23 @@ Yields `dist/main.exe` — standalone binary.
 
 ---
 
+## 🧩 Included Component: VanitySearch Binary (MIT License)
+
+This project includes a precompiled binary of **VanitySearch**, a GPU-accelerated Bitcoin vanity address generator.
+
+- **Original project**: [VanitySearch by Jean-Luc Pons](https://github.com/JeanLucPons/VanitySearch)
+- **License**: MIT
+- **Binary origin**: A third-party fork of the VanitySearch project that adds seed-based deterministic search capability.
+- **Compiler**: Not compiled by us — this executable was distributed by the forked project directly.
+
+We make **no claims or guarantees** about the performance, security, or accuracy of the included VanitySearch binary. Use at your own discretion.
+
+> If you are the author of the specific fork used, and would like attribution or changes, feel free to open an issue or PR.
+
+---
+
+**License Notice**: The original VanitySearch project and most of its forks are distributed under the MIT License. A copy of the license is included below.
+
 ## 🚨 Legal Notice
 
 AllInKeys is provided for **educational and research use only**. The authors do not condone or support illegal behavior. Use responsibly.
