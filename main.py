@@ -1,12 +1,12 @@
 # main.py
 
-import threading
-import time
 import os
+import time
 import argparse
-import psutil
 from datetime import datetime
-from multiprocessing import Process
+from multiprocessing import Process, set_start_method
+
+import psutil
 
 try:
     import GPUtil
@@ -28,17 +28,10 @@ from core.keygen import start_keygen_loop, keygen_progress
 from core.csv_checker import check_csvs_day_one, check_csvs
 from core.backlog import start_backlog_conversion_loop
 from core.alerts import trigger_startup_alerts, alert_match
-from core.dashboard import update_dashboard_stat, THREAD_HEALTH
+from core.dashboard import update_dashboard_stat
 from ui.dashboard_gui import start_dashboard
-from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import convert_txt_to_csv_loop
-
-
-if not os.path.exists(VANITYSEARCH_PATH):
-    raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")
-else:
-    print(f"✅ VanitySearch found: {VANITYSEARCH_PATH}")
-
+from core.gpu_selector import assign_gpu_roles
 
 def display_logo():
     print(LOGO_ART)
@@ -61,7 +54,7 @@ def save_checkpoint_loop():
         time.sleep(CHECKPOINT_INTERVAL_SECONDS)
 
 
-def metrics_updater_thread():
+def metrics_updater():
     while True:
         try:
             stats = {}
@@ -82,12 +75,11 @@ def metrics_updater_thread():
             prog = keygen_progress()
             stats['keyrate'] = prog['total_keys_generated']
             stats['uptime'] = prog['elapsed_time']
-
             update_dashboard_stat(stats)
+
             log_message(f"📊 Metrics updated: {stats}", "DEBUG")
         except Exception as e:
             log_message(f"❌ Error in metrics updater: {e}", "ERROR")
-
         time.sleep(3)
 
 
@@ -102,29 +94,25 @@ def run_all_processes(args):
         log_message("🧠 Checkpoint restore enabled.", "INFO")
 
     if not args.skip_downloads:
-        if should_skip_download_today(download_dir=DOWNLOAD_DIR):
+        if should_skip_download_today(DOWNLOAD_DIR):
             log_message("🚩 Skipping address downloads — already downloaded today.")
         else:
             log_message("🌐 Downloading address lists...")
             download_and_compare_address_lists()
 
     if ENABLE_KEYGEN and not args.headless:
-        THREAD_HEALTH["keygen"] = True
         Process(target=start_keygen_loop).start()
         log_message("🧬 Keygen loop started.", "INFO")
 
     if ENABLE_DAY_ONE_CHECK:
-        THREAD_HEALTH["csv_check"] = True
         Process(target=check_csvs_day_one).start()
         log_message("🧾 Day One CSV check scheduled.", "INFO")
 
     if ENABLE_UNIQUE_RECHECK:
-        THREAD_HEALTH["csv_recheck"] = True
         Process(target=check_csvs).start()
         log_message("🔁 Unique recheck scheduled.", "INFO")
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
-        THREAD_HEALTH["backlog"] = True
         Process(target=start_backlog_conversion_loop).start()
         log_message("📁 Backlog conversion loop scheduled.", "INFO")
 
@@ -133,11 +121,14 @@ def run_all_processes(args):
         log_message("🚨 Alert system primed.", "INFO")
 
     if CHECKPOINT_INTERVAL_SECONDS:
-        threading.Thread(target=save_checkpoint_loop, daemon=True).start()
+        Process(target=save_checkpoint_loop).start()
         log_message("🕒 Checkpoint thread started.", "INFO")
 
-    threading.Thread(target=metrics_updater_thread, daemon=True).start()
-    log_message("📈 Metrics updater thread launched.", "INFO")
+    Process(target=metrics_updater).start()
+    log_message("📈 Metrics updater thread launched.")
+
+    # Altcoin derive loop (background txt → csv conversion)
+    Process(target=convert_txt_to_csv_loop).start()
 
 
 def run_allinkeys(args):
@@ -168,7 +159,16 @@ def run_allinkeys(args):
 
 
 if __name__ == "__main__":
-    assign_gpu_roles()  # 🧠 Prompt user or auto-assign GPUs before forking any processes
+    from core.gpu_selector import assign_gpu_roles
+
+    set_start_method("spawn")
+
+    if not os.path.exists(VANITYSEARCH_PATH):
+        raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")
+    else:
+        print(f"✅ VanitySearch found: {VANITYSEARCH_PATH}")
+
+    assign_gpu_roles()
 
     parser = argparse.ArgumentParser(description="AllInKeys Modular Runner")
     parser.add_argument("--skip-backlog", action="store_true", help="Skip backlog conversion on startup")
