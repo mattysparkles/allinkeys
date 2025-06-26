@@ -59,7 +59,12 @@ def get_amd_gpu_device():
 
 
 def derive_addresses_gpu(hex_keys):
-    context, device = get_amd_gpu_device()
+    try:
+        context, device = get_amd_gpu_device()
+    except Exception as e:
+        log_message(f"❌ GPU derivation failed: {e}", "ERROR")
+        return [{"error": str(e)} for _ in hex_keys]
+
     queue = cl.CommandQueue(context)
 
     kernel_path = os.path.join(os.path.dirname(__file__), "sha256_kernel.cl")
@@ -141,7 +146,6 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                     try:
                         line = raw.decode("utf-8")
                     except UnicodeDecodeError:
-                        # Fallback decoding: replace problematic characters and log
                         line = raw.decode("utf-8", errors="replace")
                         log_message(f"⚠️ Non-UTF8 character replaced in line {i}: {repr(line)}")
                     yield line
@@ -167,7 +171,7 @@ def convert_txt_to_csv(input_txt_path, batch_id):
             for line in infile:
                 line_number += 1
                 stripped = line.strip()
-                if stripped.startswith("Pub Addr:"):
+                if stripped.startswith("PubAddress:") or stripped.startswith("Pub Addr:"):
                     line_buffer = [stripped]
                 elif stripped.startswith("Priv (WIF):") and line_buffer:
                     line_buffer.append(stripped)
@@ -200,6 +204,9 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                     line_buffer = []
                 else:
                     line_buffer = []
+
+            if rows_written == 0:
+                log_message(f"⚠️ No rows written for {input_txt_path}. Check parsing rules or input format.")
 
             log_message(f"✅ Created CSV: {output_csv_path} with {rows_written} rows", "INFO")
             update_dashboard_stat("csv_created", 1)
