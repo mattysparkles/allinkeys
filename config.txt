@@ -226,7 +226,7 @@ FILTER_ONLY_P2PKH = True  # Remove bc1 / 3 addresses for now (true = only "1" pr
 
 # ===================== 🛑 CSV CHECKING =============================
 ENABLE_DAY_ONE_CHECKS = True # checks all newly created address files against the complete list of addresses with balance for each coin
-ENABLE_DAILY_UNIQUE_RECHECK = True # rechecks all previously checked addresses against the daily list of brand new funded addresses that werent in previous list 
+ENABLE_DAILY_UNIQUE_RECHECK = True # rechecks all previously checked addresses against the daily list of brand new funded addresses that weren't in previous list 
 
 # ===================== 🔔 ALERTS + NOTIFICATIONS ====================
 ENABLE_ALERTS = True
@@ -256,7 +256,7 @@ ALERT_PHRASE = "The Beacons Have Been Lit, Gondor Calls for Aid!"
 
 #Sends Email Alert of Match Information, match details can be encrypted with PGP if desired
 #if using use a burner email best to use non gmail addresses for sender, dont give your primary
-# email credentials to randomly downloaded softwares, use good OpSec
+# email credentials to randomly downloaded software, use good OpSec
 
 ALERT_EMAIL_ENABLED = False
 
@@ -285,7 +285,7 @@ ALERT_SMS_ENABLED = False
 # TWILIO_SID = "Add Twilio SID here"
 # TWILIO_AUTH_TOKEN = "Put Your Twilio Token HERE"
 # TWILIO_FROM_NUMBER = "Phone Number Sending SMS"
-# TWILIO_TO_NUMBER = "Phone Number to recieve SMS"
+# TWILIO_TO_NUMBER = "Phone Number to receive SMS"
 # INCLUDE_MATCH_INFO = True
 # ENCRYPTED_MESSAGE = True
 
