@@ -29,13 +29,13 @@ CHECKPOINT_FILE = os.path.join(BASE_DIR, "checkpoint.json")
 
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
-VANITYSEARCH_PATH = r"D:\Downloads\vanity\VanitySearch-1.15.4_bitcrack_th256gr.exe"  # Adjust if renamed
+VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")  # Adjust if renamed
 MAX_KEYS_PER_FILE = 100_000  #Deprecated
 # Output file rotation config (for VanitySearch stream)
 MAX_OUTPUT_FILE_SIZE = 250 * 1024 * 1024  # 250 MB default
 MAX_OUTPUT_LINES = 200_000              # 200,000 lines per file
 USE_GPU = True
-ROTATE_INTERVAL_SECONDS = 180
+ROTATE_INTERVAL_SECONDS = 60
 
 # ===================== ✅ ENABLED FEATURES ==========================
 ENABLE_CHECKPOINT_RESTORE = True
