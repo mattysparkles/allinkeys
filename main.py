@@ -1,10 +1,11 @@
 # main.py
 
-import os
+import threading
 import time
+import os
 import argparse
-from datetime import datetime
 import psutil
+from datetime import datetime
 from multiprocessing import Process
 
 try:
@@ -28,9 +29,15 @@ from core.csv_checker import check_csvs_day_one, check_csvs
 from core.backlog import start_backlog_conversion_loop
 from core.alerts import trigger_startup_alerts, alert_match
 from core.dashboard import update_dashboard_stat, THREAD_HEALTH
-from core.gpu_selector import assign_gpu_roles
 from ui.dashboard_gui import start_dashboard
+from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import convert_txt_to_csv_loop
+
+
+if not os.path.exists(VANITYSEARCH_PATH):
+    raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")
+else:
+    print(f"✅ VanitySearch found: {VANITYSEARCH_PATH}")
 
 
 def display_logo():
@@ -54,11 +61,10 @@ def save_checkpoint_loop():
         time.sleep(CHECKPOINT_INTERVAL_SECONDS)
 
 
-def metrics_updater_loop():
+def metrics_updater_thread():
     while True:
         try:
             stats = {}
-
             stats['cpu'] = psutil.cpu_percent()
             stats['ram'] = psutil.virtual_memory().percent
             stats['disk'] = psutil.disk_usage('/').percent
@@ -90,58 +96,48 @@ def should_skip_download_today(download_dir):
     return any(today_str in f for f in os.listdir(download_dir) if f.endswith(".txt"))
 
 
-def run_all_processes():
-    # 🧠 Assign GPUs
-    assign_gpu_roles()
-
-    # 🧠 Checkpoint restore
+def run_all_processes(args):
     if ENABLE_CHECKPOINT_RESTORE:
         load_keygen_checkpoint()
         log_message("🧠 Checkpoint restore enabled.", "INFO")
 
-    # 🌐 Address downloads
-    if not should_skip_download_today(DOWNLOAD_DIR):
-        log_message("🌐 Downloading address lists...")
-        download_and_compare_address_lists()
-    else:
-        log_message("🚩 Skipping address downloads — already downloaded today.")
+    if not args.skip_downloads:
+        if should_skip_download_today(download_dir=DOWNLOAD_DIR):
+            log_message("🚩 Skipping address downloads — already downloaded today.")
+        else:
+            log_message("🌐 Downloading address lists...")
+            download_and_compare_address_lists()
 
-    # 🧬 Keygen loop
-    if ENABLE_KEYGEN:
-        Process(target=start_keygen_loop, daemon=True).start()
+    if ENABLE_KEYGEN and not args.headless:
+        THREAD_HEALTH["keygen"] = True
+        Process(target=start_keygen_loop).start()
         log_message("🧬 Keygen loop started.", "INFO")
 
-    # 🔁 CSV checker
     if ENABLE_DAY_ONE_CHECK:
-        Process(target=check_csvs_day_one, daemon=True).start()
-        log_message("🧾 Day One CSV check launched.", "INFO")
+        THREAD_HEALTH["csv_check"] = True
+        Process(target=check_csvs_day_one).start()
+        log_message("🧾 Day One CSV check scheduled.", "INFO")
 
     if ENABLE_UNIQUE_RECHECK:
-        Process(target=check_csvs, daemon=True).start()
-        log_message("🔁 Unique recheck launched.", "INFO")
+        THREAD_HEALTH["csv_recheck"] = True
+        Process(target=check_csvs).start()
+        log_message("🔁 Unique recheck scheduled.", "INFO")
 
-    # 🧪 Altcoin derive (TXT → CSV)
-    Process(target=convert_txt_to_csv_loop, daemon=True).start()
-    log_message("⚙️ Altcoin derive watcher launched.", "INFO")
+    if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
+        THREAD_HEALTH["backlog"] = True
+        Process(target=start_backlog_conversion_loop).start()
+        log_message("📁 Backlog conversion loop scheduled.", "INFO")
 
-    # 🗃️ Backlog conversion
-    if ENABLE_BACKLOG_CONVERSION:
-        Process(target=start_backlog_conversion_loop, daemon=True).start()
-        log_message("📁 Backlog converter launched.", "INFO")
-
-    # 🚨 Alert test
     if ENABLE_ALERTS:
-        Process(target=trigger_startup_alerts, daemon=True).start()
+        Process(target=trigger_startup_alerts).start()
         log_message("🚨 Alert system primed.", "INFO")
 
-    # 💾 Checkpoint save
     if CHECKPOINT_INTERVAL_SECONDS:
-        Process(target=save_checkpoint_loop, daemon=True).start()
-        log_message("🕒 Checkpoint save loop started.", "INFO")
+        threading.Thread(target=save_checkpoint_loop, daemon=True).start()
+        log_message("🕒 Checkpoint thread started.", "INFO")
 
-    # 📈 Metrics
-    Process(target=metrics_updater_loop, daemon=True).start()
-    log_message("📈 Metrics updater launched.", "INFO")
+    threading.Thread(target=metrics_updater_thread, daemon=True).start()
+    log_message("📈 Metrics updater thread launched.", "INFO")
 
 
 def run_allinkeys(args):
@@ -158,20 +154,22 @@ def run_allinkeys(args):
             "timestamp": datetime.utcnow().isoformat(),
             "test_mode": True
         }
+        log_message("🧺 Running simulated match alert...")
         alert_match(test_data, test_mode=True)
-        log_message("🧺 Simulated match alert triggered.")
 
     if ENABLE_DASHBOARD and not args.no_dashboard:
-        Process(target=run_all_processes, daemon=True).start()
+        Process(target=run_all_processes, args=(args,)).start()
         start_dashboard()
     else:
-        run_all_processes()
+        run_all_processes(args)
 
     while True:
         time.sleep(10)
 
 
 if __name__ == "__main__":
+    assign_gpu_roles()  # 🧠 Prompt user or auto-assign GPUs before forking any processes
+
     parser = argparse.ArgumentParser(description="AllInKeys Modular Runner")
     parser.add_argument("--skip-backlog", action="store_true", help="Skip backlog conversion on startup")
     parser.add_argument("--no-dashboard", action="store_true", help="Don't launch GUI dashboard")
