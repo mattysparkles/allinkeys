@@ -24,7 +24,7 @@ sys.stdout.reconfigure(encoding='utf-8')  # ✅ Safe print emojis on Win termina
 
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
-from core.gpu_selector import get_vanity_gpu_ids  # ✅ New import
+from core.gpu_selector import get_vanitysearch_gpu_ids  
 
 # Runtime trackers
 total_keys_generated = 0
