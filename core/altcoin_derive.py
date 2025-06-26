@@ -28,9 +28,13 @@ import core.checkpoint as checkpoint
 
 
 def get_compressed_pubkey(priv_bytes):
+    """Return the 33-byte compressed public key for the given private key."""
     sk = SigningKey.from_string(priv_bytes, curve=SECP256k1)
-    vk = sk.get_verifying_key().to_string()
-    return b'\x02' + bytes([vk[0] & 1]) + vk[1:]
+    point = sk.get_verifying_key().pubkey.point
+    x = point.x()
+    y = point.y()
+    prefix = b"\x03" if (y & 1) else b"\x02"
+    return prefix + x.to_bytes(32, "big")
 
 
 def hash160(data):
