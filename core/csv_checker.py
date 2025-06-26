@@ -42,14 +42,23 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
                         addr = row.get(col, "").strip()
                         if addr and addr in address_set:
                             log_message(f"✅ MATCH in {filename}: {addr} ({coin})", "ALERT")
-                            match_data = f"{datetime.utcnow()} | {addr} | Coin: {coin} | File: {filename} | WIF: {row.get('wif')}"
+
+                            match_payload = {
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "coin": coin,
+                                "address": addr,
+                                "csv_file": filename,
+                                "privkey": row.get("wif", row.get("priv_hex", ""))
+                            }
 
                             if ENABLE_PGP:
-                                encrypted = encrypt_with_pgp(match_data, PGP_PUBLIC_KEY_PATH)
-                                alert_match(encrypted)
+                                encrypted = encrypt_with_pgp(str(match_payload), PGP_PUBLIC_KEY_PATH)
+                                alert_match({"encrypted": encrypted})
                             else:
-                                alert_match(match_data)
+                                alert_match(match_payload)
+
                             new_matches.append(addr)
+
         return new_matches
 
     except Exception as e:
