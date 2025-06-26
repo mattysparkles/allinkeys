@@ -89,7 +89,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
     seed_int = initial_seed_int
 
     while True:
-        # Make filename seed portion compact but meaningful
         hex_seed_full = hex(seed_int)[2:].rjust(64, "0")
         hex_seed_short = hex(seed_int)[2:].lstrip("0")[:8] or "00000000"
 
@@ -127,7 +126,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
             proc.wait()
             timer_thread.join()
 
-        # File has closed. Count lines written
         if os.path.exists(current_output_path):
             try:
                 with open(current_output_path, 'r', encoding='utf-8') as f:
@@ -137,7 +135,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
             except Exception as e:
                 logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
 
-        # Prepare next rotation: new file index + new random seed (≥ 2^128)
         file_index += 1
         seed_int = generate_random_seed()
         logger.info(f"🔁 Rotating to new seed: {hex(seed_int)[2:].rjust(64, '0')} | New file index: {file_index}")
@@ -151,10 +148,15 @@ def start_keygen_loop():
         os.makedirs(VANITY_OUTPUT_DIR)
 
     checkpoint = load_checkpoint()
-    KEYGEN_STATE["batch_id"] = checkpoint.get("batch_id", 0)
-    KEYGEN_STATE["index_within_batch"] = checkpoint.get("index_within_batch", 0)
-
-    logger.info("✅ Checkpoint loaded successfully" if checkpoint else "🚀 Starting new keygen loop")
+    if checkpoint:
+        KEYGEN_STATE["batch_id"] = checkpoint.get("batch_id", 0)
+        KEYGEN_STATE["index_within_batch"] = checkpoint.get("index_within_batch", 0)
+        logger.info("✅ Checkpoint loaded successfully")
+    else:
+        # Randomize starting point if no checkpoint is found
+        KEYGEN_STATE["batch_id"] = secrets.randbelow(1_000_000)
+        KEYGEN_STATE["index_within_batch"] = secrets.randbelow(BATCH_SIZE)
+        logger.info("🚀 No checkpoint found. Starting with randomized batch/index.")
 
     try:
         while True:
@@ -172,7 +174,6 @@ def start_keygen_loop():
                     "index_within_batch": index + 1
                 })
 
-            # Finished full batch
             KEYGEN_STATE["batch_id"] += 1
             KEYGEN_STATE["index_within_batch"] = 0
             save_checkpoint({
