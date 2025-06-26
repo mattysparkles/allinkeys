@@ -9,9 +9,9 @@ from core.altcoin_derive import derive_altcoin_addresses_from_hex, convert_txt_t
 from config.settings import VANITY_OUTPUT_DIR, CSV_DIR
 from core.logger import log_message
 
-# === Extra Config for Custom Batch Parsing Mode ===
-LOG_DIR = r"P:\ALLINKEYS\KeyGen\Project\modular\logs"
-CSV_BASE_DIR = r"P:\ALLINKEYS\KeyGen\Project\modular\output\csv"
+# === Portable Config for Batch Parsing Mode ===
+LOG_DIR = os.getenv("LOG_DIR", os.path.join(os.getcwd(), "logs"))
+CSV_BASE_DIR = os.getenv("CSV_BASE_DIR", os.path.join(os.getcwd(), "output", "csv"))
 BATCH_LOG = os.path.join(LOG_DIR, "backlog_history.log")
 MAX_CSV_MB = 750
 SKIP_FILE_NAME = "batch_0_part_0_seed_10000000.txt"
@@ -24,6 +24,22 @@ def log(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {msg}")
 
+def is_file_locked(path):
+    try:
+        with open(path, 'a+'):
+            return False
+    except (OSError, PermissionError):
+        return True
+
+def is_file_still_writing(path, delay=2.0):
+    try:
+        size1 = os.path.getsize(path)
+        time.sleep(delay)
+        size2 = os.path.getsize(path)
+        return size1 != size2
+    except Exception:
+        return True
+
 def start_backlog_conversion_loop():
     log_message("📦 Backlog converter started...", "INFO")
 
@@ -34,12 +50,14 @@ def start_backlog_conversion_loop():
                 txt_path = os.path.join(VANITY_OUTPUT_DIR, file)
                 output_path = os.path.join(CSV_DIR, file.replace(".txt", ".csv"))
 
-                # Skip files actively being written
+                # Skip unfinished or unready files
                 if (
                     file == SKIP_FILE_NAME or
-                    os.path.getsize(txt_path) < SKIP_FILE_MIN_SIZE_KB * 1024
+                    os.path.getsize(txt_path) < SKIP_FILE_MIN_SIZE_KB * 1024 or
+                    is_file_locked(txt_path) or
+                    is_file_still_writing(txt_path)
                 ):
-                    log_message(f"⏭️ Skipping {file} (in use or too small)", "DEBUG")
+                    log_message(f"⏭️ Skipping {file} (locked, growing, or too small)", "DEBUG")
                     continue
 
                 try:
@@ -67,7 +85,7 @@ def start_backlog_conversion_loop():
         except Exception as e:
             log_message(f"❌ Error in backlog conversion loop: {e}", "ERROR")
 
-        time.sleep(180)  # Update later to ROTATE_INTERVAL_SECONDS if needed
+        time.sleep(10)  # Can be updated to ROTATE_INTERVAL_SECONDS
 
 
 # === Legacy Logging Mode Functions ===
