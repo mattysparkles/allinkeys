@@ -11,3 +11,14 @@ pyaudio
 soundfile
 pycryptodome
 py-cpuinfo
+pyopencl
+ecdsa
+eth-hash
+base58
+numpy
+cryptography
+bitcoinaddress
+twilio
+playsound
+GPUtil
+eth-account
