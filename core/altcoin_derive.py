@@ -25,6 +25,7 @@ from config.settings import (
 from core.logger import log_message
 from core.dashboard import update_dashboard_stat
 import core.checkpoint as checkpoint
+from core.gpu_selector import get_altcoin_gpu_ids  # ✅ Integrated new GPU selector
 
 
 def get_compressed_pubkey(priv_bytes):
@@ -49,18 +50,31 @@ def b58(prefix, payload):
     return base58.b58encode(full + checksum).decode()
 
 
-def get_amd_gpu_device():
-    for platform in cl.get_platforms():
+def get_gpu_context_for_altcoin():
+    """Initialize OpenCL context using user-assigned GPU for altcoin derivation."""
+    selected_ids = get_altcoin_gpu_ids()
+    if not selected_ids:
+        raise RuntimeError("❌ No GPU assigned for altcoin derivation.")
+
+    platforms = cl.get_platforms()
+    all_devices = []
+
+    for platform in platforms:
         for device in platform.get_devices():
-            if "gfx1032" in device.name.lower() or "rx 6600" in device.name.lower():
-                context = cl.Context([device])
-                return context, device
-    raise RuntimeError("❌ AMD RX 6600 GPU not found.")
+            all_devices.append(device)
+
+    try:
+        device = all_devices[selected_ids[0]]  # Use first assigned GPU
+        context = cl.Context([device])
+        log_message(f"🧠 Using GPU for altcoin derive: {device.name}", "INFO")
+        return context, device
+    except Exception as e:
+        raise RuntimeError(f"❌ Failed to initialize assigned GPU for altcoin derive: {e}")
 
 
 def derive_addresses_gpu(hex_keys):
     try:
-        context, device = get_amd_gpu_device()
+        context, device = get_gpu_context_for_altcoin()
     except Exception as e:
         log_message(f"❌ GPU derivation failed: {e}", "ERROR")
         return [{"error": str(e)} for _ in hex_keys]
