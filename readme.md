@@ -170,6 +170,10 @@ Yields `dist/main.exe` — standalone binary.
 ## 🧩 Included Component: VanitySearch Binary (MIT License)
 
 This project includes a precompiled binary of **VanitySearch**, a GPU-accelerated Bitcoin vanity address generator.
+### Binary Tools
+
+`bin/VanitySearch.exe`, a precompiled binary from a third-party MIT-licensed fork of [VanitySearch](https://github.com/JeanLucPons/VanitySearch). See `third_party_licenses.md` for details.
+
 
 - **Original project**: [VanitySearch by Jean-Luc Pons](https://github.com/JeanLucPons/VanitySearch)
 - **License**: MIT
