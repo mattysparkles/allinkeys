@@ -15,6 +15,7 @@ import pyopencl as cl
 import numpy as np
 from eth_hash.auto import keccak
 from ecdsa import SigningKey, SECP256k1
+import time
 
 from config.settings import (
     ENABLE_ALTCOIN_DERIVATION,
@@ -29,7 +30,6 @@ from core.gpu_selector import get_altcoin_gpu_ids  # ✅ Integrated new GPU sele
 
 
 def get_compressed_pubkey(priv_bytes):
-    """Return the 33-byte compressed public key for the given private key."""
     sk = SigningKey.from_string(priv_bytes, curve=SECP256k1)
     point = sk.get_verifying_key().pubkey.point
     x = point.x()
@@ -51,7 +51,6 @@ def b58(prefix, payload):
 
 
 def get_gpu_context_for_altcoin():
-    """Initialize OpenCL context using user-assigned GPU for altcoin derivation."""
     selected_ids = get_altcoin_gpu_ids()
     if not selected_ids:
         raise RuntimeError("❌ No GPU assigned for altcoin derivation.")
@@ -230,3 +229,31 @@ def convert_txt_to_csv(input_txt_path, batch_id):
     except Exception as e:
         log_message(f"❌ Error processing {input_txt_path}: {e}", "ERROR")
         traceback.print_exc()
+
+
+def convert_txt_to_csv_loop():
+    """
+    Watches the CSV_DIR for new .txt files from VanitySearch
+    and converts them to .csv format using convert_txt_to_csv().
+    This is meant to be launched as a separate process.
+    """
+    log_message("📦 Altcoin conversion loop started...", "INFO")
+    processed = set()
+
+    while True:
+        try:
+            all_txt = [
+                f for f in os.listdir(CSV_DIR)
+                if f.endswith(".txt") and f not in processed
+            ]
+
+            for txt_file in all_txt:
+                full_path = os.path.join(CSV_DIR, txt_file)
+                batch_id = None  # Optional: parse from filename
+                convert_txt_to_csv(full_path, batch_id)
+                processed.add(txt_file)
+
+        except Exception as e:
+            log_message(f"❌ Error in altcoin conversion loop: {e}", "ERROR")
+
+        time.sleep(5)
