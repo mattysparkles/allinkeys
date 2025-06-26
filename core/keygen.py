@@ -24,6 +24,7 @@ sys.stdout.reconfigure(encoding='utf-8')  # ✅ Safe print emojis on Win termina
 
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
+from core.gpu_selector import get_vanity_gpu_ids  # ✅ New import
 
 # Runtime trackers
 total_keys_generated = 0
@@ -88,6 +89,10 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
     file_index = 0
     seed_int = initial_seed_int
 
+    # ✅ Get assigned GPU IDs for VanitySearch
+    selected_gpu_ids = get_vanity_gpu_ids()
+    gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
+
     while True:
         hex_seed_full = hex(seed_int)[2:].rjust(64, "0")
         hex_seed_short = hex(seed_int)[2:].lstrip("0")[:8] or "00000000"
@@ -106,13 +111,14 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
             "-u", VANITY_PATTERN
         ]
 
-        logger.info(f"🧬 Starting VanitySearch: seed={hex_seed_full} → {current_output_path}")
+        logger.info(f"🧬 Starting VanitySearch: seed={hex_seed_full} → {current_output_path} | GPUs: {selected_gpu_ids or 'default'}")
 
         with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
             proc = subprocess.Popen(
                 cmd,
                 stdout=outfile,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                env={**os.environ, **gpu_env}  # ✅ Set GPU scope
             )
 
             def terminate_after_interval(p):
