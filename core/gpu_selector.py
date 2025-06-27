@@ -1,6 +1,8 @@
 # core/gpu_selector.py
 
+import os
 import time
+import json
 import pyopencl as cl
 
 try:
@@ -14,6 +16,7 @@ assigned_gpus = {
     "altcoin_derive": []
 }
 
+GPU_ASSIGN_FILE = "gpu_assignments.json"
 SELECTION_TIMEOUT = 20  # seconds
 
 
@@ -27,23 +30,26 @@ def list_gpus():
             for gpu in GPUtil.getGPUs():
                 name = f"NVIDIA: {gpu.name}"
                 if name not in seen_names:
-                    gpus.append({"type": "nvidia", "name": gpu.name, "id": gpu.id})
+                    gpus.append({"type": "nvidia", "name": gpu.name, "id": gpu.id, "cl_index": None})
                     seen_names.add(name)
         except:
             pass
 
     # AMD or others via OpenCL
     try:
+        cl_index = 0
         for platform in cl.get_platforms():
             for device in platform.get_devices():
                 name = f"AMD: {device.name}"
                 if name not in seen_names:
-                    gpus.append({"type": "amd", "name": device.name, "id": len(gpus)})
+                    gpus.append({"type": "amd", "name": device.name, "id": len(gpus), "cl_index": cl_index})
                     seen_names.add(name)
+                cl_index += 1
     except:
         pass
 
     return gpus
+
 
 
 def auto_assign_best(gpus):
@@ -63,7 +69,6 @@ def auto_assign_best(gpus):
             assigned_gpus["altcoin_derive"].append(nvidia[0])
             assigned_gpus["vanitysearch"].append(nvidia[1])
     else:
-        # Prefer NVIDIA for VanitySearch, AMD for Altcoin
         for g in gpus:
             if g["type"] == "nvidia" and len(assigned_gpus["vanitysearch"]) == 0:
                 assigned_gpus["vanitysearch"].append(g)
@@ -113,7 +118,6 @@ def prompt_user_to_choose(gpus):
             auto_assign_best(gpus)
 
     except (ImportError, AttributeError, OSError):
-        # On Windows or signal-unsupported environments
         try:
             vs_input = input("Select GPU(s) for VanitySearch: ").strip()
             ad_input = input("Select GPU(s) for Altcoin Derive: ").strip()
@@ -141,11 +145,34 @@ def assign_gpu_roles():
         return
 
     prompt_user_to_choose(gpus)
+    save_gpu_assignments()
+
+
+def save_gpu_assignments():
+    with open(GPU_ASSIGN_FILE, "w") as f:
+        json.dump(assigned_gpus, f)
+
+
+def load_gpu_assignments():
+    global assigned_gpus
+    if os.path.exists(GPU_ASSIGN_FILE):
+        with open(GPU_ASSIGN_FILE, "r") as f:
+            try:
+                assigned_gpus = json.load(f)
+            except json.JSONDecodeError:
+                pass
 
 
 def get_vanitysearch_gpu_ids():
-    return [g["id"] for g in assigned_gpus["vanitysearch"]]
+    load_gpu_assignments()
+    return [g["id"] for g in assigned_gpus.get("vanitysearch", [])]
 
 
 def get_altcoin_gpu_ids():
-    return [g["id"] for g in assigned_gpus["altcoin_derive"]]
+    load_gpu_assignments()
+    return [g["id"] for g in assigned_gpus.get("altcoin_derive", [])]
+
+
+def clear_gpu_assignments():
+    if os.path.exists(GPU_ASSIGN_FILE):
+        os.remove(GPU_ASSIGN_FILE)
