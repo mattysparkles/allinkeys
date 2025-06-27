@@ -15,7 +15,7 @@ CSV_BASE_DIR = os.getenv("CSV_BASE_DIR", os.path.join(os.getcwd(), "output", "cs
 BATCH_LOG = os.path.join(LOG_DIR, "backlog_history.log")
 MAX_CSV_MB = 750
 SKIP_FILE_NAME = "batch_0_part_0_seed_10000000.txt"
-SKIP_FILE_MIN_SIZE_KB = 250_000  # Skip anything < 250MB
+SKIP_FILE_MIN_SIZE_KB = 50_000  # Skip anything < 50MB
 
 os.makedirs(CSV_BASE_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -41,6 +41,10 @@ def is_file_still_writing(path, delay=2.0):
         return True
 
 def start_backlog_conversion_loop():
+    """
+    Monitors VANITY_OUTPUT_DIR for .txt files and converts to .csv if ready.
+    Skips files that are too small, locked, or recently modified.
+    """
     log_message("📦 Backlog converter started...", "INFO")
 
     while True:
@@ -50,21 +54,26 @@ def start_backlog_conversion_loop():
                 txt_path = os.path.join(VANITY_OUTPUT_DIR, file)
                 output_path = os.path.join(CSV_DIR, file.replace(".txt", ".csv"))
 
-                # Skip unfinished or unready files
-                if (
-                    file == SKIP_FILE_NAME or
-                    os.path.getsize(txt_path) < SKIP_FILE_MIN_SIZE_KB * 1024 or
-                    is_file_locked(txt_path) or
-                    is_file_still_writing(txt_path)
-                ):
-                    log_message(f"⏭️ Skipping {file} (locked, growing, or too small)", "DEBUG")
+                too_small = os.path.getsize(txt_path) < SKIP_FILE_MIN_SIZE_KB * 1024
+                locked = is_file_locked(txt_path)
+                writing = is_file_still_writing(txt_path)
+
+                if file == SKIP_FILE_NAME:
+                    log_message(f"⏭️ Skipping {file} (explicit skip file)", "DEBUG")
                     continue
 
+                if too_small:
+                    log_message(f"⏭️ Skipping {file} (too small: {os.path.getsize(txt_path)} bytes)", "DEBUG")
+                if locked:
+                    log_message(f"⏭️ Skipping {file} (file is locked)", "DEBUG")
+                if writing:
+                    log_message(f"⏭️ Skipping {file} (file may still be writing)", "DEBUG")
+
+                if too_small or locked or writing:
+                    continue  # Skip conversion
+
                 try:
-                    if "part_" in file and "_seed_" in file:
-                        batch_id = int(file.split("_")[1])
-                    else:
-                        batch_id = None
+                    batch_id = int(file.split("_")[1]) if "part_" in file and "_seed_" in file else None
                 except Exception as e:
                     log_message(f"⚠️ Could not extract batch_id from {file}: {e}", "WARNING")
                     batch_id = None
@@ -85,7 +94,8 @@ def start_backlog_conversion_loop():
         except Exception as e:
             log_message(f"❌ Error in backlog conversion loop: {e}", "ERROR")
 
-        time.sleep(10)  # Can be updated to ROTATE_INTERVAL_SECONDS
+        time.sleep(10)
+
 
 
 # === Legacy Logging Mode Functions ===
