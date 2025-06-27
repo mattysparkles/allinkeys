@@ -17,6 +17,7 @@ from ecdsa import SigningKey, SECP256k1
 import time
 import threading
 import multiprocessing
+_gpu_logged_once = False
 
 from config.settings import (
     ENABLE_ALTCOIN_DERIVATION,
@@ -60,6 +61,12 @@ def b58(prefix, payload):
 
 
 def get_gpu_context_for_altcoin():
+    """
+    Returns an OpenCL context and device for the assigned altcoin GPU.
+    Only logs the selected GPU once per session to avoid log spam.
+    """
+    global _gpu_logged_once
+
     selected_ids = get_altcoin_gpu_ids()
     if not selected_ids:
         from core.gpu_selector import assign_gpu_roles
@@ -92,7 +99,11 @@ def get_gpu_context_for_altcoin():
 
     device = all_devices[cl_index]
     context = cl.Context([device])
-    log_message(f"🧠 Using GPU for altcoin derive: {device.name}", "INFO")
+
+    if not _gpu_logged_once:
+        log_message(f"🧠 Using GPU for altcoin derive: {device.name}", "INFO")
+        _gpu_logged_once = True
+
     return context, device
 
 
