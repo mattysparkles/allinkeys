@@ -280,6 +280,11 @@ def convert_txt_to_csv(input_txt_path, batch_id):
 
 
 def convert_txt_to_csv_loop():
+    """
+    Watches VANITY_OUTPUT_DIR and converts new .txt files to CSVs
+    using altcoin derivation. Tracks already-processed files to avoid reprocessing.
+    Exits cleanly on Ctrl+C and logs all errors with ASCII-safe fallbacks.
+    """
     log_message("📦 Altcoin conversion loop started...", "INFO")
     processed = set()
 
@@ -293,12 +298,26 @@ def convert_txt_to_csv_loop():
             for txt_file in all_txt:
                 full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
                 batch_id = None
-                convert_txt_to_csv(full_path, batch_id)
-                processed.add(txt_file)
+                try:
+                    convert_txt_to_csv(full_path, batch_id)
+                    processed.add(txt_file)
+                except Exception as e:
+                    try:
+                        err = str(e).encode("ascii", errors="replace").decode("ascii")
+                        log_message(f"❌ Conversion failed on {txt_file}: {err}", "ERROR")
+                    except:
+                        log_message(f"❌ Conversion failed on {txt_file}: Non-ASCII error", "ERROR")
 
             time.sleep(5)
     except KeyboardInterrupt:
-        log_message("🛑 CSV conversion loop interrupted by user.", "INFO")
+        log_message("🛑 Altcoin conversion loop interrupted by Ctrl+C", "INFO")
+        sys.exit(0)
+    except Exception as loop_err:
+        try:
+            err = str(loop_err).encode("ascii", errors="replace").decode()
+            log_message(f"❌ Altcoin conversion loop crashed: {err}", "ERROR")
+        except:
+            log_message("❌ Altcoin conversion loop crashed with unreadable error.", "ERROR")
 
 
 def start_backlog_conversion_loop():
