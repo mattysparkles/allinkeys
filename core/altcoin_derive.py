@@ -109,8 +109,11 @@ def derive_addresses_gpu(hex_keys):
     if not os.path.isfile(kernel_path):
         raise FileNotFoundError(f"❌ Missing kernel file: {kernel_path}")
 
-    with open(kernel_path, "r", encoding="utf-8", errors="replace") as kf:
+    with open(kernel_path, "r", encoding="utf-8", errors="strict") as kf:
         kernel_code = kf.read()
+
+    # Sanitize for PyOpenCL cache write: only ASCII allowed
+    kernel_code = ''.join(c if 32 <= ord(c) <= 126 or c in '\n\r\t' else '?' for c in kernel_code)
 
     program = cl.Program(context, kernel_code).build()
 
