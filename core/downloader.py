@@ -7,7 +7,7 @@ import requests
 from datetime import datetime
 from glob import glob
 
-from config.settings import COIN_DOWNLOAD_URLS, DOWNLOAD_DIR, MAX_DAILY_FILES_PER_COIN
+from config.settings import COIN_DOWNLOAD_URLS, DOWNLOADS_DIR, MAX_DAILY_FILES_PER_COIN
 from core.logger import log_message
 
 def download_and_compare_address_lists():
@@ -18,8 +18,8 @@ def download_and_compare_address_lists():
     for coin, url in COIN_DOWNLOAD_URLS.items():
         try:
             now = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
-            output_full = os.path.join(DOWNLOAD_DIR, f"{coin.upper()}_addresses_{now}.txt")
-            output_unique = os.path.join(DOWNLOAD_DIR, f"{coin.upper()}_UNIQUE_addresses_{now}.txt")
+            output_full = os.path.join(DOWNLOADS_DIR, f"{coin.upper()}_addresses_{now}.txt")
+            output_unique = os.path.join(DOWNLOADS_DIR, f"{coin.upper()}_UNIQUE_addresses_{now}.txt")
             gz_path = output_full + ".gz"
 
             # Download file
@@ -30,13 +30,23 @@ def download_and_compare_address_lists():
                     f.write(chunk)
             log_message(f"{coin.upper()}: Download complete")
 
-            # Decompress .gz file
-            with gzip.open(gz_path, 'rb') as f_in, open(output_full, 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            os.remove(gz_path)
-            log_message(f"{coin.upper()}: Decompressed to {output_full}")
+            # Check for GZIP magic header
+            with open(gz_path, 'rb') as test_f:
+                magic = test_f.read(2)
+            is_gzipped = magic == b'\x1f\x8b'
 
-            # Special BTC handling: filter only addresses starting with '1'
+            if is_gzipped:
+                # Decompress .gz file
+                with gzip.open(gz_path, 'rb') as f_in, open(output_full, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+                os.remove(gz_path)
+                log_message(f"{coin.upper()}: Decompressed to {output_full}")
+            else:
+                # Treat as raw text file
+                shutil.move(gz_path, output_full)
+                log_message(f"{coin.upper()}: File was not gzipped. Saved as-is.")
+
+            # BTC: Filter only addresses starting with '1'
             if coin == "btc":
                 with open(output_full, 'r', encoding='utf-8') as f:
                     filtered = [line for line in f if line.startswith("1")]
@@ -45,7 +55,7 @@ def download_and_compare_address_lists():
                 log_message(f"{coin.upper()}: Filtered for addresses starting with '1'")
 
             # Compare with previous file
-            previous_files = sorted(glob(os.path.join(DOWNLOAD_DIR, f"{coin.upper()}_addresses_*.txt")))
+            previous_files = sorted(glob(os.path.join(DOWNLOADS_DIR, f"{coin.upper()}_addresses_*.txt")))
             if len(previous_files) >= 2:
                 previous_file = previous_files[-2]
                 with open(previous_file, 'r', encoding='utf-8') as f:
@@ -61,7 +71,7 @@ def download_and_compare_address_lists():
 
             # Prune excess files
             for pattern in [f"{coin.upper()}_addresses_*.txt", f"{coin.upper()}_UNIQUE_addresses_*.txt"]:
-                files = sorted(glob(os.path.join(DOWNLOAD_DIR, pattern)))
+                files = sorted(glob(os.path.join(DOWNLOADS_DIR, pattern)))
                 while len(files) > MAX_DAILY_FILES_PER_COIN:
                     to_delete = files.pop(0)
                     os.remove(to_delete)
