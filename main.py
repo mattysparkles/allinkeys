@@ -5,7 +5,6 @@ import time
 import argparse
 from datetime import datetime
 from multiprocessing import Process, set_start_method
-
 import psutil
 
 try:
@@ -24,14 +23,12 @@ from config.settings import (
 from core.logger import log_message
 from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint
 from core.downloader import download_and_compare_address_lists
-from core.keygen import start_keygen_loop, keygen_progress
 from core.csv_checker import check_csvs_day_one, check_csvs
-from core.backlog import start_backlog_conversion_loop
 from core.alerts import trigger_startup_alerts, alert_match
 from core.dashboard import update_dashboard_stat
 from ui.dashboard_gui import start_dashboard
-from core.altcoin_derive import convert_txt_to_csv_loop
-from core.gpu_selector import assign_gpu_roles
+from core.gpu_selector import assign_gpu_roles, assigned_gpus
+
 
 def display_logo():
     print(LOGO_ART)
@@ -47,6 +44,7 @@ def display_logo():
 def save_checkpoint_loop():
     while True:
         try:
+            from core.keygen import keygen_progress
             save_keygen_checkpoint(keygen_progress())
             log_message("💾 Checkpoint saved.", "DEBUG")
         except Exception as e:
@@ -57,6 +55,7 @@ def save_checkpoint_loop():
 def metrics_updater():
     while True:
         try:
+            from core.keygen import keygen_progress
             stats = {}
             stats['cpu'] = psutil.cpu_percent()
             stats['ram'] = psutil.virtual_memory().percent
@@ -89,6 +88,10 @@ def should_skip_download_today(download_dir):
 
 
 def run_all_processes(args):
+    # 💻 Defer GPU-dependent imports until after GPUs are assigned
+    from core.keygen import start_keygen_loop
+    from core.backlog import start_backlog_conversion_loop
+
     if ENABLE_CHECKPOINT_RESTORE:
         load_keygen_checkpoint()
         log_message("🧠 Checkpoint restore enabled.", "INFO")
@@ -127,14 +130,14 @@ def run_all_processes(args):
     Process(target=metrics_updater).start()
     log_message("📈 Metrics updater thread launched.")
 
-    # Altcoin derive loop (background txt → csv conversion)
-    Process(target=convert_txt_to_csv_loop).start()
-
 
 def run_allinkeys(args):
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(CSV_DIR, exist_ok=True)
     display_logo()
+
+    # ✅ GPU selection BEFORE everything else
+    assign_gpu_roles()
 
     if args.match_test:
         test_data = {
@@ -159,16 +162,12 @@ def run_allinkeys(args):
 
 
 if __name__ == "__main__":
-    from core.gpu_selector import assign_gpu_roles
-
     set_start_method("spawn")
 
     if not os.path.exists(VANITYSEARCH_PATH):
         raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")
     else:
         print(f"✅ VanitySearch found: {VANITYSEARCH_PATH}")
-
-    assign_gpu_roles()
 
     parser = argparse.ArgumentParser(description="AllInKeys Modular Runner")
     parser.add_argument("--skip-backlog", action="store_true", help="Skip backlog conversion on startup")
