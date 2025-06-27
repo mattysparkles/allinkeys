@@ -8,7 +8,6 @@ Preserves all columns and GPU pipeline. Flushes rows as it writes.
 
 import os
 import csv
-import traceback
 import hashlib
 import base58
 import pyopencl as cl
@@ -106,7 +105,16 @@ def derive_addresses_gpu(hex_keys):
 
     program = cl.Program(context, kernel_code).build()
 
-    key_bytes = [bytes.fromhex(k.lstrip("0x").zfill(64)) for k in hex_keys]
+    key_bytes = []
+    for i, k in enumerate(hex_keys):
+        try:
+            cleaned = k[2:] if k.lower().startswith("0x") else k
+            cleaned = cleaned.zfill(64)
+            key_bytes.append(bytes.fromhex(cleaned))
+        except Exception as e:
+            log_message(f"⚠️ Invalid hex at index {i}: {k} — {e}", "WARNING")
+            key_bytes.append(b'\x00' * 32)
+
     all_keys_flat = b''.join(key_bytes)
     count = len(key_bytes)
 
@@ -173,10 +181,20 @@ def convert_txt_to_csv(input_txt_path, batch_id):
 
             def safe_lines(stream):
                 for i, raw in enumerate(stream, 1):
-                    line = raw.decode("utf-8", errors="replace").replace('\ufffd', '?')
-                    if '�' in line:
-                        log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}")
-                    yield line
+                    try:
+                        line = raw.decode("utf-8", errors="replace").replace('\ufffd', '?')
+                        if '�' in line:
+                            try:
+                                log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
+                            except:
+                                pass
+                        yield line
+                    except Exception as decode_err:
+                        try:
+                            log_message(f"⚠️ Line {i} could not be decoded: {decode_err}", "WARNING")
+                        except:
+                            pass
+                        continue
 
             infile = safe_lines(infile_raw)
             writer = csv.writer(outfile)
@@ -209,9 +227,9 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                         pub = line_buffer[0].split(":", 1)[1].strip()
                         priv_hex = line_buffer[2].split(":", 1)[1].strip()
 
-                        # Validate priv_hex before using it
+                        sanitized_hex = priv_hex.lower().replace("0x", "").zfill(64)
                         try:
-                            raw_bytes = bytes.fromhex(priv_hex)
+                            raw_bytes = bytes.fromhex(sanitized_hex)
                             if len(raw_bytes) != 32:
                                 raise ValueError(f"Invalid hex length: {len(raw_bytes)} bytes")
                         except Exception as hex_err:
@@ -219,7 +237,6 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                             continue
 
                         derived = derive_altcoin_addresses_from_hex(priv_hex)
-
                         btc_u = derived.get("btc_U", "")
                         btc_c = derived.get("btc_C", "")
                         if ENABLE_SEED_VERIFICATION and pub and btc_u != pub:
@@ -238,30 +255,36 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                         outfile.flush()
                         rows_written += 1
                     except Exception as e:
-                        log_message(f"❌ Derivation failed at block starting line {line_number - 2}: {e}", "ERROR")
+                        try:
+                            safe_err = str(e).encode("ascii", errors="replace").decode("ascii")
+                            log_message(f"❌ Derivation failed at block starting line {line_number - 2}: {safe_err}", "ERROR")
+                        except:
+                            log_message(f"❌ Derivation failed and could not decode exception at line {line_number - 2}", "ERROR")
                     line_buffer = []
                 else:
                     line_buffer = []
 
             if rows_written == 0:
                 log_message(f"⚠️ No rows written for {input_txt_path}. Check parsing rules or input format.")
-
             log_message(f"✅ Created CSV: {output_csv_path} with {rows_written} rows", "INFO")
             update_dashboard_stat("csv_created", 1)
             if batch_id is not None:
                 checkpoint.save_csv_checkpoint(batch_id, output_csv_path)
 
     except Exception as e:
-        log_message(f"❌ Error processing {input_txt_path}: {e}", "ERROR")
-        traceback.print_exc()
+        try:
+            safe_err = str(e).encode("ascii", errors="replace").decode("ascii")
+            log_message(f"❌ Error processing {input_txt_path}: {safe_err}", "ERROR")
+        except:
+            log_message(f"❌ Error processing file and failed to log error safely.", "ERROR")
 
 
 def convert_txt_to_csv_loop():
     log_message("📦 Altcoin conversion loop started...", "INFO")
     processed = set()
 
-    while True:
-        try:
+    try:
+        while True:
             all_txt = [
                 f for f in os.listdir(VANITY_OUTPUT_DIR)
                 if f.endswith(".txt") and f not in processed
@@ -273,18 +296,12 @@ def convert_txt_to_csv_loop():
                 convert_txt_to_csv(full_path, batch_id)
                 processed.add(txt_file)
 
-        except Exception as e:
-            log_message(f"❌ Error in altcoin conversion loop: {e}", "ERROR")
-
-        time.sleep(5)
+            time.sleep(5)
+    except KeyboardInterrupt:
+        log_message("🛑 CSV conversion loop interrupted by user.", "INFO")
 
 
 def start_backlog_conversion_loop():
-    def loop():
-        while True:
-            convert_txt_to_csv_loop()
-            time.sleep(5)
-
-    thread = threading.Thread(target=loop, daemon=True)
+    thread = threading.Thread(target=convert_txt_to_csv_loop)
     thread.start()
     log_message("🚀 Backlog converter thread started...", "INFO")
