@@ -16,6 +16,7 @@ from eth_hash.auto import keccak
 from ecdsa import SigningKey, SECP256k1
 import time
 import threading
+import multiprocessing
 
 from config.settings import (
     ENABLE_ALTCOIN_DERIVATION,
@@ -28,6 +29,14 @@ from core.dashboard import update_dashboard_stat
 import core.checkpoint as checkpoint
 from core.gpu_selector import get_altcoin_gpu_ids
 
+def safe_str(obj):
+    try:
+        return str(obj)
+    except Exception:
+        try:
+            return repr(obj)
+        except Exception:
+            return "<unprintable exception>"
 
 def get_compressed_pubkey(priv_bytes):
     sk = SigningKey.from_string(priv_bytes, curve=SECP256k1)
@@ -100,7 +109,7 @@ def derive_addresses_gpu(hex_keys):
     if not os.path.isfile(kernel_path):
         raise FileNotFoundError(f"❌ Missing kernel file: {kernel_path}")
 
-    with open(kernel_path, "r") as kf:
+    with open(kernel_path, "r", encoding="utf-8", errors="replace") as kf:
         kernel_code = kf.read()
 
     program = cl.Program(context, kernel_code).build()
@@ -184,16 +193,10 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                     try:
                         line = raw.decode("utf-8", errors="replace").replace('\ufffd', '?')
                         if '�' in line:
-                            try:
-                                log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
-                            except:
-                                pass
+                            log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
                         yield line
                     except Exception as decode_err:
-                        try:
-                            log_message(f"⚠️ Line {i} could not be decoded: {decode_err}", "WARNING")
-                        except:
-                            pass
+                        log_message(f"⚠️ Line {i} could not be decoded: {safe_str(decode_err)}", "WARNING")
                         continue
 
             infile = safe_lines(infile_raw)
@@ -226,17 +229,17 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                     try:
                         pub = line_buffer[0].split(":", 1)[1].strip()
                         priv_hex = line_buffer[2].split(":", 1)[1].strip()
-
                         sanitized_hex = priv_hex.lower().replace("0x", "").zfill(64)
                         try:
                             raw_bytes = bytes.fromhex(sanitized_hex)
                             if len(raw_bytes) != 32:
                                 raise ValueError(f"Invalid hex length: {len(raw_bytes)} bytes")
                         except Exception as hex_err:
-                            log_message(f"⚠️ Skipping invalid priv_hex at line {line_number - 2}: {priv_hex} — {hex_err}", "WARNING")
+                            log_message(f"⚠️ Skipping invalid priv_hex at line {line_number - 2}: {priv_hex} — {safe_str(hex_err)}", "WARNING")
                             continue
 
                         derived = derive_altcoin_addresses_from_hex(priv_hex)
+
                         btc_u = derived.get("btc_U", "")
                         btc_c = derived.get("btc_C", "")
                         if ENABLE_SEED_VERIFICATION and pub and btc_u != pub:
@@ -255,11 +258,7 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                         outfile.flush()
                         rows_written += 1
                     except Exception as e:
-                        try:
-                            safe_err = str(e).encode("ascii", errors="replace").decode("ascii")
-                            log_message(f"❌ Derivation failed at block starting line {line_number - 2}: {safe_err}", "ERROR")
-                        except:
-                            log_message(f"❌ Derivation failed and could not decode exception at line {line_number - 2}", "ERROR")
+                        log_message(f"❌ Derivation failed at block starting line {line_number - 2}: {safe_str(e)}", "ERROR")
                     line_buffer = []
                 else:
                     line_buffer = []
@@ -272,24 +271,16 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                 checkpoint.save_csv_checkpoint(batch_id, output_csv_path)
 
     except Exception as e:
-        try:
-            safe_err = str(e).encode("ascii", errors="replace").decode("ascii")
-            log_message(f"❌ Error processing {input_txt_path}: {safe_err}", "ERROR")
-        except:
-            log_message(f"❌ Error processing file and failed to log error safely.", "ERROR")
+        log_message(f"❌ Error processing {input_txt_path}: {safe_str(e)}", "ERROR")
+        traceback.print_exc()
 
 
 def convert_txt_to_csv_loop():
-    """
-    Watches VANITY_OUTPUT_DIR and converts new .txt files to CSVs
-    using altcoin derivation. Tracks already-processed files to avoid reprocessing.
-    Exits cleanly on Ctrl+C and logs all errors with ASCII-safe fallbacks.
-    """
     log_message("📦 Altcoin conversion loop started...", "INFO")
     processed = set()
 
-    try:
-        while True:
+    while True:
+        try:
             all_txt = [
                 f for f in os.listdir(VANITY_OUTPUT_DIR)
                 if f.endswith(".txt") and f not in processed
@@ -298,29 +289,16 @@ def convert_txt_to_csv_loop():
             for txt_file in all_txt:
                 full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
                 batch_id = None
-                try:
-                    convert_txt_to_csv(full_path, batch_id)
-                    processed.add(txt_file)
-                except Exception as e:
-                    try:
-                        err = str(e).encode("ascii", errors="replace").decode("ascii")
-                        log_message(f"❌ Conversion failed on {txt_file}: {err}", "ERROR")
-                    except:
-                        log_message(f"❌ Conversion failed on {txt_file}: Non-ASCII error", "ERROR")
+                convert_txt_to_csv(full_path, batch_id)
+                processed.add(txt_file)
 
-            time.sleep(5)
-    except KeyboardInterrupt:
-        log_message("🛑 Altcoin conversion loop interrupted by Ctrl+C", "INFO")
-        sys.exit(0)
-    except Exception as loop_err:
-        try:
-            err = str(loop_err).encode("ascii", errors="replace").decode()
-            log_message(f"❌ Altcoin conversion loop crashed: {err}", "ERROR")
-        except:
-            log_message("❌ Altcoin conversion loop crashed with unreadable error.", "ERROR")
+        except Exception as e:
+            log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
+
+        time.sleep(5)
 
 
 def start_backlog_conversion_loop():
-    thread = threading.Thread(target=convert_txt_to_csv_loop)
-    thread.start()
-    log_message("🚀 Backlog converter thread started...", "INFO")
+    process = multiprocessing.Process(target=convert_txt_to_csv_loop)
+    process.start()
+    log_message("🚀 Backlog converter process started...", "INFO")
