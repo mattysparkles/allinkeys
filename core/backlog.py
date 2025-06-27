@@ -20,9 +20,21 @@ SKIP_FILE_MIN_SIZE_KB = 50_000  # Skip anything < 50MB
 os.makedirs(CSV_BASE_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
+
+def safe_str(obj):
+    try:
+        return str(obj)
+    except Exception:
+        try:
+            return repr(obj)
+        except Exception:
+            return "<unprintable exception>"
+
+
 def log(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {msg}")
+
 
 def is_file_locked(path):
     try:
@@ -30,6 +42,7 @@ def is_file_locked(path):
             return False
     except (OSError, PermissionError):
         return True
+
 
 def is_file_still_writing(path, delay=2.0):
     try:
@@ -39,6 +52,7 @@ def is_file_still_writing(path, delay=2.0):
         return size1 != size2
     except Exception:
         return True
+
 
 def start_backlog_conversion_loop():
     """
@@ -75,30 +89,33 @@ def start_backlog_conversion_loop():
                 try:
                     batch_id = int(file.split("_")[1]) if "part_" in file and "_seed_" in file else None
                 except Exception as e:
-                    log_message(f"⚠️ Could not extract batch_id from {file}: {e}", "WARNING")
+                    log_message(f"⚠️ Could not extract batch_id from {file}: {safe_str(e)}", "WARNING")
                     batch_id = None
 
                 if not os.path.exists(output_path):
                     log_message(f"🔁 Converting {file} to CSV...", "INFO")
-                    convert_txt_to_csv(txt_path, batch_id)
+                    try:
+                        convert_txt_to_csv(txt_path, batch_id)
+                    except Exception as inner:
+                        log_message(f"❌ Conversion failed for {file}: {safe_str(inner)}", "ERROR")
+                        continue
 
                     if os.path.exists(output_path):
                         try:
                             os.remove(txt_path)
                             log_message(f"🧹 Deleted original .txt file: {file}", "INFO")
                         except Exception as e:
-                            log_message(f"⚠️ Could not delete {file}: {e}", "WARNING")
+                            log_message(f"⚠️ Could not delete {file}: {safe_str(e)}", "WARNING")
                 else:
                     log_message(f"✅ Already converted: {file}", "DEBUG")
 
         except Exception as e:
-            log_message(f"❌ Error in backlog conversion loop: {e}", "ERROR")
+            log_message(f"❌ Error in backlog conversion loop: {safe_str(e)}", "ERROR")
 
         time.sleep(10)
 
 
-
-# === Legacy Logging Mode Functions ===
+# === Legacy Parsing Mode (Rarely Used) ===
 
 def get_parsed_log():
     if not os.path.exists(BATCH_LOG):
@@ -106,18 +123,21 @@ def get_parsed_log():
     with open(BATCH_LOG, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
+
 def append_to_log(filename):
     with open(BATCH_LOG, "a", encoding="utf-8") as f:
         f.write(filename + "\n")
 
+
 def get_file_size_mb(path):
     return os.path.getsize(path) / (1024 * 1024)
+
 
 def open_new_csv_writer(index):
     folder = os.path.join(CSV_BASE_DIR, f"Batch_{index:03d}")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, f"keys_batch_{index:05d}.csv")
-    f = open(path, "w", newline="", encoding="utf-8")
+    f = open(path, "w", newline='', encoding="utf-8")
     writer = csv.DictWriter(f, fieldnames=[
         "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
         "doge_C", "doge_U", "bch_C", "bch_U", "eth", "dash_C", "dash_U",
@@ -125,6 +145,7 @@ def open_new_csv_writer(index):
     ])
     writer.writeheader()
     return f, writer, path
+
 
 def parse_vanity_file(txt_file, batch_id):
     with open(txt_file, "r", encoding="utf-8") as f:
@@ -134,13 +155,12 @@ def parse_vanity_file(txt_file, batch_id):
 
     parsed_count = 0
     csv_index = len([f for _, _, files in os.walk(CSV_BASE_DIR) for f in files if f.endswith(".csv")])
-
     address_tally = {k: 0 for k in [
-        "btc_C", "btc_U", "ltc_C", "ltc_U", "doge_C", "doge_U", "bch_C", "bch_U", "eth", "dash_C", "dash_U"
+        "btc_C", "btc_U", "ltc_C", "ltc_U", "doge_C", "doge_U",
+        "bch_C", "bch_U", "eth", "dash_C", "dash_U"
     ]}
 
     f, writer, path = open_new_csv_writer(csv_index)
-
     i = 0
     while i < len(lines):
         if not lines[i].startswith("PubAddress:") or i + 2 >= len(lines):
@@ -191,7 +211,6 @@ def parse_vanity_file(txt_file, batch_id):
                 f.flush()
                 size_mb = get_file_size_mb(path)
                 log(f"🧾 Written {parsed_count} rows, file size: {size_mb:.2f}MB")
-
                 if size_mb >= MAX_CSV_MB:
                     f.close()
                     csv_index += 1
@@ -199,15 +218,15 @@ def parse_vanity_file(txt_file, batch_id):
 
             i += 3
         except Exception as e:
-            log(f"⚠️ Error at line {i}: {e}")
+            log(f"⚠️ Error at line {i}: {safe_str(e)}")
             i += 1
 
     f.close()
     log(f"✅ Done. {parsed_count:,} rows written.")
     for coin, count in address_tally.items():
         log(f"🔢 {coin.upper()} addresses: {count:,}")
-
     return parsed_count
+
 
 def main():
     parsed_files = get_parsed_log()
@@ -228,7 +247,8 @@ def main():
                 os.remove(path)
                 log(f"🧹 Removed {txt}")
         except Exception as e:
-            log(f"❌ Failed to process {txt}: {e}")
+            log(f"❌ Failed to process {txt}: {safe_str(e)}")
+
 
 if __name__ == "__main__":
     main()
