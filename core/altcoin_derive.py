@@ -200,7 +200,7 @@ def convert_txt_to_csv(input_txt_path, batch_id):
 
     try:
         with open(input_txt_path, "rb") as infile_raw, \
-             open(output_csv_path, "w", newline='', encoding="utf-8") as outfile:
+             open(output_csv_path, "w", newline='', encoding="utf-8", buffering=1) as outfile:
 
             def safe_lines(stream):
                 for i, raw in enumerate(stream, 1):
