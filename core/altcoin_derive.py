@@ -16,17 +16,18 @@ import numpy as np
 from eth_hash.auto import keccak
 from ecdsa import SigningKey, SECP256k1
 import time
+import threading
 
 from config.settings import (
     ENABLE_ALTCOIN_DERIVATION,
     ENABLE_SEED_VERIFICATION,
     DOGE, DASH, LTC, BCH, RVN, PEP, ETH,
-    CSV_DIR
+    CSV_DIR, VANITY_OUTPUT_DIR
 )
 from core.logger import log_message
 from core.dashboard import update_dashboard_stat
 import core.checkpoint as checkpoint
-from core.gpu_selector import get_altcoin_gpu_ids  # ✅ Integrated new GPU selector
+from core.gpu_selector import get_altcoin_gpu_ids
 
 
 def get_compressed_pubkey(priv_bytes):
@@ -53,22 +54,38 @@ def b58(prefix, payload):
 def get_gpu_context_for_altcoin():
     selected_ids = get_altcoin_gpu_ids()
     if not selected_ids:
-        raise RuntimeError("❌ No GPU assigned for altcoin derivation.")
+        from core.gpu_selector import assign_gpu_roles
+        assign_gpu_roles()
+        selected_ids = get_altcoin_gpu_ids()
+        if not selected_ids:
+            raise RuntimeError("❌ No GPU assigned for altcoin derivation.")
 
     platforms = cl.get_platforms()
     all_devices = []
+    device_lookup = {}
 
+    device_counter = 0
     for platform in platforms:
         for device in platform.get_devices():
             all_devices.append(device)
+            device_lookup[device_counter] = device
+            device_counter += 1
 
-    try:
-        device = all_devices[selected_ids[0]]  # Use first assigned GPU
-        context = cl.Context([device])
-        log_message(f"🧠 Using GPU for altcoin derive: {device.name}", "INFO")
-        return context, device
-    except Exception as e:
-        raise RuntimeError(f"❌ Failed to initialize assigned GPU for altcoin derive: {e}")
+    from core.gpu_selector import list_gpus
+    available = list_gpus()
+    altcoin_gpu = next((g for g in available if g["id"] == selected_ids[0]), None)
+
+    if not altcoin_gpu or altcoin_gpu["cl_index"] is None:
+        raise RuntimeError(f"❌ Could not find OpenCL index for GPU ID {selected_ids[0]}.")
+
+    cl_index = altcoin_gpu["cl_index"]
+    if cl_index >= len(all_devices):
+        raise RuntimeError(f"❌ OpenCL index {cl_index} is out of bounds.")
+
+    device = all_devices[cl_index]
+    context = cl.Context([device])
+    log_message(f"🧠 Using GPU for altcoin derive: {device.name}", "INFO")
+    return context, device
 
 
 def derive_addresses_gpu(hex_keys):
@@ -156,11 +173,9 @@ def convert_txt_to_csv(input_txt_path, batch_id):
 
             def safe_lines(stream):
                 for i, raw in enumerate(stream, 1):
-                    try:
-                        line = raw.decode("utf-8")
-                    except UnicodeDecodeError:
-                        line = raw.decode("utf-8", errors="replace")
-                        log_message(f"⚠️ Non-UTF8 character replaced in line {i}: {repr(line)}")
+                    line = raw.decode("utf-8", errors="replace").replace('\ufffd', '?')
+                    if '�' in line:
+                        log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}")
                     yield line
 
             infile = safe_lines(infile_raw)
@@ -193,6 +208,16 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                     try:
                         pub = line_buffer[0].split(":", 1)[1].strip()
                         priv_hex = line_buffer[2].split(":", 1)[1].strip()
+
+                        # Validate priv_hex before using it
+                        try:
+                            raw_bytes = bytes.fromhex(priv_hex)
+                            if len(raw_bytes) != 32:
+                                raise ValueError(f"Invalid hex length: {len(raw_bytes)} bytes")
+                        except Exception as hex_err:
+                            log_message(f"⚠️ Skipping invalid priv_hex at line {line_number - 2}: {priv_hex} — {hex_err}", "WARNING")
+                            continue
+
                         derived = derive_altcoin_addresses_from_hex(priv_hex)
 
                         btc_u = derived.get("btc_U", "")
@@ -232,24 +257,19 @@ def convert_txt_to_csv(input_txt_path, batch_id):
 
 
 def convert_txt_to_csv_loop():
-    """
-    Watches the CSV_DIR for new .txt files from VanitySearch
-    and converts them to .csv format using convert_txt_to_csv().
-    This is meant to be launched as a separate process.
-    """
     log_message("📦 Altcoin conversion loop started...", "INFO")
     processed = set()
 
     while True:
         try:
             all_txt = [
-                f for f in os.listdir(CSV_DIR)
+                f for f in os.listdir(VANITY_OUTPUT_DIR)
                 if f.endswith(".txt") and f not in processed
             ]
 
             for txt_file in all_txt:
-                full_path = os.path.join(CSV_DIR, txt_file)
-                batch_id = None  # Optional: parse from filename
+                full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
+                batch_id = None
                 convert_txt_to_csv(full_path, batch_id)
                 processed.add(txt_file)
 
@@ -257,3 +277,14 @@ def convert_txt_to_csv_loop():
             log_message(f"❌ Error in altcoin conversion loop: {e}", "ERROR")
 
         time.sleep(5)
+
+
+def start_backlog_conversion_loop():
+    def loop():
+        while True:
+            convert_txt_to_csv_loop()
+            time.sleep(5)
+
+    thread = threading.Thread(target=loop, daemon=True)
+    thread.start()
+    log_message("🚀 Backlog converter thread started...", "INFO")
