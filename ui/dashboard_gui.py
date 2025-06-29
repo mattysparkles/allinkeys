@@ -1,7 +1,7 @@
-# dashboard_gui.py – Clean Layout with Centered Logo and Aligned Metric Boxes + Dynamic Button State
+# dashboard_gui.py – Extended Full Metrics and Controls Dashboard
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
 import os
 import subprocess
 from config.settings import (
@@ -16,8 +16,7 @@ from config.settings import (
     ALERT_CREDENTIAL_WARNINGS,
     DASHBOARD_PASSWORD
 )
-from core.dashboard import get_current_metrics, reset_all_metrics, load_checkpoint_file
-from core.alerts import alert_match
+from core.dashboard import get_current_metrics, reset_all_metrics
 
 
 class DashboardGUI:
@@ -37,28 +36,48 @@ class DashboardGUI:
         logo_label = tk.Label(logo_frame, text=LOGO_ASCII, font=("Courier", 7), justify="center")
         logo_label.pack()
 
-        # Organized Grouped Metric Boxes
+        # Organized Metric Group Boxes
         self.section_frame = tk.Frame(self.master)
         self.section_frame.pack(fill="both", expand=True, padx=10)
 
-        self.group_map = {
-            "System Stats": ["cpu_usage", "ram_usage", "disk_free"],
-            "Keygen Metrics": ["keys_per_sec", "batches_completed", "avg_keygen_file_time"],
-            "CSV Checker": ["csv_created_today", "csv_created_lifetime", "csv_check_queue_file_count", "csv_recheck_queue_file_count", "avg_csv_check_time"],
-            "Match Info": ["matches_today", "matches_lifetime"],
-            "Backlog": ["backlog_files_in_queue", "backlog_eta", "avg_backlog_file_time"],
-            "Uptime & Misc": ["uptime", "current_seed_index"]
+        # Group all active metrics from settings.py
+        grouped_keys = {
+            "System Stats": [],
+            "Keygen Metrics": [],
+            "CSV Checker": [],
+            "Match Info": [],
+            "Backlog": [],
+            "Uptime & Misc": []
         }
+
+        for key in STATS_TO_DISPLAY:
+            if not STATS_TO_DISPLAY[key]:
+                continue
+            label = METRICS_LABEL_MAP.get(key, key)
+            key_lower = key.lower()
+            if any(x in key_lower for x in ["cpu", "ram", "disk"]):
+                grouped_keys["System Stats"].append((key, label))
+            elif any(x in key_lower for x in ["keygen", "keys_per_sec", "batches"]):
+                grouped_keys["Keygen Metrics"].append((key, label))
+            elif any(x in key_lower for x in ["csv", "address"]):
+                grouped_keys["CSV Checker"].append((key, label))
+            elif "match" in key_lower:
+                grouped_keys["Match Info"].append((key, label))
+            elif "backlog" in key_lower:
+                grouped_keys["Backlog"].append((key, label))
+            else:
+                grouped_keys["Uptime & Misc"].append((key, label))
 
         row = 0
         col = 0
         max_cols = 3
-        for idx, (group, keys) in enumerate(self.group_map.items()):
+        for group, keys in grouped_keys.items():
+            if not keys:
+                continue
             frame = tk.LabelFrame(self.section_frame, text=group, padx=10, pady=5, font=("Arial", 10, "bold"))
             frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
-            for i, key in enumerate(keys):
-                label_text = METRICS_LABEL_MAP.get(key, key)
+            for i, (key, label_text) in enumerate(keys):
                 tk.Label(frame, text=label_text + ":", anchor="e").grid(row=i, column=0, sticky="e")
                 if "usage" in key or "keys_per_sec" in key:
                     pb = ttk.Progressbar(frame, length=100, mode="determinate")
@@ -73,7 +92,7 @@ class DashboardGUI:
                 col = 0
                 row += 1
 
-        # Match Alert Methods (3 rows to avoid cutoff)
+        # Match Alert Methods
         alert_frame = tk.LabelFrame(self.master, text="Match Alert Methods", padx=10, pady=5)
         alert_frame.pack(padx=10, pady=(5, 0), fill="x")
 
@@ -92,16 +111,10 @@ class DashboardGUI:
         btn_frame = tk.Frame(self.master)
         btn_frame.pack(pady=10)
         col = 0
-        if BUTTONS_ENABLED.get("vanity"):
-            self._group_button_set(btn_frame, "Vanity", col); col += 1
-        if BUTTONS_ENABLED.get("altcoin"):
-            self._group_button_set(btn_frame, "Altcoin", col); col += 1
-        if BUTTONS_ENABLED.get("csv_check"):
-            self._group_button_set(btn_frame, "CSV Check", col); col += 1
-        if BUTTONS_ENABLED.get("csv_recheck"):
-            self._group_button_set(btn_frame, "Recheck", col); col += 1
-        if BUTTONS_ENABLED.get("alerts"):
-            self._group_button_set(btn_frame, "Alerts", col); col += 1
+        for label in ["vanity", "altcoin", "csv_check", "csv_recheck", "alerts"]:
+            if BUTTONS_ENABLED.get(label):
+                self._group_button_set(btn_frame, label.capitalize(), col)
+                col += 1
 
         # Reset + Config + Delete
         control_frame = tk.Frame(self.master)
