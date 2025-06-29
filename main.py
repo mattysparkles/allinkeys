@@ -2,7 +2,10 @@
 
 import os
 import time
+import sys
+import signal
 import argparse
+import multiprocessing
 from datetime import datetime
 from multiprocessing import Process, set_start_method
 import psutil
@@ -27,7 +30,8 @@ from core.csv_checker import check_csvs_day_one, check_csvs
 from core.alerts import trigger_startup_alerts, alert_match
 from core.dashboard import update_dashboard_stat
 from ui.dashboard_gui import start_dashboard
-from core.gpu_selector import assign_gpu_roles, assigned_gpus
+from core.gpu_selector import assign_gpu_roles
+from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
 
 
 def display_logo():
@@ -56,11 +60,11 @@ def metrics_updater():
     while True:
         try:
             from core.keygen import keygen_progress
-            stats = {}
-            stats['cpu'] = psutil.cpu_percent()
-            stats['ram'] = psutil.virtual_memory().percent
-            stats['disk'] = psutil.disk_usage('/').percent
-
+            stats = {
+                'cpu': psutil.cpu_percent(),
+                'ram': psutil.virtual_memory().percent,
+                'disk': psutil.disk_usage('/').percent,
+            }
             if GPUtil:
                 try:
                     gpus = GPUtil.getGPUs()
@@ -75,7 +79,6 @@ def metrics_updater():
             stats['keyrate'] = prog['total_keys_generated']
             stats['uptime'] = prog['elapsed_time']
             update_dashboard_stat(stats)
-
             log_message(f"📊 Metrics updated: {stats}", "DEBUG")
         except Exception as e:
             log_message(f"❌ Error in metrics updater: {e}", "ERROR")
@@ -87,10 +90,11 @@ def should_skip_download_today(download_dir):
     return any(today_str in f for f in os.listdir(download_dir) if f.endswith(".txt"))
 
 
-def run_all_processes(args):
-    # 💻 Defer GPU-dependent imports until after GPUs are assigned
+def run_all_processes(args, shutdown_event):
     from core.keygen import start_keygen_loop
-    from core.backlog import start_backlog_conversion_loop
+    from core.backlog import start_backlog_conversion_loop  # Optional non-GPU parser
+
+    processes = []
 
     if ENABLE_CHECKPOINT_RESTORE:
         load_keygen_checkpoint()
@@ -104,31 +108,46 @@ def run_all_processes(args):
             download_and_compare_address_lists()
 
     if ENABLE_KEYGEN and not args.headless:
-        Process(target=start_keygen_loop).start()
+        p = Process(target=start_keygen_loop)
+        p.start()
+        processes.append(p)
         log_message("🧬 Keygen loop started.", "INFO")
 
     if ENABLE_DAY_ONE_CHECK:
-        Process(target=check_csvs_day_one).start()
+        p = Process(target=check_csvs_day_one)
+        p.start()
+        processes.append(p)
         log_message("🧾 Day One CSV check scheduled.", "INFO")
 
     if ENABLE_UNIQUE_RECHECK:
-        Process(target=check_csvs).start()
+        p = Process(target=check_csvs)
+        p.start()
+        processes.append(p)
         log_message("🔁 Unique recheck scheduled.", "INFO")
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
-        Process(target=start_backlog_conversion_loop).start()
-        log_message("📁 Backlog conversion loop scheduled.", "INFO")
+        p = start_altcoin_conversion_process(shutdown_event)  # <-- updated call
+        processes.append(p)
+        log_message("📁 Altcoin conversion loop scheduled.", "INFO")
 
     if ENABLE_ALERTS:
-        Process(target=trigger_startup_alerts).start()
+        p = Process(target=trigger_startup_alerts)
+        p.start()
+        processes.append(p)
         log_message("🚨 Alert system primed.", "INFO")
 
     if CHECKPOINT_INTERVAL_SECONDS:
-        Process(target=save_checkpoint_loop).start()
+        p = Process(target=save_checkpoint_loop)
+        p.start()
+        processes.append(p)
         log_message("🕒 Checkpoint thread started.", "INFO")
 
-    Process(target=metrics_updater).start()
+    p = Process(target=metrics_updater)
+    p.start()
+    processes.append(p)
     log_message("📈 Metrics updater thread launched.")
+
+    return processes
 
 
 def run_allinkeys(args):
@@ -136,8 +155,8 @@ def run_allinkeys(args):
     os.makedirs(CSV_DIR, exist_ok=True)
     display_logo()
 
-    # ✅ GPU selection BEFORE everything else
     assign_gpu_roles()
+    shutdown_event = multiprocessing.Event()
 
     if args.match_test:
         test_data = {
@@ -151,14 +170,25 @@ def run_allinkeys(args):
         log_message("🧺 Running simulated match alert...")
         alert_match(test_data, test_mode=True)
 
+    processes = run_all_processes(args, shutdown_event)
+
+    def shutdown_handler(sig, frame):
+        print("\n🛑 Ctrl+C received. Shutting down gracefully...")
+        shutdown_event.set()
+        for p in processes:
+            if p.is_alive():
+                p.terminate()
+        for p in processes:
+            p.join()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, shutdown_handler)
+
     if ENABLE_DASHBOARD and not args.no_dashboard:
-        Process(target=run_all_processes, args=(args,)).start()
         start_dashboard()
     else:
-        run_all_processes(args)
-
-    while True:
-        time.sleep(10)
+        while True:
+            time.sleep(10)
 
 
 if __name__ == "__main__":
