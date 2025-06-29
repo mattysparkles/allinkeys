@@ -20,11 +20,12 @@ from config.settings import (
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS
 )
+
 sys.stdout.reconfigure(encoding='utf-8')  # ✅ Safe print emojis on Win terminal
 
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
-from core.gpu_selector import get_vanitysearch_gpu_ids  
+from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 
 # Runtime trackers
 total_keys_generated = 0
@@ -41,7 +42,6 @@ KEYGEN_STATE = {
 # Setup logging
 logger = logging.getLogger("KeyGen")
 logger.setLevel(logging.INFO)
-
 if LOGGING_ENABLED:
     handler = logging.FileHandler("keygen.log", encoding='utf-8')
     formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s")
@@ -63,9 +63,6 @@ def keygen_progress():
 
 
 def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1024000):
-    """
-    Deterministically generate a seed from batch_id and index, ensuring ≥ 2^128.
-    """
     seed = batch_id * batch_size + index_within_batch
     min_val = 1 << 128
     if seed < min_val:
@@ -76,9 +73,6 @@ def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1024000):
 
 
 def generate_random_seed(min_bits=128):
-    """
-    Generate a cryptographically secure random seed that's at least 2^128.
-    """
     min_val = 1 << min_bits
     range_span = SECP256K1_ORDER - min_val
     return secrets.randbelow(range_span) + min_val
@@ -89,8 +83,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
     file_index = 0
     seed_int = initial_seed_int
 
-    # ✅ Get assigned GPU IDs for VanitySearch
-    selected_gpu_ids = get_vanity_gpu_ids()
+    selected_gpu_ids = get_vanitysearch_gpu_ids()
     gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
 
     while True:
@@ -111,14 +104,15 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
             "-u", VANITY_PATTERN
         ]
 
-        logger.info(f"🧬 Starting VanitySearch: seed={hex_seed_full} → {current_output_path} | GPUs: {selected_gpu_ids or 'default'}")
+        logger.info(f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'default'}")
+        logger.info(f"🚀 Running command: {' '.join(cmd)}")
 
         with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
             proc = subprocess.Popen(
                 cmd,
                 stdout=outfile,
-                stderr=subprocess.DEVNULL,
-                env={**os.environ, **gpu_env}  # ✅ Set GPU scope
+                stderr=subprocess.STDOUT,
+                env={**os.environ, **gpu_env}
             )
 
             def terminate_after_interval(p):
@@ -140,6 +134,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
                     logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
+        else:
+            logger.error(f"❌ Output file not created: {current_output_path}")
 
         file_index += 1
         seed_int = generate_random_seed()
@@ -147,9 +143,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
 
 
 def start_keygen_loop():
-    """
-    Main execution loop. Resumes from checkpoint if exists.
-    """
     if not os.path.exists(VANITY_OUTPUT_DIR):
         os.makedirs(VANITY_OUTPUT_DIR)
 
@@ -159,7 +152,6 @@ def start_keygen_loop():
         KEYGEN_STATE["index_within_batch"] = checkpoint.get("index_within_batch", 0)
         logger.info("✅ Checkpoint loaded successfully")
     else:
-        # Randomize starting point if no checkpoint is found
         KEYGEN_STATE["batch_id"] = secrets.randbelow(1_000_000)
         KEYGEN_STATE["index_within_batch"] = secrets.randbelow(BATCH_SIZE)
         logger.info("🚀 No checkpoint found. Starting with randomized batch/index.")
@@ -173,6 +165,7 @@ def start_keygen_loop():
 
                 KEYGEN_STATE["index_within_batch"] = index
                 KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
+
                 run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index)
 
                 save_checkpoint({
@@ -191,3 +184,10 @@ def start_keygen_loop():
         logger.info("🛑 Keygen loop interrupted by user. Exiting cleanly.")
     except Exception as e:
         logger.error(f"❌ Unexpected error: {e}")
+
+
+# 🧪 One-time run (for debugging only)
+if __name__ == "__main__":
+    print("🧪 Running one-shot VanitySearch test with random seed...")
+    test_seed = generate_random_seed()
+    run_vanitysearch_stream(test_seed, 999, 0)
