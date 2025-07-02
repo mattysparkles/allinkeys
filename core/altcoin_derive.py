@@ -281,16 +281,10 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                     try:
                         line = raw.decode("utf-8", errors="replace").replace('\ufffd', '?')
                         if '�' in line:
-                            try:
-                                log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
-                            except Exception:
-                                log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
+                            log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
                         yield line
                     except Exception as decode_err:
-                        try:
-                            log_message(f"⚠️ Line {i} could not be decoded: {safe_str(decode_err)}", "WARNING")
-                        except Exception:
-                            log_message(f"⚠️ Line {i} could not be decoded: [unprintable exception]", "WARNING")
+                        log_message(f"⚠️ Line {i} could not be decoded: {safe_str(decode_err)}", "WARNING")
                         continue
 
             infile = safe_lines(infile_raw)
@@ -343,10 +337,7 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                                 btc_c = derived.get("btc_C", "")
 
                                 if ENABLE_SEED_VERIFICATION and pub and btc_u != pub:
-                                    try:
-                                        log_message(f"⚠️ BTC mismatch: expected {pub}, got {btc_u}", "WARNING")
-                                    except Exception:
-                                        log_message("⚠️ BTC mismatch: [unprintable pub/wif combo]", "WARNING")
+                                    log_message(f"⚠️ BTC mismatch: expected {pub}, got {btc_u}", "WARNING")
                                     continue
 
                                 row = {
@@ -368,8 +359,8 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                                     "pep_C": derived.get("pep_C", ""),
                                     "pep_U": derived.get("pep_U", ""),
                                     "private_key": wif,
-                                    "compressed_address": btc_c,
-                                    "uncompressed_address": "",
+                                    "compressed_address": "",  # leave blank
+                                    "uncompressed_address": pub,  # from VanitySearch
                                     "batch_id": batch_id,
                                     "index": index
                                 }
@@ -411,10 +402,7 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                     btc_c = derived.get("btc_C", "")
 
                     if ENABLE_SEED_VERIFICATION and pub and btc_u != pub:
-                        try:
-                            log_message(f"⚠️ BTC mismatch: expected {pub}, got {btc_u}", "WARNING")
-                        except Exception:
-                            log_message("⚠️ BTC mismatch: [unprintable pub/wif combo]", "WARNING")
+                        log_message(f"⚠️ BTC mismatch: expected {pub}, got {btc_u}", "WARNING")
                         continue
 
                     row = {
@@ -436,8 +424,8 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                         "pep_C": derived.get("pep_C", ""),
                         "pep_U": derived.get("pep_U", ""),
                         "private_key": wif,
-                        "compressed_address": btc_c,
-                        "uncompressed_address": "",
+                        "compressed_address": "",  # leave blank
+                        "uncompressed_address": pub,  # from VanitySearch
                         "batch_id": batch_id,
                         "index": index
                     }
@@ -451,20 +439,14 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                 f.flush()
             f.close()
 
-            try:
-                log_message(f"✅ {rows_written} rows written to {path}", "INFO")
-                for coin, count in address_tally.items():
-                    log_message(f"🔢 {coin.upper()}: {count}", "DEBUG")
-            except Exception:
-                log_message(f"✅ {rows_written} rows written. (Some tallies may be unprintable)", "INFO")
+            log_message(f"✅ {rows_written} rows written to {path}", "INFO")
+            for coin, count in address_tally.items():
+                log_message(f"🔢 {coin.upper()}: {count}", "DEBUG")
 
             return rows_written
 
     except Exception as e:
-        try:
-            log_message(f"❌ Fatal error in convert_txt_to_csv: {safe_str(e)}", "ERROR")
-        except Exception:
-            log_message(f"❌ Fatal error in convert_txt_to_csv: [unprintable exception]", "ERROR")
+        log_message(f"❌ Fatal error in convert_txt_to_csv: {safe_str(e)}", "ERROR")
         return 0
 
 def convert_txt_to_csv_loop(shared_shutdown_event):
