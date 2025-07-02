@@ -142,7 +142,11 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
         logger.info(f"🔁 Rotating to new seed: {hex(seed_int)[2:].rjust(64, '0')} | New file index: {file_index}")
 
 
-def start_keygen_loop():
+from core.dashboard import init_shared_metrics
+
+
+def start_keygen_loop(shared_metrics=None):
+    init_shared_metrics(shared_metrics)
     if not os.path.exists(VANITY_OUTPUT_DIR):
         os.makedirs(VANITY_OUTPUT_DIR)
 

@@ -31,7 +31,7 @@ from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint
 from core.downloader import download_and_compare_address_lists
 from core.csv_checker import check_csvs_day_one, check_csvs
 from core.alerts import trigger_startup_alerts, alert_match
-from core.dashboard import update_dashboard_stat
+from core.dashboard import update_dashboard_stat, _default_metrics, init_shared_metrics
 from ui.dashboard_gui import start_dashboard
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
@@ -59,14 +59,18 @@ def save_checkpoint_loop():
         time.sleep(CHECKPOINT_INTERVAL_SECONDS)
 
 
-def metrics_updater():
+from core.dashboard import init_shared_metrics
+
+
+def metrics_updater(shared_metrics=None):
+    init_shared_metrics(shared_metrics)
     while True:
         try:
             from core.keygen import keygen_progress
             stats = {
-                'cpu': psutil.cpu_percent(),
-                'ram': psutil.virtual_memory().percent,
-                'disk': psutil.disk_usage('/').percent,
+                'cpu_usage_percent': psutil.cpu_percent(),
+                'ram_usage_gb': round(psutil.virtual_memory().used / (1024 ** 3), 2),
+                'disk_free_gb': round(psutil.disk_usage('/').free / (1024 ** 3), 2),
             }
             if GPUtil:
                 try:
@@ -79,7 +83,7 @@ def metrics_updater():
                 stats['gpu'] = 0
 
             prog = keygen_progress()
-            stats['keyrate'] = prog['total_keys_generated']
+            stats['keys_generated_lifetime'] = prog['total_keys_generated']
             stats['uptime'] = prog['elapsed_time']
             update_dashboard_stat(stats)
             log_message(f"📊 Metrics updated: {stats}", "DEBUG")
@@ -93,10 +97,12 @@ def should_skip_download_today(download_dir):
     return any(today_str in f for f in os.listdir(download_dir) if f.endswith(".txt"))
 
 
-def run_all_processes(args, shutdown_event):
+def run_all_processes(args, shutdown_event, shared_metrics):
     from core.keygen import start_keygen_loop
     from core.backlog import start_backlog_conversion_loop  # Optional non-GPU parser
+    from core.dashboard import init_shared_metrics
 
+    init_shared_metrics(shared_metrics)
     processes = []
 
     if ENABLE_CHECKPOINT_RESTORE:
@@ -111,25 +117,25 @@ def run_all_processes(args, shutdown_event):
             download_and_compare_address_lists()
 
     if ENABLE_KEYGEN and not args.headless:
-        p = Process(target=start_keygen_loop)
+        p = Process(target=start_keygen_loop, args=(shared_metrics,))
         p.start()
         processes.append(p)
         log_message("🧬 Keygen loop started.", "INFO")
 
     if ENABLE_DAY_ONE_CHECK:
-        p = Process(target=check_csvs_day_one)
+        p = Process(target=check_csvs_day_one, args=(shared_metrics,))
         p.start()
         processes.append(p)
         log_message("🧾 Day One CSV check scheduled.", "INFO")
 
     if ENABLE_UNIQUE_RECHECK:
-        p = Process(target=check_csvs)
+        p = Process(target=check_csvs, args=(shared_metrics,))
         p.start()
         processes.append(p)
         log_message("🔁 Unique recheck scheduled.", "INFO")
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
-        p = start_altcoin_conversion_process(shutdown_event)  # <-- updated call
+        p = start_altcoin_conversion_process(shutdown_event, shared_metrics)
         processes.append(p)
         log_message("📁 Altcoin conversion loop scheduled.", "INFO")
 
@@ -145,7 +151,7 @@ def run_all_processes(args, shutdown_event):
         processes.append(p)
         log_message("🕒 Checkpoint thread started.", "INFO")
 
-    p = Process(target=metrics_updater)
+    p = Process(target=metrics_updater, args=(shared_metrics,))
     p.start()
     processes.append(p)
     log_message("📈 Metrics updater thread launched.")
@@ -160,6 +166,10 @@ def run_allinkeys(args):
 
     assign_gpu_roles()
     shutdown_event = multiprocessing.Event()
+    manager = multiprocessing.Manager()
+    shared_metrics = manager.dict({k: (manager.dict(v) if isinstance(v, dict) else v)
+                                   for k, v in _default_metrics().items()})
+    init_shared_metrics(shared_metrics)
 
     if args.match_test:
         test_data = {
@@ -173,7 +183,7 @@ def run_allinkeys(args):
         log_message("🧺 Running simulated match alert...")
         alert_match(test_data, test_mode=True)
 
-    processes = run_all_processes(args, shutdown_event)
+    processes = run_all_processes(args, shutdown_event, shared_metrics)
 
     def shutdown_handler(sig, frame):
         print("\n🛑 Ctrl+C received. Shutting down gracefully...")

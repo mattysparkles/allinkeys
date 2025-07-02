@@ -36,6 +36,7 @@ from config.settings import (
 )
 
 from core.dashboard import get_current_metrics, reset_all_metrics
+from core.alerts import set_alert_flag
 
 
 class DashboardGUI:
@@ -72,7 +73,7 @@ class DashboardGUI:
         for key, enabled in STATS_TO_DISPLAY.items():
             if not enabled:
                 continue
-            label = METRICS_LABEL_MAP.get(key.lower(), key)
+            label = METRICS_LABEL_MAP.get(key, key)
             key_lower = key.lower()
             if any(x in key_lower for x in ["cpu", "ram", "disk"]):
                 grouped_keys["System Stats"].append((key, label))
@@ -87,11 +88,14 @@ class DashboardGUI:
             else:
                 grouped_keys["Uptime & Misc"].append((key, label))
 
-        row = 0
+        frames = [(g, k) for g, k in grouped_keys.items() if k]
+        per_col = (len(frames) + 2) // 3
         col = 0
-        for group, keys in grouped_keys.items():
-            if not keys:
-                continue
+        row = 0
+        for idx, (group, keys) in enumerate(frames):
+            if idx and idx % per_col == 0:
+                col += 1
+                row = 0
             frame = ttk.LabelFrame(self.section_frame, text=group)
             frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
@@ -105,10 +109,7 @@ class DashboardGUI:
                     lbl = ttk.Label(frame, text="Loading...", foreground="blue")
                     lbl.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = lbl
-            col += 1
-            if col >= 3:
-                col = 0
-                row += 1
+            row += 1
 
         # Alert Configuration Checkboxes
         if SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES:
@@ -121,7 +122,8 @@ class DashboardGUI:
                 col = (idx % third) * 2
                 var = tk.BooleanVar(value=ALERT_OPTIONS.get(option, False))
                 self.checkbox_vars[option] = var
-                cb = tk.Checkbutton(alert_frame, text=option, variable=var)
+                cb = tk.Checkbutton(alert_frame, text=option, variable=var,
+                                     command=lambda o=option, v=var: self.update_alert_option(o, v.get()))
                 cb.grid(row=row, column=col, sticky="w", padx=(0, 2))
                 if ALERT_CREDENTIAL_WARNINGS.get(option):
                     tk.Label(alert_frame, text="⚠", fg="red").grid(row=row, column=col + 1)
@@ -184,6 +186,9 @@ class DashboardGUI:
         btns["Resume"].grid(row=1, column=1)
 
         update_buttons()
+
+    def update_alert_option(self, name, value):
+        set_alert_flag(name, value)
 
     def refresh_loop(self):
         try:

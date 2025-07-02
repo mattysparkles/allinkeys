@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 import core.checkpoint as checkpoint
 import traceback
+import multiprocessing
 
 # Thread health tracking (expanded)
 THREAD_HEALTH = {
@@ -14,14 +15,16 @@ THREAD_HEALTH = {
     "alerts": True
 }
 
-metrics_lock = threading.Lock()
+manager = multiprocessing.Manager()
+metrics_lock = manager.Lock()
 
-metrics = {
-    "batches_completed": 0,
-    "current_seed_index": 0,
-    "vanitysearch_speed": "0 MKeys/s",
-    "active_gpus": {},
-    "csv_checked_today": 0,
+def _default_metrics():
+    return {
+        "batches_completed": 0,
+        "current_seed_index": 0,
+        "vanitysearch_speed": "0 MKeys/s",
+        "active_gpus": {},
+        "csv_checked_today": 0,
     "csv_checked_lifetime": 0,
     "uptime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "processed_pages": 0,
@@ -88,10 +91,21 @@ metrics = {
         "webhook": False,
         "home_assistant": False
     },
-    "pin_reset_required": False,
-    "metrics_last_reset": datetime.now().isoformat(),
-    "thread_health_flags": THREAD_HEALTH.copy()
-}
+        "pin_reset_required": False,
+        "metrics_last_reset": datetime.now().isoformat(),
+        "thread_health_flags": THREAD_HEALTH.copy()
+    }
+
+# Shared dictionary backed by multiprocessing.Manager
+metrics = manager.dict()
+metrics.update({k: (manager.dict(v) if isinstance(v, dict) else v)
+                 for k, v in _default_metrics().items()})
+
+def init_shared_metrics(shared_dict):
+    """Replace internal metrics dict with externally provided manager dict."""
+    global metrics
+    if shared_dict is not None:
+        metrics = shared_dict
 
 def update_dashboard_stat(key, value=None):
     try:
@@ -123,7 +137,11 @@ def load_checkpoint_file(filepath=None):
 
 def increment_metric(key, amount=1):
     with metrics_lock:
-        if isinstance(metrics.get(key), int):
+        if "." in key:
+            top, sub = key.split(".", 1)
+            if isinstance(metrics.get(top), dict):
+                metrics[top][sub] = metrics[top].get(sub, 0) + amount
+        elif isinstance(metrics.get(key), int):
             metrics[key] += amount
 
 def reset_all_metrics():

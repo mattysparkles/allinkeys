@@ -450,7 +450,11 @@ def convert_txt_to_csv(input_txt_path, batch_id):
         log_message(f"❌ Fatal error in convert_txt_to_csv: {safe_str(e)}", "ERROR")
         return 0
 
-def convert_txt_to_csv_loop(shared_shutdown_event):
+from core.dashboard import init_shared_metrics
+
+
+def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
+    init_shared_metrics(shared_metrics)
     """
     Monitors VANITY_OUTPUT_DIR for .txt files and converts them to CSV using GPU derivation.
     Handles multiple files in parallel using ThreadPoolExecutor.
@@ -500,7 +504,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event):
 
     log_message("✅ Altcoin derive loop exited cleanly.", "INFO")
 
-def start_altcoin_conversion_process(shared_shutdown_event):
+def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None):
     """
     Starts a subprocess that monitors VANITY_OUTPUT_DIR for .txt files and converts them to multi-coin CSVs.
     Gracefully shuts down on Ctrl+C or when shutdown_event is triggered.
@@ -508,7 +512,7 @@ def start_altcoin_conversion_process(shared_shutdown_event):
     """
     process = multiprocessing.Process(
         target=convert_txt_to_csv_loop,
-        args=(shared_shutdown_event,),
+        args=(shared_shutdown_event, shared_metrics),
         name="AltcoinConverter"
     )
     process.start()
