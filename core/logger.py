@@ -1,15 +1,19 @@
 # core/logger.py
 
 import os
+import io
 import datetime
-from config.settings import LOG_DIR, LOG_LEVEL, LOG_TO_CONSOLE, LOG_TO_FILE
 import sys
 import logging
+from config.settings import LOG_DIR, LOG_LEVEL, LOG_TO_CONSOLE, LOG_TO_FILE
+
+# ✅ Force stdout to UTF-8
+sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
 
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-console_handler.setStream(open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1))
 
+# Define separate log files by level
 LOG_FILE_PATHS = {
     "INFO": os.path.join(LOG_DIR, "info.log"),
     "DEBUG": os.path.join(LOG_DIR, "debug.log"),
@@ -22,28 +26,14 @@ LOG_FILE_PATHS = {
 }
 
 def get_timestamp():
+    """
+    Returns current timestamp in [YYYY-MM-DD HH:MM:SS] format.
+    """
     return datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-
-def log_message(message, level="INFO"):
-    """
-    Logs a message to both console and log file depending on config flags.
-    Level can be: INFO, DEBUG, WARN, ERROR, TRACE, ALERT, etc.
-    """
-    timestamped = f"{get_timestamp()} {level}: {message}"
-
-    if LOG_TO_CONSOLE and level_severity(level) >= level_severity(LOG_LEVEL):
-        print(timestamped)
-
-    if LOG_TO_FILE and level in LOG_FILE_PATHS:
-        try:
-            with open(LOG_FILE_PATHS[level], "a", encoding="utf-8") as f:
-                f.write(timestamped + "\n")
-        except Exception as e:
-            print(f"[ERROR] Failed to write log: {e}")
 
 def level_severity(level):
     """
-    Define severity levels for comparison.
+    Returns numeric severity for log level comparison.
     """
     levels = {
         "TRACE": 0,
@@ -54,3 +44,30 @@ def level_severity(level):
         "ALERT": 5
     }
     return levels.get(level.upper(), 99)
+
+def log_message(message, level="INFO"):
+    """
+    Logs a message to both console and file if enabled.
+    Supports: INFO, DEBUG, WARN, ERROR, TRACE, ALERT, etc.
+    Uses UTF-8 for file output. Gracefully handles emoji printing to terminal.
+    """
+    timestamped = f"{get_timestamp()} {level}: {message}"
+
+    # Print to console with fallback if terminal encoding breaks
+    if LOG_TO_CONSOLE and level_severity(level) >= level_severity(LOG_LEVEL):
+        try:
+            print(timestamped)
+        except UnicodeEncodeError:
+            fallback = timestamped.encode("ascii", errors="replace").decode()
+            print(fallback)
+
+    # Write to file (UTF-8 with emoji-safe fallback)
+    if LOG_TO_FILE and level in LOG_FILE_PATHS:
+        try:
+            with open(LOG_FILE_PATHS[level], "a", encoding="utf-8", errors="replace") as f:
+                f.write(timestamped + "\n")
+        except Exception as e:
+            try:
+                print(f"[ERROR] Failed to write log: {e}")
+            except UnicodeEncodeError:
+                print("[ERROR] Failed to write log: <encoding issue>")
