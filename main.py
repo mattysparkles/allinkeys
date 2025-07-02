@@ -1,6 +1,7 @@
 # main.py
 
 import os
+import io
 import time
 import sys
 import signal
@@ -9,6 +10,8 @@ import multiprocessing
 from datetime import datetime
 from multiprocessing import Process, set_start_method
 import psutil
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 try:
     import GPUtil
