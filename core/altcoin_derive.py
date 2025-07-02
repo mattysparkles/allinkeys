@@ -18,6 +18,9 @@ from ecdsa import SigningKey, SECP256k1
 import time
 import threading
 import multiprocessing
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 _gpu_logged_once = False
 
 from config.settings import (
@@ -177,17 +180,44 @@ def cashaddr_encode(prefix, payload):
 
 
 def derive_addresses_gpu(hex_keys):
-    context, device = get_amd_gpu_device()
+    log_message("🔧 Starting GPU address derivation...", "DEBUG")
+    context, device = get_gpu_context_for_altcoin()
     queue = cl.CommandQueue(context)
 
     kernel_path = os.path.join(os.path.dirname(__file__), "sha256_kernel.cl")
+    log_message(f"📄 Loading kernel from {kernel_path}", "DEBUG")
+
     if not os.path.isfile(kernel_path):
         raise FileNotFoundError(f"❌ Missing kernel file: {kernel_path}")
 
-    with open(kernel_path, "r") as kf:
+    with open(kernel_path, "r", encoding="utf-8") as kf:
         kernel_code = kf.read()
 
-    program = cl.Program(context, kernel_code).build()
+    log_message("🧪 Building OpenCL program...", "DEBUG")
+
+    build_result = {"program": None, "error": None}
+    def build_kernel():
+        try:
+            prog = cl.Program(context, kernel_code).build()
+            build_result["program"] = prog
+        except Exception as build_err:
+            log_message("❌ OpenCL build failed", "ERROR")
+            log_message(safe_str(build_err), "ERROR")
+            build_result["error"] = build_err
+
+    import threading
+    build_thread = threading.Thread(target=build_kernel)
+    build_thread.start()
+    build_thread.join(timeout=10)
+
+    if build_thread.is_alive():
+        log_message("❌ OpenCL build is hanging (timeout after 10s).", "ERROR")
+        raise RuntimeError("OpenCL kernel build timeout.")
+    if build_result["error"]:
+        raise build_result["error"]
+
+    log_message("✅ OpenCL program built successfully", "DEBUG")
+    program = build_result["program"]
 
     key_bytes = [bytes.fromhex(k.lstrip("0x").zfill(64)) for k in hex_keys]
     all_keys_flat = b''.join(key_bytes)
@@ -249,8 +279,6 @@ def derive_addresses_gpu(hex_keys):
     return results
 
 
-
-
 def derive_altcoin_addresses_from_hex(hex_key):
     sanitized = hex_key.lower().replace("0x", "").zfill(64)
     results = derive_addresses_gpu([sanitized])
@@ -258,7 +286,6 @@ def derive_altcoin_addresses_from_hex(hex_key):
 
 
 def convert_txt_to_csv(input_txt_path, batch_id):
-
     filename = os.path.basename(input_txt_path)
     base_name = os.path.splitext(filename)[0]
 
@@ -269,10 +296,16 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                     try:
                         line = raw.decode("utf-8", errors="replace").replace('\ufffd', '?')
                         if '�' in line:
-                            log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
+                            try:
+                                log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
+                            except Exception:
+                                log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
                         yield line
                     except Exception as decode_err:
-                        log_message(f"⚠️ Line {i} could not be decoded: {safe_str(decode_err)}", "WARNING")
+                        try:
+                            log_message(f"⚠️ Line {i} could not be decoded: {safe_str(decode_err)}", "WARNING")
+                        except Exception:
+                            log_message(f"⚠️ Line {i} could not be decoded: [unprintable exception]", "WARNING")
                         continue
 
             infile = safe_lines(infile_raw)
@@ -325,7 +358,10 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                                 btc_c = derived.get("btc_C", "")
 
                                 if ENABLE_SEED_VERIFICATION and pub and btc_u != pub:
-                                    log_message(f"⚠️ BTC mismatch: expected {pub}, got {btc_u}", "WARNING")
+                                    try:
+                                        log_message(f"⚠️ BTC mismatch: expected {pub}, got {btc_u}", "WARNING")
+                                    except Exception:
+                                        log_message("⚠️ BTC mismatch: [unprintable pub/wif combo]", "WARNING")
                                     continue
 
                                 row = {
@@ -372,7 +408,10 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                             meta_map.clear()
 
                     except Exception as e:
-                        log_message(f"❌ Failed to parse block at line {i}: {safe_str(e)}", "ERROR")
+                        try:
+                            log_message(f"❌ Failed to parse block at line {i}: {safe_str(e)}", "ERROR")
+                        except Exception:
+                            log_message(f"❌ Failed to parse block at line {i}: [unprintable exception]", "ERROR")
                     line_buffer = []
                 else:
                     line_buffer = []
@@ -387,7 +426,10 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                     btc_c = derived.get("btc_C", "")
 
                     if ENABLE_SEED_VERIFICATION and pub and btc_u != pub:
-                        log_message(f"⚠️ BTC mismatch: expected {pub}, got {btc_u}", "WARNING")
+                        try:
+                            log_message(f"⚠️ BTC mismatch: expected {pub}, got {btc_u}", "WARNING")
+                        except Exception:
+                            log_message("⚠️ BTC mismatch: [unprintable pub/wif combo]", "WARNING")
                         continue
 
                     row = {
@@ -424,16 +466,21 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                 f.flush()
             f.close()
 
-            log_message(f"✅ {rows_written} rows written to {path}", "INFO")
-            for coin, count in address_tally.items():
-                log_message(f"🔢 {coin.upper()}: {count}", "DEBUG")
+            try:
+                log_message(f"✅ {rows_written} rows written to {path}", "INFO")
+                for coin, count in address_tally.items():
+                    log_message(f"🔢 {coin.upper()}: {count}", "DEBUG")
+            except Exception:
+                log_message(f"✅ {rows_written} rows written. (Some tallies may be unprintable)", "INFO")
 
             return rows_written
 
     except Exception as e:
-        log_message(f"❌ Fatal error in convert_txt_to_csv: {safe_str(e)}", "ERROR")
+        try:
+            log_message(f"❌ Fatal error in convert_txt_to_csv: {safe_str(e)}", "ERROR")
+        except Exception:
+            log_message(f"❌ Fatal error in convert_txt_to_csv: [unprintable exception]", "ERROR")
         return 0
-
 
 def convert_txt_to_csv_loop(shared_shutdown_event):
     """
