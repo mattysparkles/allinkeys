@@ -22,7 +22,7 @@ CHECKPOINT_FILE = os.path.join(BASE_DIR, "checkpoint.json")
 CONFIG_FILE_PATH = __file__
 
 # ===================== 🖼️ ASCII LOGO ==========================
-LOGO_ASCII = r"""
+LOGO_ART = r"""
   ______   __        __        ______  __    __        __    __  ________  __      __  ______  
  /      \ /  |      /  |      /      |/  \  /  |      /  |  /  |/        |/  \    /  |/      \ 
 /$$$$$$  |$$ |      $$ |      $$$$$$/ $$  \ $$ |      $$ | /$$/ $$$$$$$$/ $$  \  /$$//$$$$$$  |
@@ -34,14 +34,6 @@ $$ |  $$ |$$       |$$       |/ $$   |$$ | $$$ |      $$ | $$  |$$       |    $$
 $$/   $$/ $$$$$$$$/ $$$$$$$$/ $$$$$$/ $$/   $$/       $$/   $$/ $$$$$$$$/     $$/     $$$$$$/  
 """
 
-# ===================== 🧩 BUTTON LOGIC ==========================
-BUTTONS_ENABLED = {
-    "vanity": True,
-    "altcoin": True,
-    "csv_check": True,
-    "csv_recheck": True,
-    "alerts": True
-}
 
 # ===================== 📈 STATISTICS TO DISPLAY MAPPING ==========================
 STATS_TO_DISPLAY = {
@@ -112,6 +104,8 @@ METRICS_LABEL_MAP = {
     "addresses_checked_today": "Addresses Checked Today",
     "addresses_checked_lifetime": "Addresses Checked Lifetime"
 }
+# ===================== ⏱️ DASHBOARD REFRESH ==========================
+DASHBOARD_REFRESH_INTERVAL = 1.0  # seconds between dashboard UI updates
 
 # ===================== 🕒 TIMESTAMP ==========================
 LAUNCH_TIMESTAMP = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -136,6 +130,21 @@ ENABLE_ALTCOIN_DERIVATION = True
 ENABLE_SEED_VERIFICATION = False
 ENABLE_PGP = True
 ENABLE_AUTO_RESUME_DEPENDENCIES = True
+
+# ===================== 🧩 DASHBOARD FEATURE TOGGLES ==========================
+SHOW_ALERTS_SUCCESSFULLY_CONFIGURED_TYPES = True
+SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES = True
+SHOW_CONTROL_BUTTONS_MAIN = True
+OPEN_CONFIG_FILE_FROM_DASHBOARD = True
+SHOW_REFRESH_DASHBOARD_DATA_BUTTON = True
+SHOW_DELETE_DASHBOARD_DATA_BUTTON = True
+SHOW_DONATION_MESSAGE = True
+
+# ===================== 🗑️ FILE CLEANUP BUTTON TOGGLES ==========================
+DELETE_VANITY_SEARCH_LOGS = True
+DELETE_CSV_FILES = True
+DELETE_SYSTEM_LOGS = True
+DELETE_CSV_CHECKING_LOGS = True
 
 # ===================== 💥 VANITY SEARCH SETTINGS ==========================
 VANITY_PATTERN = "1**"
@@ -211,7 +220,7 @@ LOGGING_ENABLED = True
 
 # ===================== 🔔 ALERTS + NOTIFICATIONS ==========================
 
-ENABLE_ALERTS = True  # Master toggle
+# ENABLE ALERTS Mater toggle set In ENABLED Features section above  
 
 # === LOCAL AUDIO ALERT ===
 ENABLE_AUDIO_ALERT_LOCAL = True
@@ -250,15 +259,28 @@ TWILIO_SID = "AC9fab6c5e3a541ada1cf4c6b3956bc615"
 TWILIO_AUTH_TOKEN = "4aa3b017524e75237752997e658ab16f"
 TWILIO_FROM_NUMBER = "+16696666608"
 TWILIO_TO_NUMBER = "+16318792320"
+ALERT_SMS_ENABLED = True
+ENABLE_SMS_ALERT = ALERT_SMS_ENABLED # alias for backward compatibility dont modify
+TWILIO_SID = "AC9fab6c5e3a541ada1cf4c6b3956bc615"
+TWILIO_TO = TWILIO_TO_NUMBER # Alias do not change
+TWILIO_TO_SMS = TWILIO_TO_NUMBER  # alias for backward compatibility
+TWILIO_FROM = TWILIO_FROM_NUMBER  # alias for backward compatibility
+ENABLE_PHONE_CALL_ALERT = True
+TWILIO_CALL_TO_NUMBER = "+16318792320"
+TWILIO_TOKEN = TWILIO_AUTH_TOKEN  # Alias do not change
+TWILIO_TO_CALL = TWILIO_CALL_TO_NUMBER # Alias do not change
 
 # === DISCORD WEBHOOK ALERTS ===
 ALERT_DISCORD_ENABLED = False
+ENABLE_DISCORD_ALERT = ALERT_DISCORD_ENABLED # Alias do not change
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/..."
 
 # === HOME ASSISTANT / IoT WEBHOOK ===
 ALERT_HOME_ASSISTANT_ENABLED = False
+ENABLE_HOME_ASSISTANT_ALERT = ALERT_HOME_ASSISTANT_ENABLED # Alias do not change
 HOME_ASSISTANT_WEBHOOK = "https://your-home-assistant-url/api/webhook/..."
 HOME_ASSISTANT_TOKEN = "your home assistant api token here"
+HOME_ASSISTANT_URL = HOME_ASSISTANT_WEBHOOK # Alias do not change
 
 # === CLOUD STORAGE MATCH BACKUPS ===
 ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE = False
@@ -382,7 +404,6 @@ DELETE_CSV_CHECKING_LOGS = True
 
 # ===================== 🧠 ALIASES AND FALLBACKS ==========================
 DOWNLOAD_DIR = DOWNLOADS_DIR
-MATCH_LOG_DIR = MATCHES_DIR
 ENABLE_TELEGRAM_ALERT = ALERT_TELEGRAM_ENABLED
 ENABLE_SMS_ALERT = ALERT_SMS_ENABLED
 ENABLE_CLOUD_UPLOAD = ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE
