@@ -180,44 +180,25 @@ def cashaddr_encode(prefix, payload):
 
 
 def derive_addresses_gpu(hex_keys):
-    log_message("🔧 Starting GPU address derivation...", "DEBUG")
+    INPUT_SIZE = 32  # Each private key is 32 bytes
+
     context, device = get_gpu_context_for_altcoin()
     queue = cl.CommandQueue(context)
 
     kernel_path = os.path.join(os.path.dirname(__file__), "sha256_kernel.cl")
-    log_message(f"📄 Loading kernel from {kernel_path}", "DEBUG")
-
     if not os.path.isfile(kernel_path):
         raise FileNotFoundError(f"❌ Missing kernel file: {kernel_path}")
+    log_message(f"📄 Loading kernel from {kernel_path}", "DEBUG")
 
     with open(kernel_path, "r", encoding="utf-8") as kf:
         kernel_code = kf.read()
 
-    log_message("🧪 Building OpenCL program...", "DEBUG")
-
-    build_result = {"program": None, "error": None}
-    def build_kernel():
-        try:
-            prog = cl.Program(context, kernel_code).build()
-            build_result["program"] = prog
-        except Exception as build_err:
-            log_message("❌ OpenCL build failed", "ERROR")
-            log_message(safe_str(build_err), "ERROR")
-            build_result["error"] = build_err
-
-    import threading
-    build_thread = threading.Thread(target=build_kernel)
-    build_thread.start()
-    build_thread.join(timeout=10)
-
-    if build_thread.is_alive():
-        log_message("❌ OpenCL build is hanging (timeout after 10s).", "ERROR")
-        raise RuntimeError("OpenCL kernel build timeout.")
-    if build_result["error"]:
-        raise build_result["error"]
-
-    log_message("✅ OpenCL program built successfully", "DEBUG")
-    program = build_result["program"]
+    try:
+        program = cl.Program(context, kernel_code).build()
+    except Exception as build_err:
+        log_message("❌ OpenCL build failed", "ERROR")
+        log_message(str(build_err), "ERROR")
+        raise
 
     key_bytes = [bytes.fromhex(k.lstrip("0x").zfill(64)) for k in hex_keys]
     all_keys_flat = b''.join(key_bytes)
@@ -226,10 +207,16 @@ def derive_addresses_gpu(hex_keys):
     mf = cl.mem_flags
     private_keys_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=all_keys_flat)
     output_buf = cl.Buffer(context, mf.WRITE_ONLY, 32 * count)
-    program.derive_addresses(queue, (count,), None, private_keys_buf, output_buf, np.int32(count))
+
+    program.derive_addresses(
+        queue, (count,), None,
+        private_keys_buf, output_buf,
+        np.int32(INPUT_SIZE)  # ✅ Fix: pass actual input size, not count
+    )
 
     derived_data = np.empty((count, 32), dtype=np.uint8)
     cl.enqueue_copy(queue, derived_data, output_buf)
+    queue.finish()  # ✅ Ensure GPU work is completed
 
     results = []
     for raw in derived_data:
@@ -244,12 +231,10 @@ def derive_addresses_gpu(hex_keys):
             priv = seed.to_bytes(32, 'big')
             sk = SigningKey.from_string(priv, curve=SECP256k1)
 
-            # Generate public keys
             vk_bytes = sk.get_verifying_key().to_string()
             pubkey_compressed = b'\x02' + bytes([vk_bytes[0] & 1]) + vk_bytes[1:]
             pubkey_uncompressed = b'\x04' + vk_bytes
 
-            # Hashes
             hash160_c = hash160(pubkey_compressed)
             hash160_u = hash160(pubkey_uncompressed)
 
