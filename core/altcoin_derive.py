@@ -518,3 +518,16 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None)
     process.start()
     log_message("🚀 Altcoin derive subprocess started...", "INFO")
     return process
+    
+if __name__ == "__main__":
+    from multiprocessing import freeze_support, Event
+    freeze_support()
+    print("🧪 Running one-shot altcoin conversion test (dev mode)...")
+    shared_event = Event()
+    try:
+        start_altcoin_conversion_process(shared_event)
+        while True:
+            time.sleep(10)
+    except KeyboardInterrupt:
+        print("🛑 Ctrl+C received. Stopping...")
+        shared_event.set()
