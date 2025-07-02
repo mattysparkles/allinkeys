@@ -14,7 +14,7 @@ from config.coin_definitions import coin_columns
 from core.alerts import alert_match
 from core.logger import log_message
 from utils.pgp_utils import encrypt_with_pgp
-from core.dashboard import update_dashboard_stat, increment_metric
+from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics
 
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
 os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
@@ -122,14 +122,15 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
 
         avg_time = round(sum(CHECK_TIME_HISTORY) / len(CHECK_TIME_HISTORY), 2)
 
+        increment_metric("csv_checked_today", 1)
+        increment_metric("csv_checked_lifetime", 1)
         update_dashboard_stat({
-            "csv_checked_today": 1,
-            "csv_checked_lifetime": 1,
             "avg_check_time": avg_time,
-            "last_check_duration": f"{duration_sec:.2f}s",
-            "addresses_checked_today": {coin: rows_scanned for coin in coin_columns},
-            "addresses_checked_lifetime": {coin: rows_scanned for coin in coin_columns}
+            "last_check_duration": f"{duration_sec:.2f}s"
         })
+        for coin in coin_columns:
+            increment_metric(f"addresses_checked_today.{coin}", rows_scanned)
+            increment_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
 
         log_message(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s", "INFO")
 
@@ -148,7 +149,10 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
         return []
 
 
-def check_csvs_day_one():
+
+
+def check_csvs_day_one(shared_metrics=None):
+    init_shared_metrics(shared_metrics)
     address_sets = {}
     for coin, columns in coin_columns.items():
         full_path = os.path.join(FULL_DIR, f"{coin}_funded.txt")
@@ -164,9 +168,10 @@ def check_csvs_day_one():
         check_csv_against_addresses(csv_path, combined_set)
         mark_csv_as_checked(filename, CHECKED_CSV_LOG)
    
-   update_csv_eta()
+    update_csv_eta()
 
-def check_csvs():
+def check_csvs(shared_metrics=None):
+    init_shared_metrics(shared_metrics)
     address_sets = {}
     for coin, columns in coin_columns.items():
         unique_path = os.path.join(UNIQUE_DIR, f"{coin}_UNIQUE.txt")
@@ -183,3 +188,16 @@ def check_csvs():
         mark_csv_as_checked(filename, RECHECKED_CSV_LOG)
     
     update_csv_eta()
+
+
+def inject_test_match(test_address="1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"):
+    """Helper to append a known funded address and trigger a check."""
+    test_csv = os.path.join(CSV_DIR, "test_match.csv")
+    with open(test_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["btc_U", "wif"])
+        writer.writeheader()
+        writer.writerow({"btc_U": test_address, "wif": "TESTWIF"})
+
+    matches = check_csv_against_addresses(test_csv, {test_address})
+    os.remove(test_csv)
+    return bool(matches)

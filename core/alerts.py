@@ -25,6 +25,25 @@ from config.settings import (
 
 from core.logger import log_message
 
+# runtime alert flags that can be toggled from the GUI
+ALERT_FLAGS = {
+    "ENABLE_AUDIO_ALERT_LOCAL": ENABLE_AUDIO_ALERT_LOCAL,
+    "ENABLE_DESKTOP_WINDOW_ALERT": ENABLE_DESKTOP_WINDOW_ALERT,
+    "ENABLE_PGP": ENABLE_PGP,
+    "ALERT_EMAIL_ENABLED": ALERT_EMAIL_ENABLED,
+    "ENABLE_TELEGRAM_ALERT": ENABLE_TELEGRAM_ALERT,
+    "ENABLE_SMS_ALERT": ENABLE_SMS_ALERT,
+    "ENABLE_PHONE_CALL_ALERT": ENABLE_PHONE_CALL_ALERT,
+    "ENABLE_DISCORD_ALERT": ENABLE_DISCORD_ALERT,
+    "ENABLE_HOME_ASSISTANT_ALERT": ENABLE_HOME_ASSISTANT_ALERT,
+    "ENABLE_CLOUD_UPLOAD": ENABLE_CLOUD_UPLOAD,
+}
+
+
+def set_alert_flag(name, value):
+    if name in ALERT_FLAGS:
+        ALERT_FLAGS[name] = value
+
 
 def alert_match(match_data, test_mode=False):
     """
@@ -61,7 +80,7 @@ def alert_match(match_data, test_mode=False):
     log_message(f"🚨 {alert_type}: {address} (File: {csv_file})")
 
     # 🖥️ Desktop Window Alert
-    if ENABLE_DESKTOP_WINDOW_ALERT:
+    if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT"):
         try:
             import tkinter as tk
             win = tk.Tk()
@@ -75,7 +94,7 @@ def alert_match(match_data, test_mode=False):
             print(f"Window alert error: {e}")
 
     # 🔊 Sound Alert
-    if ENABLE_AUDIO_ALERT_LOCAL:
+    if ALERT_FLAGS.get("ENABLE_AUDIO_ALERT_LOCAL"):
         try:
             import playsound
             playsound.playsound(ALERT_SOUND_FILE)
@@ -83,7 +102,7 @@ def alert_match(match_data, test_mode=False):
             print(f"Sound alert error: {e}")
 
     # 📧 Email Alert
-    if ALERT_EMAIL_ENABLED:
+    if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED"):
         try:
             msg = MIMEMultipart()
             msg['From'] = ALERT_EMAIL_FROM
@@ -100,7 +119,7 @@ def alert_match(match_data, test_mode=False):
             print(f"Email alert error: {e}")
 
     # 📲 Telegram Alert
-    if ENABLE_TELEGRAM_ALERT:
+    if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT"):
         try:
             telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
             requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text})
@@ -108,7 +127,7 @@ def alert_match(match_data, test_mode=False):
             print(f"Telegram alert error: {e}")
 
     # 📱 SMS via Twilio
-    if ENABLE_SMS_ALERT:
+    if ALERT_FLAGS.get("ENABLE_SMS_ALERT"):
         try:
             client = Client(TWILIO_SID, TWILIO_TOKEN)
             client.messages.create(body=match_text, from_=TWILIO_FROM, to=TWILIO_TO_SMS)
@@ -116,7 +135,7 @@ def alert_match(match_data, test_mode=False):
             print(f"SMS alert error: {e}")
 
     # 📞 Phone Call Alert
-    if ENABLE_PHONE_CALL_ALERT:
+    if ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT"):
         try:
             client = Client(TWILIO_SID, TWILIO_TOKEN)
             client.calls.create(
@@ -128,7 +147,7 @@ def alert_match(match_data, test_mode=False):
             print(f"Phone call error: {e}")
 
     # 💬 Discord Alert
-    if ENABLE_DISCORD_ALERT:
+    if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):
         try:
             data = {"content": match_text}
             requests.post(DISCORD_WEBHOOK_URL, json=data)
@@ -136,7 +155,7 @@ def alert_match(match_data, test_mode=False):
             print(f"Discord alert error: {e}")
 
     # 🏠 Home Assistant Alert
-    if ENABLE_HOME_ASSISTANT_ALERT:
+    if ALERT_FLAGS.get("ENABLE_HOME_ASSISTANT_ALERT"):
         try:
             headers = {
                 "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
@@ -148,7 +167,7 @@ def alert_match(match_data, test_mode=False):
             print(f"Home Assistant alert error: {e}")
 
     # ☁ PGP + Cloud Upload
-    if ENABLE_CLOUD_UPLOAD:
+    if ALERT_FLAGS.get("ENABLE_CLOUD_UPLOAD"):
         try:
             with open(PGP_PUBLIC_KEY_PATH, "rb") as pubkey_file:
                 pubkey = RSA.import_key(pubkey_file.read())
