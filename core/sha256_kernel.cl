@@ -49,7 +49,7 @@ uint sigma1(uint x) {
   return ROTR(x, 17) ^ ROTR(x, 19) ^ (x >> 10);
 }
 
-// ⛓️ Renamed to match altcoin_derive.py call
+// Renamed to match altcoin_derive.py call
 __kernel void derive_addresses(__global const uchar *inputs, __global uchar *outputs, uint input_size) {
   int gid = get_global_id(0);
   __global const uchar *data = inputs + gid * input_size;
@@ -67,10 +67,12 @@ __kernel void derive_addresses(__global const uchar *inputs, __global uchar *out
     w[i] = (uint)data[j] << 24 | (uint)data[j + 1] << 16 | (uint)data[j + 2] << 8 | (uint)data[j + 3];
   }
 
-  // Padding
+  // SHA-256 padding for single-block 32-byte input
   w[8] = 0x80000000;
-  for (int i = 9; i < 15; i++) w[i] = 0x00000000;
-  w[15] = input_size * 8;
+  for (int i = 9; i < 15; i++) {
+    w[i] = 0x00000000;
+  }
+  w[15] = input_size * 8; // message length in bits
 
   for (int i = 16; i < 64; i++) {
     w[i] = sigma1(w[i - 2]) + w[i - 7] + sigma0(w[i - 15]) + w[i - 16];
