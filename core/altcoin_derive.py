@@ -180,7 +180,10 @@ def cashaddr_encode(prefix, payload):
 
 
 def derive_addresses_gpu(hex_keys):
-    INPUT_SIZE = 32  # Each private key is 32 bytes
+    """
+    Given a list of 64-character hex private keys, uses the GPU to run SHA-256 kernel (for future compatibility),
+    but derives Bitcoin and altcoin addresses from the **original key** (not the GPU-hashed output).
+    """
 
     context, device = get_gpu_context_for_altcoin()
     queue = cl.CommandQueue(context)
@@ -188,7 +191,6 @@ def derive_addresses_gpu(hex_keys):
     kernel_path = os.path.join(os.path.dirname(__file__), "sha256_kernel.cl")
     if not os.path.isfile(kernel_path):
         raise FileNotFoundError(f"❌ Missing kernel file: {kernel_path}")
-    log_message(f"📄 Loading kernel from {kernel_path}", "DEBUG")
 
     with open(kernel_path, "r", encoding="utf-8") as kf:
         kernel_code = kf.read()
@@ -208,33 +210,33 @@ def derive_addresses_gpu(hex_keys):
     private_keys_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=all_keys_flat)
     output_buf = cl.Buffer(context, mf.WRITE_ONLY, 32 * count)
 
-    program.derive_addresses(
-        queue, (count,), None,
-        private_keys_buf, output_buf,
-        np.int32(INPUT_SIZE)  # ✅ Fix: pass actual input size, not count
-    )
+    INPUT_SIZE = 32  # SHA-256 input size in bytes
+    program.derive_addresses(queue, (count,), None, private_keys_buf, output_buf, np.int32(INPUT_SIZE))
 
+    # Copy output anyway for consistency / future GPU validation purposes
     derived_data = np.empty((count, 32), dtype=np.uint8)
     cl.enqueue_copy(queue, derived_data, output_buf)
-    queue.finish()  # ✅ Ensure GPU work is completed
+    queue.finish()
 
     results = []
-    for raw in derived_data:
-        raw_bytes = bytes(raw)
-        seed = int.from_bytes(raw_bytes, 'big') % (2**256)
-
-        if seed == 0:
-            results.append({'error': 'Invalid seed'})
-            continue
+    for idx, raw in enumerate(derived_data):
+        priv = key_bytes[idx]
 
         try:
-            priv = seed.to_bytes(32, 'big')
             sk = SigningKey.from_string(priv, curve=SECP256k1)
+            vk_bytes = sk.get_verifying_key().to_string()  # 64 bytes: X (32) + Y (32)
 
-            vk_bytes = sk.get_verifying_key().to_string()
-            pubkey_compressed = b'\x02' + bytes([vk_bytes[0] & 1]) + vk_bytes[1:]
-            pubkey_uncompressed = b'\x04' + vk_bytes
+            x = vk_bytes[:32]
+            y = vk_bytes[32:]
 
+            # Compressed pubkey (33 bytes): 0x02 or 0x03 + x
+            prefix = b'\x03' if (y[-1] % 2) else b'\x02'
+            pubkey_compressed = prefix + x
+
+            # Uncompressed pubkey (65 bytes): 0x04 + x + y
+            pubkey_uncompressed = b'\x04' + x + y
+
+            # Hash160 of pubkeys
             hash160_c = hash160(pubkey_compressed)
             hash160_u = hash160(pubkey_uncompressed)
 
@@ -262,7 +264,6 @@ def derive_addresses_gpu(hex_keys):
             results.append({"error": str(e)})
 
     return results
-
 
 def derive_altcoin_addresses_from_hex(hex_key):
     sanitized = hex_key.lower().replace("0x", "").zfill(64)
