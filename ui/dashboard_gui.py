@@ -1,9 +1,16 @@
-# dashboard_gui.py – Extended Full Metrics and Controls Dashboard
-
-import tkinter as tk
-from tkinter import ttk, messagebox
+# dashboard_gui.py – Themed Live Dashboard for AllInKeys
 import os
+import sys
 import subprocess
+import tkinter as tk
+from tkinter import messagebox
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+
+# Add the config directory to the path for importing settings
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config')))
+import settings
+
 from config.settings import (
     STATS_TO_DISPLAY,
     BUTTONS_ENABLED,
@@ -14,8 +21,20 @@ from config.settings import (
     ALERT_OPTIONS,
     ALERT_CHECKBOXES,
     ALERT_CREDENTIAL_WARNINGS,
-    DASHBOARD_PASSWORD
+    DASHBOARD_PASSWORD,
+    SHOW_ALERTS_SUCCESSFULLY_CONFIGURED_TYPES,
+    SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES,
+    SHOW_CONTROL_BUTTONS_MAIN,
+    SHOW_REFRESH_DASHBOARD_DATA_BUTTON,
+    SHOW_DELETE_DASHBOARD_DATA_BUTTON,
+    SHOW_DONATION_MESSAGE,
+    DELETE_VANITY_SEARCH_LOGS,
+    DELETE_CSV_FILES,
+    DELETE_SYSTEM_LOGS,
+    DELETE_CSV_CHECKING_LOGS,
+    OPEN_CONFIG_FILE_FROM_DASHBOARD,   
 )
+
 from core.dashboard import get_current_metrics, reset_all_metrics
 
 
@@ -30,17 +49,17 @@ class DashboardGUI:
         self.refresh_loop()
 
     def create_widgets(self):
-        # Centered ASCII Logo
-        logo_frame = tk.Frame(self.master)
-        logo_frame.pack(fill="x", padx=10)
-        logo_label = tk.Label(logo_frame, text=LOGO_ASCII, font=("Courier", 7), justify="center")
-        logo_label.pack()
+        # Logo
+        if LOGO_ASCII:
+            logo_frame = ttk.Frame(self.master)
+            logo_frame.pack(fill="x", padx=10)
+            logo_label = tk.Label(logo_frame, text=LOGO_ASCII, font=("Courier", 7), justify="center")
+            logo_label.pack()
 
-        # Organized Metric Group Boxes
-        self.section_frame = tk.Frame(self.master)
+        # Metric Panels
+        self.section_frame = ttk.Frame(self.master)
         self.section_frame.pack(fill="both", expand=True, padx=10)
 
-        # Group all active metrics from settings.py
         grouped_keys = {
             "System Stats": [],
             "Keygen Metrics": [],
@@ -50,16 +69,16 @@ class DashboardGUI:
             "Uptime & Misc": []
         }
 
-        for key in STATS_TO_DISPLAY:
-            if not STATS_TO_DISPLAY[key]:
+        for key, enabled in STATS_TO_DISPLAY.items():
+            if not enabled:
                 continue
-            label = METRICS_LABEL_MAP.get(key, key)
+            label = METRICS_LABEL_MAP.get(key.lower(), key)
             key_lower = key.lower()
             if any(x in key_lower for x in ["cpu", "ram", "disk"]):
                 grouped_keys["System Stats"].append((key, label))
             elif any(x in key_lower for x in ["keygen", "keys_per_sec", "batches"]):
                 grouped_keys["Keygen Metrics"].append((key, label))
-            elif any(x in key_lower for x in ["csv", "address"]):
+            elif "csv" in key_lower or "address" in key_lower:
                 grouped_keys["CSV Checker"].append((key, label))
             elif "match" in key_lower:
                 grouped_keys["Match Info"].append((key, label))
@@ -70,61 +89,69 @@ class DashboardGUI:
 
         row = 0
         col = 0
-        max_cols = 3
         for group, keys in grouped_keys.items():
             if not keys:
                 continue
-            frame = tk.LabelFrame(self.section_frame, text=group, padx=10, pady=5, font=("Arial", 10, "bold"))
+            frame = ttk.LabelFrame(self.section_frame, text=group)
             frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
             for i, (key, label_text) in enumerate(keys):
-                tk.Label(frame, text=label_text + ":", anchor="e").grid(row=i, column=0, sticky="e")
+                ttk.Label(frame, text=label_text + ":").grid(row=i, column=0, sticky="e")
                 if "usage" in key or "keys_per_sec" in key:
                     pb = ttk.Progressbar(frame, length=100, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = pb
                 else:
-                    lbl = tk.Label(frame, text="Loading...", anchor="w", fg="blue")
+                    lbl = ttk.Label(frame, text="Loading...", foreground="blue")
                     lbl.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = lbl
             col += 1
-            if col >= max_cols:
+            if col >= 3:
                 col = 0
                 row += 1
 
-        # Match Alert Methods
-        alert_frame = tk.LabelFrame(self.master, text="Match Alert Methods", padx=10, pady=5)
-        alert_frame.pack(padx=10, pady=(5, 0), fill="x")
+        # Alert Configuration Checkboxes
+        if SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES:
+            alert_frame = ttk.LabelFrame(self.master, text="Alert Methods")
+            alert_frame.pack(fill="x", padx=10, pady=(5, 0))
 
-        third = (len(ALERT_CHECKBOXES) + 2) // 3
-        for idx, option in enumerate(ALERT_CHECKBOXES):
-            row = idx // third
-            col = (idx % third) * 2
-            var = tk.BooleanVar(value=ALERT_OPTIONS.get(option, False))
-            self.checkbox_vars[option] = var
-            cb = tk.Checkbutton(alert_frame, text=option, variable=var)
-            cb.grid(row=row, column=col, sticky="w", padx=(0, 2))
-            if ALERT_CREDENTIAL_WARNINGS.get(option):
-                tk.Label(alert_frame, text="⚠", fg="red").grid(row=row, column=col + 1)
+            third = (len(ALERT_CHECKBOXES) + 2) // 3
+            for idx, option in enumerate(ALERT_CHECKBOXES):
+                row = idx // third
+                col = (idx % third) * 2
+                var = tk.BooleanVar(value=ALERT_OPTIONS.get(option, False))
+                self.checkbox_vars[option] = var
+                cb = tk.Checkbutton(alert_frame, text=option, variable=var)
+                cb.grid(row=row, column=col, sticky="w", padx=(0, 2))
+                if ALERT_CREDENTIAL_WARNINGS.get(option):
+                    tk.Label(alert_frame, text="⚠", fg="red").grid(row=row, column=col + 1)
 
-        # Control Buttons
-        btn_frame = tk.Frame(self.master)
-        btn_frame.pack(pady=10)
-        col = 0
-        for label in ["vanity", "altcoin", "csv_check", "csv_recheck", "alerts"]:
-            if BUTTONS_ENABLED.get(label):
-                self._group_button_set(btn_frame, label.capitalize(), col)
-                col += 1
+        # Control Panel
+        if SHOW_CONTROL_BUTTONS_MAIN:
+            btn_frame = ttk.Frame(self.master)
+            btn_frame.pack(pady=10)
+            col = 0
+            for label in ["vanity", "altcoin", "csv_check", "csv_recheck", "alerts"]:
+                if BUTTONS_ENABLED.get(label):
+                    self._group_button_set(btn_frame, label.capitalize(), col)
+                    col += 1
 
-        # Reset + Config + Delete
-        control_frame = tk.Frame(self.master)
-        control_frame.pack(pady=(0, 10))
-        tk.Button(control_frame, text="Open Config File", command=self.open_config_file).pack(side="left", padx=5)
-        tk.Button(control_frame, text="Reset Metrics", command=self.reset_metrics_prompt).pack(side="left", padx=5)
-        tk.Button(control_frame, text="Delete All Data", command=self.delete_data_prompt).pack(side="left", padx=5)
+        # Config and Reset
+        bottom_frame = ttk.Frame(self.master)
+        bottom_frame.pack(pady=10)
+
+        if OPEN_CONFIG_FILE_FROM_DASHBOARD:
+            ttk.Button(bottom_frame, text="Open Config File", command=self.open_config_file).pack(side="left", padx=5)
+        ttk.Button(bottom_frame, text="Reset Metrics", command=self.reset_metrics_prompt).pack(side="left", padx=5)
+        if SHOW_DELETE_DASHBOARD_DATA_BUTTON:
+            ttk.Button(bottom_frame, text="Delete All Data", command=self.delete_data_prompt).pack(side="left", padx=5)
+
+        if SHOW_DONATION_MESSAGE:
+            msg = "If you find AllInKeys useful, consider donating! BTC: 18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y"
+            ttk.Label(self.master, text=msg, font=("Segoe UI", 9, "italic"), foreground="gray").pack(pady=(0, 10))
 
     def _group_button_set(self, parent, label, col):
-        sub_frame = tk.LabelFrame(parent, text=label)
+        sub_frame = ttk.LabelFrame(parent, text=label)
         sub_frame.grid(row=0, column=col, padx=5)
         self.module_states[label] = "stopped"
 
@@ -134,22 +161,22 @@ class DashboardGUI:
             state = self.module_states[label]
             for bname, btn in btns.items():
                 if state == "running" and bname == "Start":
-                    btn.config(text="RUNNING", bg="green", fg="white")
+                    btn.config(text="RUNNING", bootstyle="success")
                 elif state == "stopped" and bname == "Stop":
-                    btn.config(text="STOPPED", bg="red", fg="white")
+                    btn.config(text="STOPPED", bootstyle="danger")
                 elif state == "paused" and bname == "Pause":
-                    btn.config(text="PAUSED", bg="goldenrod", fg="black")
+                    btn.config(text="PAUSED", bootstyle="warning")
                 else:
-                    btn.config(text=bname, bg="SystemButtonFace", fg="black")
+                    btn.config(text=bname, bootstyle="secondary")
 
         def set_state(new_state):
             self.module_states[label] = new_state
             update_buttons()
 
-        btns["Start"] = tk.Button(sub_frame, text="Start", width=8, command=lambda: set_state("running"))
-        btns["Stop"] = tk.Button(sub_frame, text="Stop", width=8, command=lambda: set_state("stopped"))
-        btns["Pause"] = tk.Button(sub_frame, text="Pause", width=8, command=lambda: set_state("paused"))
-        btns["Resume"] = tk.Button(sub_frame, text="Resume", width=8, command=lambda: set_state("running"))
+        btns["Start"] = ttk.Button(sub_frame, text="Start", width=8, command=lambda: set_state("running"))
+        btns["Stop"] = ttk.Button(sub_frame, text="Stop", width=8, command=lambda: set_state("stopped"))
+        btns["Pause"] = ttk.Button(sub_frame, text="Pause", width=8, command=lambda: set_state("paused"))
+        btns["Resume"] = ttk.Button(sub_frame, text="Resume", width=8, command=lambda: set_state("running"))
 
         btns["Start"].grid(row=0, column=0)
         btns["Stop"].grid(row=0, column=1)
@@ -198,6 +225,7 @@ class DashboardGUI:
                 pw = self.prompt_password()
                 if pw == DASHBOARD_PASSWORD:
                     print("[GUI] Deleting all data...")
+                    # Here add actual deletion logic based on flags like DELETE_VANITY_SEARCH_LOGS
                 else:
                     messagebox.showerror("Invalid Password", "Deletion canceled.")
 
@@ -217,10 +245,9 @@ class DashboardGUI:
         self.master.wait_window(pw_window)
         return result[0] if result else ""
 
+
 def start_dashboard():
-    root = tk.Tk()
-    style = ttk.Style()
-    style.theme_use("clam")
+    root = ttk.Window(themename="darkly")
     app = DashboardGUI(root)
     root.mainloop()
 
