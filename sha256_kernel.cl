@@ -49,21 +49,16 @@ uint sigma1(uint x) {
   return ROTR(x, 17) ^ ROTR(x, 19) ^ (x >> 10);
 }
 
-__kernel void sha256_batch(__global const uchar *inputs, __global uchar *outputs, uint input_size) {
+// Renamed to match altcoin_derive.py call
+__kernel void derive_addresses(__global const uchar *inputs, __global uchar *outputs, uint input_size) {
   int gid = get_global_id(0);
   __global const uchar *data = inputs + gid * input_size;
   __global uchar *digest = outputs + gid * 32;
 
   // SHA-256 initial hash values
   uint h[8] = {
-    0x6a09e667,
-    0xbb67ae85,
-    0x3c6ef372,
-    0xa54ff53a,
-    0x510e527f,
-    0x9b05688c,
-    0x1f83d9ab,
-    0x5be0cd19
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
   };
 
   uint w[64];
@@ -72,10 +67,12 @@ __kernel void sha256_batch(__global const uchar *inputs, __global uchar *outputs
     w[i] = (uint)data[j] << 24 | (uint)data[j + 1] << 16 | (uint)data[j + 2] << 8 | (uint)data[j + 3];
   }
 
-  // Padding single block (assumes 32-byte input max)
-  w[8] = 0x80000000;  // 1 bit then zeros
-  for (int i = 9; i < 15; i++) w[i] = 0x00000000;
-  w[15] = input_size * 8;
+  // SHA-256 padding for single-block 32-byte input
+  w[8] = 0x80000000;
+  for (int i = 9; i < 15; i++) {
+    w[i] = 0x00000000;
+  }
+  w[15] = input_size * 8; // message length in bits
 
   for (int i = 16; i < 64; i++) {
     w[i] = sigma1(w[i - 2]) + w[i - 7] + sigma0(w[i - 15]) + w[i - 16];
