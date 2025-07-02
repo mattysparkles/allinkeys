@@ -1,5 +1,3 @@
-// sha256_kernel.cl
-
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
 
 __constant uint k[64] = {
@@ -62,17 +60,24 @@ __kernel void derive_addresses(__global const uchar *inputs, __global uchar *out
   };
 
   uint w[64];
-  for (int i = 0; i < 16; i++) {
+
+  // SAFETY FIX: avoid out-of-bounds access on input buffer
+  uint words = input_size / 4;
+  for (int i = 0; i < words; i++) {
     int j = i * 4;
-    w[i] = (uint)data[j] << 24 | (uint)data[j + 1] << 16 | (uint)data[j + 2] << 8 | (uint)data[j + 3];
+    w[i] = (uint)data[j] << 24 |
+           (uint)data[j + 1] << 16 |
+           (uint)data[j + 2] << 8 |
+           (uint)data[j + 3];
+  }
+  for (int i = words; i < 16; i++) {
+    w[i] = 0;
   }
 
-  // SHA-256 padding for single-block 32-byte input
+  // Padding (bit 1 followed by zeros, then length)
   w[8] = 0x80000000;
-  for (int i = 9; i < 15; i++) {
-    w[i] = 0x00000000;
-  }
-  w[15] = input_size * 8; // message length in bits
+  for (int i = 9; i < 15; i++) w[i] = 0x00000000;
+  w[15] = input_size * 8;
 
   for (int i = 16; i < 64; i++) {
     w[i] = sigma1(w[i - 2]) + w[i - 7] + sigma0(w[i - 15]) + w[i - 16];
