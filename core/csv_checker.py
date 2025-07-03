@@ -18,8 +18,6 @@ from core.logger import log_message
 from utils.pgp_utils import encrypt_with_pgp
 from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
-
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
 os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
 # Track last 10 check times for rolling average

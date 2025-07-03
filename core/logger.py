@@ -7,8 +7,7 @@ import sys
 import logging
 from config.settings import LOG_DIR, LOG_LEVEL, LOG_TO_CONSOLE, LOG_TO_FILE
 
-# ✅ Force stdout to UTF-8
-sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
+# stdout is configured in main
 
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))

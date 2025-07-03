@@ -19,9 +19,8 @@ from config.settings import (
     MAX_OUTPUT_FILE_SIZE,
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS
-)
 
-sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)  # ✅ Safe print emojis on Win terminal
+)
 
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
