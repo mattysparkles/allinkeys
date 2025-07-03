@@ -7,10 +7,11 @@ import sys
 import csv
 import time
 import io
-from datetime import datetime
 import json
+from datetime import datetime
 from config.settings import (
-    CSV_DIR, UNIQUE_DIR, FULL_DIR, CHECKED_CSV_LOG, RECHECKED_CSV_LOG,
+    CSV_DIR, UNIQUE_DIR, FULL_DIR, DOWNLOADS_DIR,
+    CHECKED_CSV_LOG, RECHECKED_CSV_LOG,
     ENABLE_ALERTS, ENABLE_PGP, PGP_PUBLIC_KEY_PATH
 )
 from utils.file_utils import find_latest_funded_file
@@ -23,7 +24,7 @@ from utils.balance_checker import fetch_live_balance
 
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
 os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
-# Track last 10 check times for rolling average
+
 CHECK_TIME_HISTORY = []
 MAX_HISTORY_SIZE = 10
 
@@ -79,7 +80,6 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
                 log_message(f"❌ {filename} missing headers. Skipping file.", "ERROR")
                 return []
 
-            # Validate expected headers
             for coin, columns in coin_columns.items():
                 missing = [col for col in columns if col not in headers]
                 if missing:
@@ -129,8 +129,6 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
 
         end_time = time.perf_counter()
         duration_sec = round(end_time - start_time, 2)
-
-        # Rolling average logic
         CHECK_TIME_HISTORY.append(duration_sec)
         if len(CHECK_TIME_HISTORY) > MAX_HISTORY_SIZE:
             CHECK_TIME_HISTORY.pop(0)
@@ -164,23 +162,21 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
         log_message(f"❌ Error reading {filename}: {str(e)}", "ERROR")
         return []
 
-
-
-
 def check_csvs_day_one(shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
+
     address_sets = {}
-    for coin, columns in coin_columns.items():
-        full_path = find_latest_funded_file(coin, FULL_DIR)
+    for coin, _ in coin_columns.items():
+        full_path = find_latest_funded_file(coin, FULL_DIR) or find_latest_funded_file(coin, DOWNLOADS_DIR)
         if full_path:
             log_message(f"🔎 Using funded list {os.path.basename(full_path)} for {coin.upper()}.")
             address_sets[coin] = load_funded_addresses(full_path)
         else:
-            log_message(f"⚠️ No funded list found for {coin.upper()} in FULL_DIR", "WARN")
+            log_message(f"⚠️ No funded list found for {coin.upper()} in FULL_DIR or fallback.", "WARN")
 
     combined_set = set.union(*address_sets.values()) if address_sets else set()
 
@@ -190,7 +186,7 @@ def check_csvs_day_one(shared_metrics=None):
         csv_path = os.path.join(CSV_DIR, filename)
         check_csv_against_addresses(csv_path, combined_set)
         mark_csv_as_checked(filename, CHECKED_CSV_LOG)
-   
+
     update_csv_eta()
 
 def check_csvs(shared_metrics=None):
@@ -199,14 +195,15 @@ def check_csvs(shared_metrics=None):
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
+
     address_sets = {}
-    for coin, columns in coin_columns.items():
-        unique_path = find_latest_funded_file(coin, UNIQUE_DIR)
+    for coin, _ in coin_columns.items():
+        unique_path = find_latest_funded_file(coin, UNIQUE_DIR) or find_latest_funded_file(coin, DOWNLOADS_DIR)
         if unique_path:
             log_message(f"🔎 Using unique list {os.path.basename(unique_path)} for {coin.upper()}.")
             address_sets[coin] = load_funded_addresses(unique_path)
         else:
-            log_message(f"⚠️ No unique list found for {coin.upper()} in UNIQUE_DIR", "WARN")
+            log_message(f"⚠️ No unique list found for {coin.upper()} in UNIQUE_DIR or fallback.", "WARN")
 
     combined_set = set.union(*address_sets.values()) if address_sets else set()
 
@@ -216,12 +213,10 @@ def check_csvs(shared_metrics=None):
         csv_path = os.path.join(CSV_DIR, filename)
         check_csv_against_addresses(csv_path, combined_set, recheck=True)
         mark_csv_as_checked(filename, RECHECKED_CSV_LOG)
-    
+
     update_csv_eta()
 
-
 def inject_test_match(test_address="1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"):
-    """Helper to append a known funded address and trigger a check."""
     test_csv = os.path.join(CSV_DIR, "test_match.csv")
     with open(test_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["btc_U", "wif"])
