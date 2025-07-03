@@ -116,13 +116,25 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
                 env={**os.environ, **gpu_env}
             )
 
-            def terminate_after_interval(p):
-                time.sleep(ROTATE_INTERVAL_SECONDS)
-                if p.poll() is None:
-                    logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
-                    p.terminate()
+            def monitor_process(p, path):
+                start = time.time()
+                while p.poll() is None:
+                    if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                        logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
+                        p.terminate()
+                        break
+                    try:
+                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
+                            logger.info(
+                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {os.path.basename(path)}"
+                            )
+                            p.terminate()
+                            break
+                    except FileNotFoundError:
+                        pass
+                    time.sleep(1)
 
-            timer_thread = threading.Thread(target=terminate_after_interval, args=(proc,))
+            timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
             timer_thread.start()
             proc.wait()
             timer_thread.join()

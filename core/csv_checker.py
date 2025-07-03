@@ -129,6 +129,7 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
                             new_matches.add(addr)
                             increment_metric("matched_keys", 1)
                             increment_metric(f"matches_found_today.{coin}", 1)
+                            increment_metric(f"matches_found_lifetime.{coin}", 1)
 
         end_time = time.perf_counter()
         duration_sec = round(end_time - start_time, 2)
@@ -140,6 +141,8 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
 
         increment_metric("csv_checked_today", 1)
         increment_metric("csv_checked_lifetime", 1)
+        if recheck:
+            increment_metric("csv_rechecked_today", 1)
         update_dashboard_stat({
             "avg_check_time": avg_time,
             "last_check_duration": f"{duration_sec:.2f}s"
