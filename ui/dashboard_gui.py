@@ -99,6 +99,10 @@ class DashboardGUI:
             frame = ttk.LabelFrame(self.section_frame, text=group)
             frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
+            SMALL_FONT_KEYS = {
+                "addresses_checked_today", "addresses_checked_lifetime",
+                "matches_found_today", "matches_found_lifetime"
+            }
             for i, (key, label_text) in enumerate(keys):
                 ttk.Label(frame, text=label_text + ":").grid(row=i, column=0, sticky="e")
                 if key not in ("cpu_usage", "ram_usage") and any(x in key for x in ["usage", "percent", "progress", "keys_per_sec"]):
@@ -111,7 +115,8 @@ class DashboardGUI:
                     self.metrics[key] = lbl
                 else:
                     # Higher contrast text for dark theme
-                    lbl = ttk.Label(frame, text="Loading...", foreground="white")
+                    font_opt = ("Segoe UI", 8) if key in SMALL_FONT_KEYS else None
+                    lbl = ttk.Label(frame, text="Loading...", foreground="white", font=font_opt)
                     lbl.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = lbl
             row += 1

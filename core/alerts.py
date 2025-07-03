@@ -1,5 +1,6 @@
 import os
 import json
+import csv
 import time
 import smtplib
 import requests
@@ -11,7 +12,8 @@ from Crypto.Cipher import PKCS1_OAEP
 import base64
 from datetime import datetime
 
-from config.settings import ENABLE_ALERTS
+from config.settings import ENABLE_ALERTS, DOWNLOADS_DIR
+from config.coin_definitions import coin_columns
 from config.settings import (
     ALERT_SOUND_FILE, ALERT_POPUP_COLOR_1, ALERT_PHRASE,
     ENABLE_DESKTOP_WINDOW_ALERT, ENABLE_AUDIO_ALERT_LOCAL,
@@ -207,12 +209,26 @@ def trigger_startup_alerts():
 
 
 def trigger_test_alerts():
-    """Fire a test alert using sample data."""
-    test_payload = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "coin": "BTC",
-        "address": "1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY",
-        "csv_file": "test_alerts.csv",
-        "privkey": "TESTKEY"
-    }
-    alert_match(test_payload, test_mode=True)
+    """Fire test alerts using addresses from test_alerts.csv."""
+    csv_path = os.path.join(DOWNLOADS_DIR, "test_alerts.csv")
+    if not os.path.exists(csv_path):
+        log_message("⚠️ test_alerts.csv not found. Run downloader first.", "WARN")
+        return
+
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            for coin, columns in coin_columns.items():
+                for col in columns:
+                    addr = row.get(col, "").strip()
+                    if not addr:
+                        continue
+                    payload = {
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "coin": coin,
+                        "address": addr,
+                        "csv_file": "test_alerts.csv",
+                        "privkey": row.get("private_key", "TEST")
+                    }
+                    log_message(f"📡 Test alert match triggered for {addr}")
+                    alert_match(payload, test_mode=True)
