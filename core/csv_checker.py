@@ -11,14 +11,12 @@ import json
 from datetime import datetime
 from config.settings import (
     CSV_DIR, UNIQUE_DIR, FULL_DIR, DOWNLOADS_DIR,
-    CHECKED_CSV_LOG, RECHECKED_CSV_LOG,
-    ENABLE_ALERTS, ENABLE_PGP, PGP_PUBLIC_KEY_PATH
+    CHECKED_CSV_LOG, RECHECKED_CSV_LOG
 )
 from utils.file_utils import find_latest_funded_file
 from config.coin_definitions import coin_columns
 from core.alerts import alert_match
 from core.logger import log_message
-from utils.pgp_utils import encrypt_with_pgp
 from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics, set_metric, get_metric
 from utils.balance_checker import fetch_live_balance
 
@@ -109,11 +107,11 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
 
                             log_message(f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}", "ALERT")
 
-                            if ENABLE_PGP:
-                                encrypted = encrypt_with_pgp(json.dumps(match_payload), PGP_PUBLIC_KEY_PATH)
-                                alert_match({"encrypted": encrypted})
-                            else:
-                                alert_match(match_payload)
+                            # Pass full match payload to alert system. The
+                            # :func:`alert_match` helper will handle optional
+                            # PGP encryption based on configuration so we don't
+                            # duplicate that logic here.
+                            alert_match(match_payload)
 
                             if filename != "test_alerts.csv":
                                 bal = fetch_live_balance(addr, coin)

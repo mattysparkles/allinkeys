@@ -363,16 +363,13 @@ def run_allinkeys(args):
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 
     if args.match_test:
-        test_data = {
-            "seed": "TESTSEED123",
-            "btc_U": "1TestAddressUncompressed",
-            "btc_C": "1TestAddressCompressed",
-            "source_file": "test_static_file.csv",
-            "timestamp": datetime.utcnow().isoformat(),
-            "test_mode": True
-        }
-        log_message("🧺 Running simulated match alert...")
-        alert_match(test_data, test_mode=True)
+        from core.csv_checker import inject_test_match
+        log_message("🧺 Injecting test match via CSV...")
+        try:
+            inject_test_match()
+            log_message("✅ Test match injected", "INFO")
+        except Exception as e:
+            log_message(f"❌ Test match injection failed: {e}", "ERROR")
 
     processes, named_processes = run_all_processes(args, shutdown_event, shared_metrics)
 

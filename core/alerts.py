@@ -30,6 +30,7 @@ from config.settings import (
 )
 
 from core.logger import log_message
+from utils.pgp_utils import encrypt_with_pgp
 
 # runtime alert flags that can be toggled from the GUI
 ALERT_FLAGS = {
@@ -45,10 +46,27 @@ ALERT_FLAGS = {
     "ENABLE_CLOUD_UPLOAD": ENABLE_CLOUD_UPLOAD,
 }
 
+# Mapping of checkbox option names from ``settings.ALERT_CHECKBOXES`` to the
+# internal ``ALERT_FLAGS`` keys. This keeps the GUI toggles working even if the
+# naming differs between modules.
+ALERT_FLAG_ALIASES = {
+    "ALERT_TELEGRAM_ENABLED": "ENABLE_TELEGRAM_ALERT",
+    "ALERT_SMS_ENABLED": "ENABLE_SMS_ALERT",
+    "ALERT_DISCORD_ENABLED": "ENABLE_DISCORD_ALERT",
+    "ALERT_HOME_ASSISTANT_ENABLED": "ENABLE_HOME_ASSISTANT_ALERT",
+    # Various cloud storage options map to the generic cloud upload flag
+    "ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE": "ENABLE_CLOUD_UPLOAD",
+    "ALERT_SAVE_MATCHES_TO_GOOGLE_DRIVE": "ENABLE_CLOUD_UPLOAD",
+    "ALERT_SAVE_MATCHES_TO_DROPBOX": "ENABLE_CLOUD_UPLOAD",
+    "ALERT_SAVE_MATCHES_TO_LOCAL_FILE": "ENABLE_CLOUD_UPLOAD",
+}
+
 
 def set_alert_flag(name, value):
-    if name in ALERT_FLAGS:
-        ALERT_FLAGS[name] = value
+    """Update runtime alert flags from the GUI."""
+    key = ALERT_FLAG_ALIASES.get(name, name)
+    if key in ALERT_FLAGS:
+        ALERT_FLAGS[key] = value
 
 
 def alert_match(match_data, test_mode=False):
@@ -85,9 +103,20 @@ def alert_match(match_data, test_mode=False):
     match_text = f"[{timestamp}] {alert_type}!\nCoin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey}"
     log_message(f"🚨 {alert_type}: {address} (File: {csv_file})")
 
+    # If PGP is enabled encrypt the payload for any text-based alerts. Channels
+    # like popup/audio still display the plaintext match text.
+    encrypted_text = None
+    if ALERT_FLAGS.get("ENABLE_PGP"):
+        try:
+            encrypted_text = encrypt_with_pgp(match_text, PGP_PUBLIC_KEY_PATH)
+            log_message("🔐 Match data encrypted with PGP.", "DEBUG")
+        except Exception as e:
+            log_message(f"❌ PGP encryption failed: {e}", "ERROR")
+
     # 🖥️ Desktop Window Alert
     if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT"):
         try:
+            log_message("[Alert] Desktop popup", "DEBUG")
             import tkinter as tk
             root = tk.Tk()
             root.withdraw()
@@ -115,6 +144,7 @@ def alert_match(match_data, test_mode=False):
     # 🔊 Sound Alert
     if ALERT_FLAGS.get("ENABLE_AUDIO_ALERT_LOCAL"):
         try:
+            log_message("[Alert] Audio", "DEBUG")
             from playsound import playsound
             if os.path.exists(ALERT_SOUND_FILE):
                 playsound(ALERT_SOUND_FILE)
@@ -127,11 +157,12 @@ def alert_match(match_data, test_mode=False):
     # 📧 Email Alert
     if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED"):
         try:
+            log_message("[Alert] Email", "DEBUG")
             msg = MIMEMultipart()
             msg['From'] = ALERT_EMAIL_FROM
             msg['To'] = ",".join(ALERT_EMAIL_TO) if isinstance(ALERT_EMAIL_TO, list) else ALERT_EMAIL_TO
             msg['Subject'] = f"AllInKeys {alert_type}"
-            msg.attach(MIMEText(match_text, 'plain'))
+            msg.attach(MIMEText(encrypted_text or match_text, 'plain'))
 
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
             server.starttls()
@@ -145,8 +176,13 @@ def alert_match(match_data, test_mode=False):
     # 📲 Telegram Alert
     if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT"):
         try:
+            log_message("[Alert] Telegram", "DEBUG")
             telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
+            resp = requests.post(
+                telegram_url,
+                json={"chat_id": TELEGRAM_CHAT_ID, "text": encrypted_text or match_text},
+                timeout=10,
+            )
             if resp.ok and resp.json().get("ok"):
                 log_message("📨 Telegram alert sent.", "INFO")
             else:
@@ -157,10 +193,11 @@ def alert_match(match_data, test_mode=False):
     # 📱 SMS via Twilio
     if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client:
         try:
+            log_message("[Alert] SMS", "DEBUG")
             if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_SMS]):
                 raise ValueError("Missing Twilio SMS credentials")
             client = Client(TWILIO_SID, TWILIO_TOKEN)
-            client.messages.create(body=match_text, from_=TWILIO_FROM, to=TWILIO_TO_SMS)
+            client.messages.create(body=encrypted_text or match_text, from_=TWILIO_FROM, to=TWILIO_TO_SMS)
             log_message("📲 SMS alert sent.", "INFO")
         except Exception as e:
             log_message(f"❌ SMS alert error: {e}", "ERROR")
@@ -168,6 +205,7 @@ def alert_match(match_data, test_mode=False):
     # 📞 Phone Call Alert
     if ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT") and Client:
         try:
+            log_message("[Alert] Phone Call", "DEBUG")
             if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_CALL]):
                 raise ValueError("Missing Twilio call credentials")
             client = Client(TWILIO_SID, TWILIO_TOKEN)
@@ -183,7 +221,8 @@ def alert_match(match_data, test_mode=False):
     # 💬 Discord Alert
     if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):
         try:
-            data = {"content": match_text}
+            log_message("[Alert] Discord", "DEBUG")
+            data = {"content": encrypted_text or match_text}
             resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
             if resp.ok:
                 log_message("💬 Discord alert sent.", "INFO")
@@ -195,11 +234,12 @@ def alert_match(match_data, test_mode=False):
     # 🏠 Home Assistant Alert
     if ALERT_FLAGS.get("ENABLE_HOME_ASSISTANT_ALERT"):
         try:
+            log_message("[Alert] Home Assistant", "DEBUG")
             headers = {
                 "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
                 "Content-Type": "application/json"
             }
-            payload = {"message": match_text}
+            payload = {"message": encrypted_text or match_text}
             resp = requests.post(HOME_ASSISTANT_URL, headers=headers, json=payload, timeout=10)
             if resp.ok:
                 log_message("🏠 Home Assistant alert sent.", "INFO")
