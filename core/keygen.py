@@ -21,7 +21,7 @@ from config.settings import (
     ROTATE_INTERVAL_SECONDS
 )
 
-sys.stdout.reconfigure(encoding='utf-8')  # ✅ Safe print emojis on Win terminal
+sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)  # ✅ Safe print emojis on Win terminal
 
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
@@ -131,6 +131,9 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
                 with open(current_output_path, 'r', encoding='utf-8') as f:
                     lines = sum(1 for _ in f)
                     total_keys_generated += lines
+                    from core.dashboard import increment_metric
+                    increment_metric("keys_generated_today", lines)
+                    increment_metric("keys_generated_lifetime", lines)
                     logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")

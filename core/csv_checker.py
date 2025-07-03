@@ -5,6 +5,7 @@ csv_checker.py – 📁 CSV scanning against complete list of funded address upd
 import os
 import csv
 import time
+import io
 from datetime import datetime
 from config.settings import (
     CSV_DIR, UNIQUE_DIR, FULL_DIR, CHECKED_CSV_LOG, RECHECKED_CSV_LOG,
@@ -15,6 +16,8 @@ from core.alerts import alert_match
 from core.logger import log_message
 from utils.pgp_utils import encrypt_with_pgp
 from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
 os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
@@ -63,8 +66,7 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
     check_type = "Recheck" if recheck else "First Check"
     rows_scanned = 0
     start_time = time.perf_counter()
-
-    log_message(f"🔍 {check_type} STARTED: {filename}")
+    log_message(f"🔎 Checking {filename}...")
 
     try:
         with open(csv_file, newline="", encoding="utf-8") as f:
@@ -132,6 +134,7 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
             increment_metric(f"addresses_checked_today.{coin}", rows_scanned)
             increment_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
 
+        log_message(f"✅ {'Recheck' if recheck else 'Check'} complete: {len(new_matches)} matches found", "INFO")
         log_message(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s", "INFO")
 
         if new_matches:

@@ -7,6 +7,7 @@ import sys
 import signal
 import argparse
 import multiprocessing
+import threading
 from datetime import datetime
 from multiprocessing import Process, set_start_method
 import psutil
@@ -108,6 +109,10 @@ def metrics_updater(shared_metrics=None):
                 'disk_fill_eta': disk_eta,
                 'gpu_stats': {}
             }
+            from core.gpu_selector import get_vanitysearch_gpu_ids, get_altcoin_gpu_ids
+            vs_ids = set(get_vanitysearch_gpu_ids())
+            ad_ids = set(get_altcoin_gpu_ids())
+
             if GPUtil:
                 try:
                     gpus = GPUtil.getGPUs()
@@ -118,8 +123,15 @@ def metrics_updater(shared_metrics=None):
                         except Exception:
                             usage = "N/A"
                             vram = "N/A"
+                        name = gpu.name
+                        if gpu.id in vs_ids:
+                            name += " (VS)"
+                        if gpu.id in ad_ids:
+                            name += " (AD)"
+                        if usage in ["N/A", None]:
+                            usage = "Active (No Stats)" if gpu.id in ad_ids | vs_ids else "N/A"
                         stats['gpu_stats'][f"GPU{gpu.id}"] = {
-                            'name': gpu.name,
+                            'name': name,
                             'usage': usage,
                             'vram': vram,
                         }
@@ -131,13 +143,17 @@ def metrics_updater(shared_metrics=None):
                 try:
                     for platform in cl.get_platforms():
                         for device in platform.get_devices():
-                            # Skip if already added via GPUtil
-                            already = any(info.get('name') == device.name for info in stats['gpu_stats'].values())
+                            already = any(info.get('name').startswith(device.name) for info in stats['gpu_stats'].values())
                             if already:
                                 continue
+                            name = device.name
+                            if next_id in vs_ids:
+                                name += " (VS)"
+                            if next_id in ad_ids:
+                                name += " (AD)"
                             stats['gpu_stats'][f"GPU{next_id}"] = {
-                                'name': device.name,
-                                'usage': 'N/A',
+                                'name': name,
+                                'usage': 'Active (No Stats)' if next_id in ad_ids | vs_ids else 'N/A',
                                 'vram': 'N/A'
                             }
                             next_id += 1
@@ -179,6 +195,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     processes = []
+    named_processes = []
 
     if ENABLE_CHECKPOINT_RESTORE:
         load_keygen_checkpoint()
@@ -201,6 +218,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
             p.start()
             log_message("[Started] Keygen subprocess", "INFO")
             processes.append(p)
+            named_processes.append(("keygen", p))
         except Exception as e:
             log_message(f"❌ Failed to launch keygen: {e}", "ERROR")
 
@@ -211,6 +229,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
             p.start()
             log_message("[Started] Day One CSV checker", "INFO")
             processes.append(p)
+            named_processes.append(("csv_check", p))
         except Exception as e:
             log_message(f"❌ Failed to start day-one checker: {e}", "ERROR")
 
@@ -221,6 +240,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
             p.start()
             log_message("[Started] Unique recheck", "INFO")
             processes.append(p)
+            named_processes.append(("csv_recheck", p))
         except Exception as e:
             log_message(f"❌ Failed to start recheck: {e}", "ERROR")
 
@@ -229,6 +249,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
             p = start_altcoin_conversion_process(shutdown_event, shared_metrics)
             log_message("[Started] Altcoin derive subprocess", "INFO")
             processes.append(p)
+            named_processes.append(("altcoin", p))
         except Exception as e:
             log_message(f"❌ Failed to start altcoin convert: {e}", "ERROR")
 
@@ -239,6 +260,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
             p.start()
             log_message("[Started] Startup alerts", "INFO")
             processes.append(p)
+            named_processes.append(("alerts", p))
         except Exception as e:
             log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
 
@@ -249,6 +271,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
             p.start()
             log_message("[Started] Checkpoint saver", "INFO")
             processes.append(p)
+            named_processes.append(("checkpoint", p))
         except Exception as e:
             log_message(f"❌ Failed to start checkpoint saver: {e}", "ERROR")
 
@@ -258,10 +281,11 @@ def run_all_processes(args, shutdown_event, shared_metrics):
         p.start()
         log_message("[Started] Metrics updater", "INFO")
         processes.append(p)
+        named_processes.append(("metrics", p))
     except Exception as e:
         log_message(f"❌ Failed to launch metrics updater: {e}", "ERROR")
 
-    return processes
+    return processes, named_processes
 
 
 def run_allinkeys(args):
@@ -301,7 +325,15 @@ def run_allinkeys(args):
         log_message("🧺 Running simulated match alert...")
         alert_match(test_data, test_mode=True)
 
-    processes = run_all_processes(args, shutdown_event, shared_metrics)
+    processes, named_processes = run_all_processes(args, shutdown_event, shared_metrics)
+
+    def monitor():
+        while not shutdown_event.is_set():
+            status = {name: proc.is_alive() for name, proc in named_processes}
+            update_dashboard_stat("thread_health_flags", status)
+            time.sleep(2)
+
+    threading.Thread(target=monitor, daemon=True).start()
 
     def shutdown_handler(sig, frame):
         print("\n🛑 Ctrl+C received. Shutting down gracefully...", flush=True)

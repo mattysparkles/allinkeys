@@ -401,6 +401,7 @@ STATS_TO_DISPLAY = {
     "addresses_checked_today": SHOW_ADDRESS_CHECKED_COUNTS_TODAY,
     "addresses_checked_lifetime": SHOW_ADDRESS_CHECKED_COUNTS_LIFETIME,
     "gpu_stats": True,
+    "thread_health_flags": True,
     "last_updated": True,
 }
 # ===================== ⏱️ DASHBOARD REFRESH ==========================
@@ -430,6 +431,7 @@ METRICS_LABEL_MAP = {
     "addresses_checked_today": "Addresses Checked Today",
     "addresses_checked_lifetime": "Addresses Checked Lifetime",
     "gpu_stats": "GPU Stats",
+    "thread_health_flags": "Module Status",
     "last_updated": "Last Updated",
 }
 # ===================== ⚠️ ALERT CONFIG OPTIONS FOR GUI ======================
