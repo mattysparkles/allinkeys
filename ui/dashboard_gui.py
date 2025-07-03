@@ -37,7 +37,7 @@ from config.settings import (
     OPEN_CONFIG_FILE_FROM_DASHBOARD,   
 )
 
-from core.dashboard import get_current_metrics, reset_all_metrics
+from core.dashboard import get_current_metrics, reset_all_metrics, set_metric
 
 
 class DashboardGUI:
@@ -76,32 +76,35 @@ class DashboardGUI:
         self.section_frame = ttk.Frame(self.container)
         self.section_frame.pack(fill="both", expand=True, padx=10)
 
-        grouped_keys = {
-            "System Stats": [],
-            "Keygen Metrics": [],
-            "CSV Checker": [],
-            "Match Info": [],
-            "Backlog": [],
-            "Uptime & Misc": []
+        grouped_keys = {"System Stats": [], "CSV Checker": [], "Backlog": []}
+
+        system_stats = {
+            "cpu_usage", "ram_usage", "disk_free_gb", "disk_fill_eta",
+            "gpu_stats", "gpu_assignments", "uptime",
+            "vanity_progress_percent", "last_updated", "thread_health_flags",
+        }
+        csv_stats = {
+            "csv_checked_today", "csv_rechecked_today",
+            "addresses_checked_today", "addresses_checked_lifetime",
+            "matches_found_lifetime", "csv_created_today", "csv_created_lifetime",
+        }
+        backlog_stats = {
+            "batches_completed", "avg_keygen_time", "backlog_files_queued",
+            "backlog_eta", "backlog_avg_time", "backlog_current_file",
+            "keys_per_sec", "keys_generated_today", "keys_generated_lifetime",
+            "current_seed_index",
         }
 
         for key, enabled in STATS_TO_DISPLAY.items():
             if not enabled:
                 continue
             label = METRICS_LABEL_MAP.get(key, key)
-            key_lower = key.lower()
-            if any(x in key_lower for x in ["cpu", "ram", "disk", "gpu"]):
+            if key in system_stats:
                 grouped_keys["System Stats"].append((key, label))
-            elif any(x in key_lower for x in ["keygen", "keys_per_sec", "batches"]):
-                grouped_keys["Keygen Metrics"].append((key, label))
-            elif "csv" in key_lower or "address" in key_lower:
+            elif key in csv_stats:
                 grouped_keys["CSV Checker"].append((key, label))
-            elif "match" in key_lower:
-                grouped_keys["Match Info"].append((key, label))
-            elif "backlog" in key_lower:
+            elif key in backlog_stats:
                 grouped_keys["Backlog"].append((key, label))
-            else:
-                grouped_keys["Uptime & Misc"].append((key, label))
 
         frames = [(g, k) for g, k in grouped_keys.items() if k]
         per_col = (len(frames) + 2) // 3
@@ -119,7 +122,7 @@ class DashboardGUI:
             self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
             SMALL_FONT_KEYS = {
                 "addresses_checked_today", "addresses_checked_lifetime",
-                "matches_found_today", "matches_found_lifetime"
+                "matches_found_lifetime"
             }
             for i, (key, label_text) in enumerate(keys):
                 ttk.Label(
@@ -135,7 +138,7 @@ class DashboardGUI:
                     pb = ttk.Progressbar(frame, length=150, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
-                elif key in ("gpu_stats", "gpu_assignments", "thread_health_flags"):
+                elif key in ("gpu_stats", "gpu_assignments", "thread_health_flags", "matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
                     txt = tk.Text(frame, height=4, width=45, wrap="word", font=FONT)
                     txt.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     txt.configure(state="disabled")
@@ -237,6 +240,13 @@ class DashboardGUI:
 
         def set_state(new_state):
             self.module_states[label] = new_state
+            try:
+                mod_key = label.lower()
+                if new_state in ("paused", "running") and mod_key == "vanity":
+                    set_metric("global_run_state", new_state)
+                set_metric(f"status.{mod_key}", new_state == "running")
+            except Exception:
+                pass
             update_buttons()
 
         btns["Start"] = ttk.Button(sub_frame, text="Start", width=8, command=lambda: set_state("running"))
@@ -314,6 +324,10 @@ class DashboardGUI:
                             for mod, name in value.items():
                                 title = name_map.get(mod, mod.replace('_', ' ').title())
                                 lines.append(f"{title} → {name}")
+                        elif key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
+                            items = [f"{k.upper()}: {v}" for k, v in value.items()]
+                            for i in range(0, len(items), 3):
+                                lines.append("   ".join(items[i:i+3]))
                         else:
                             for gid, info in value.items():
                                 name = info.get('name', '')

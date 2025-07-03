@@ -210,6 +210,7 @@ def metrics_updater(shared_metrics=None):
 
             prog = keygen_progress()
             stats['keys_generated_lifetime'] = prog['total_keys_generated']
+            stats['keys_per_sec'] = prog.get('keys_per_sec', 0)
             stats['uptime'] = prog['elapsed_time']
             stats['last_updated'] = datetime.utcnow().strftime('%H:%M:%S')
             try:
@@ -376,8 +377,9 @@ def run_allinkeys(args):
     processes, named_processes = run_all_processes(args, shutdown_event, shared_metrics)
 
     def monitor():
+        from core.dashboard import get_current_metrics
         while not shutdown_event.is_set():
-            status = {name: proc.is_alive() for name, proc in named_processes}
+            status = get_current_metrics().get("status", {})
             update_dashboard_stat("thread_health_flags", status)
             time.sleep(2)
 

@@ -49,15 +49,17 @@ if LOGGING_ENABLED:
 
 
 def keygen_progress():
-    elapsed_seconds = int(time.time() - keygen_start_time)
+    elapsed_seconds = max(1, int(time.time() - keygen_start_time))
     elapsed_time_str = str(datetime.utcfromtimestamp(elapsed_seconds).strftime('%H:%M:%S'))
+    keys_per_sec = total_keys_generated / elapsed_seconds
     return {
         "total_keys_generated": total_keys_generated,
         "current_batch_id": KEYGEN_STATE["batch_id"],
         "index_within_batch": KEYGEN_STATE["index_within_batch"],
         "last_seed": KEYGEN_STATE["last_seed"],
         "elapsed_time": elapsed_time_str,
-        "start_timestamp": datetime.utcfromtimestamp(keygen_start_time).isoformat() + "Z"
+        "start_timestamp": datetime.utcfromtimestamp(keygen_start_time).isoformat() + "Z",
+        "keys_per_sec": round(keys_per_sec, 2),
     }
 
 
@@ -130,7 +132,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
                 with open(current_output_path, 'r', encoding='utf-8') as f:
                     lines = sum(1 for _ in f)
                     total_keys_generated += lines
-                    from core.dashboard import increment_metric
                     increment_metric("keys_generated_today", lines)
                     increment_metric("keys_generated_lifetime", lines)
                     logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
@@ -144,7 +145,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
         logger.info(f"🔁 Rotating to new seed: {hex(seed_int)[2:].rjust(64, '0')} | New file index: {file_index}")
 
 
-from core.dashboard import init_shared_metrics
+from core.dashboard import init_shared_metrics, set_metric, increment_metric, get_metric
 
 
 def start_keygen_loop(shared_metrics=None):
@@ -167,33 +168,53 @@ def start_keygen_loop(shared_metrics=None):
         logger.info("🚀 No checkpoint found. Starting with randomized batch/index.")
 
     try:
+        set_metric("status.keygen", True)
+        batches_completed = 0
+        total_time = 0.0
         while True:
-            for index in range(KEYGEN_STATE["index_within_batch"], BATCH_SIZE):
+            batch_start = time.perf_counter()
+            index = KEYGEN_STATE["index_within_batch"]
+            while index < BATCH_SIZE:
+                if get_metric("global_run_state") == "paused":
+                    time.sleep(1)
+                    continue
+
                 seed = generate_seed_from_batch(KEYGEN_STATE["batch_id"], index)
                 if seed is None:
+                    index += 1
                     continue
 
                 KEYGEN_STATE["index_within_batch"] = index
                 KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
+                set_metric("current_seed_index", index)
 
                 run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index)
 
                 save_checkpoint({
                     "batch_id": KEYGEN_STATE["batch_id"],
-                    "index_within_batch": index + 1
+                    "index_within_batch": index + 1,
                 })
+                index += 1
+
+            batch_end = time.perf_counter()
+            batches_completed += 1
+            total_time += batch_end - batch_start
+            set_metric("batches_completed", batches_completed)
+            set_metric("avg_keygen_time", round(total_time / batches_completed, 2))
 
             KEYGEN_STATE["batch_id"] += 1
             KEYGEN_STATE["index_within_batch"] = 0
             save_checkpoint({
                 "batch_id": KEYGEN_STATE["batch_id"],
-                "index_within_batch": 0
+                "index_within_batch": 0,
             })
 
     except KeyboardInterrupt:
         logger.info("🛑 Keygen loop interrupted by user. Exiting cleanly.")
     except Exception as e:
         logger.error(f"❌ Unexpected error: {e}")
+    finally:
+        set_metric("status.keygen", False)
 
 
 # 🧪 One-time run (for debugging only)

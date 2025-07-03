@@ -382,7 +382,7 @@ LAUNCH_TIMESTAMP = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
 # ===================== 📈 STATISTICS TO DISPLAY MAPPING =======================
 STATS_TO_DISPLAY = {
-    "vanitysearch_speed": SHOW_KEYS_PER_SEC,
+    "keys_per_sec": SHOW_KEYS_PER_SEC,
     "batches_completed": SHOW_BATCHES_COMPLETED,
     "current_seed_index": SHOW_CURRENT_SEED_INDEX,
     "avg_keygen_time": SHOW_AVG_KEYGEN_FILE_TIME,
@@ -394,7 +394,6 @@ STATS_TO_DISPLAY = {
     "uptime": SHOW_UPTIME,
     "csv_checked_today": SHOW_NEW_CSV_CHECKED_TODAY_TOTAL,
     "csv_rechecked_today": SHOW_CSV_RECHECKED_TOTAL_TODAY,
-    "matches_found_today": SHOW_MATCHES_TODAY,
     "matches_found_lifetime": SHOW_MATCHES_LIFETIME,
     "keys_generated_today": SHOW_KEYS_GENERATED_TODAY,
     "keys_generated_lifetime": SHOW_KEYS_GENERATED_LIFETIME,
@@ -417,7 +416,7 @@ DASHBOARD_REFRESH_INTERVAL = 1.0  # seconds between dashboard UI updates
 
 # ===================== 📋 DASHBOARD METRIC LABELS ==========================
 METRICS_LABEL_MAP = {
-    "vanitysearch_speed": "Keys/sec",
+    "keys_per_sec": "Keys/sec",
     "batches_completed": "Batches Completed",
     "current_seed_index": "Current Seed Index",
     "avg_keygen_time": "Avg. Keygen Time",
@@ -431,7 +430,6 @@ METRICS_LABEL_MAP = {
     "csv_rechecked_today": "Unique Rechecked",
     "csv_created_today": "CSVs Today",
     "csv_created_lifetime": "CSVs Lifetime",
-    "matches_found_today": "Matches Today",
     "matches_found_lifetime": "Matches Lifetime",
     "keys_generated_today": "Keys Generated Today",
     "keys_generated_lifetime": "Keys Generated Lifetime",

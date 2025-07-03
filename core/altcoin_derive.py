@@ -30,7 +30,7 @@ from config.settings import (
     MAX_CSV_MB, BCH_CASHADDR_ENABLED,
 )
 from core.logger import log_message
-from core.dashboard import update_dashboard_stat
+from core.dashboard import update_dashboard_stat, set_metric, get_metric, increment_metric
 import core.checkpoint as checkpoint
 from core.gpu_selector import get_altcoin_gpu_ids
 
@@ -458,6 +458,7 @@ from core.dashboard import init_shared_metrics
 def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
+        set_metric("status.altcoin", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
@@ -494,6 +495,9 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
     signal.signal(signal.SIGINT, graceful_shutdown)
 
     while not shared_shutdown_event.is_set():
+        if get_metric("global_run_state") == "paused":
+            time.sleep(1)
+            continue
         try:
             all_txt = [
                 f for f in os.listdir(VANITY_OUTPUT_DIR)
@@ -526,6 +530,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
             log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
 
     log_message("✅ Altcoin derive loop exited cleanly.", "INFO")
+    set_metric("status.altcoin", False)
 
 def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None):
     """
