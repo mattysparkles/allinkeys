@@ -8,6 +8,8 @@ import requests
 from datetime import datetime
 from glob import glob
 
+from utils.file_utils import find_latest_funded_file
+
 from config.settings import (
     COIN_DOWNLOAD_URLS,
     DOWNLOADS_DIR,
@@ -45,9 +47,11 @@ def generate_test_csv():
 
     found_any = False
     for coin in coin_columns.keys():
-        file_path = os.path.join(DOWNLOADS_DIR, f"{coin}_funded.txt")
-        if not os.path.exists(file_path):
+        file_path = find_latest_funded_file(coin, DOWNLOADS_DIR)
+        if not file_path:
+            log_message(f"⚠️ No funded list found for {coin.upper()}.", "WARN")
             continue
+        log_message(f"📥 Using funded list {os.path.basename(file_path)} for {coin.upper()}.")
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 lines = [ln.strip() for ln in f if ln.strip()][:2]
