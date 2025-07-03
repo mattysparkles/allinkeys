@@ -3,12 +3,75 @@
 import os
 import gzip
 import shutil
+import csv
 import requests
 from datetime import datetime
 from glob import glob
 
-from config.settings import COIN_DOWNLOAD_URLS, DOWNLOADS_DIR, MAX_DAILY_FILES_PER_COIN
+from config.settings import (
+    COIN_DOWNLOAD_URLS,
+    DOWNLOADS_DIR,
+    MAX_DAILY_FILES_PER_COIN
+)
+from config.coin_definitions import coin_columns
 from core.logger import log_message
+
+
+def generate_test_csv():
+    """Create a test CSV using the first two addresses from funded lists."""
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    test_csv_path = os.path.join(DOWNLOADS_DIR, "test_alerts.csv")
+
+    if os.path.exists(test_csv_path):
+        return test_csv_path
+
+    headers = [
+        "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
+        "doge_C", "doge_U", "bch_C", "bch_U", "eth", "dash_C", "dash_U",
+        "rvn_C", "rvn_U", "pep_C", "pep_U", "private_key",
+        "compressed_address", "uncompressed_address", "batch_id", "index"
+    ]
+
+    row = {h: "" for h in headers}
+    row.update({
+        "original_seed": "TESTSEED",
+        "hex_key": "DEADBEEF",
+        "private_key": "TESTPRIV",
+        "compressed_address": "TESTCOMP",
+        "uncompressed_address": "TESTUNCOMP",
+        "batch_id": "0",
+        "index": "0",
+    })
+
+    found_any = False
+    for coin in coin_columns.keys():
+        file_path = os.path.join(DOWNLOADS_DIR, f"{coin}_funded.txt")
+        if not os.path.exists(file_path):
+            continue
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                lines = [ln.strip() for ln in f if ln.strip()][:2]
+                if lines:
+                    row[f"{coin}_C"] = lines[0]
+                    row[f"{coin}_U"] = lines[1] if len(lines) > 1 else lines[0]
+                    found_any = True
+        except Exception as exc:
+            log_message(f"⚠️ Failed reading {file_path}: {exc}", "WARN")
+
+    if not found_any:
+        log_message("⚠️ No funded address files found for test CSV", "WARN")
+        return None
+
+    try:
+        with open(test_csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            writer.writerow(row)
+        log_message(f"📝 Generated test CSV at {test_csv_path}")
+    except Exception as e:
+        log_message(f"❌ Failed to write test CSV: {e}", "ERROR")
+
+    return test_csv_path
 
 def download_and_compare_address_lists():
     """
@@ -18,6 +81,13 @@ def download_and_compare_address_lists():
     for coin, url in COIN_DOWNLOAD_URLS.items():
         try:
             now = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+            today_prefix = datetime.utcnow().strftime("%Y-%m-%d")
+            pattern_today = os.path.join(
+                DOWNLOADS_DIR, f"{coin.upper()}_addresses_{today_prefix}*.txt"
+            )
+            if glob(pattern_today):
+                log_message(f"{coin.upper()}: Already downloaded today, skipping")
+                continue
             output_full = os.path.join(DOWNLOADS_DIR, f"{coin.upper()}_addresses_{now}.txt")
             output_unique = os.path.join(DOWNLOADS_DIR, f"{coin.upper()}_UNIQUE_addresses_{now}.txt")
             gz_path = output_full + ".gz"
@@ -79,3 +149,6 @@ def download_and_compare_address_lists():
 
         except Exception as e:
             log_message(f"❌ {coin.upper()} download failed: {str(e)}", "ERROR")
+
+    # Generate test CSV even when downloads are skipped
+    generate_test_csv()
