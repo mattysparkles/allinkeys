@@ -92,6 +92,7 @@ def _default_metrics():
         "vanity_current_batch_id": 0,
         "vanity_next_batch_id": 0,
         "vanity_batch_size": 1024000,
+        "vanity_progress_percent": 0,
         "vanity_max_file_size_mb": 500,
         "vanity_custom_flags": "",
         "backlog_files_queued": 0,
@@ -173,11 +174,25 @@ def increment_metric(key, amount=1):
 
 
 def get_current_metrics():
-    if not metrics_lock:
+    """Return a snapshot of the shared metrics dict.
+
+    Previously this returned an empty dict when ``metrics_lock`` was ``None``.
+    In practice the lock is not always created when an external manager is
+    supplied via :func:`init_shared_metrics`.  The dashboard GUI relies on this
+    function to retrieve live stats, so returning ``{}`` resulted in every
+    metric showing "N/A".  We now gracefully handle the no-lock case and still
+    return the current metrics.
+    """
+    global metrics
+    if metrics is None:
         return {}
-    with metrics_lock:
+    if metrics_lock:
+        with metrics_lock:
+            metrics["thread_health_flags"] = THREAD_HEALTH.copy()
+            return dict(metrics)
+    else:
         metrics["thread_health_flags"] = THREAD_HEALTH.copy()
-        return metrics.copy()
+        return dict(metrics)
 
 
 def load_checkpoint_file(filepath=None):
