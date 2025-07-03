@@ -13,7 +13,7 @@ AllInKeys is a high-performance Python-based tool designed for Bitcoin and altco
 Install Python 3.9+ and Git first, then:
 
 ```bash
-git clone https://github.com/YourUsername/allinkeys.git
+git clone https://github.com/mattysparkles/allinkeys.git
 cd allinkeys
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
