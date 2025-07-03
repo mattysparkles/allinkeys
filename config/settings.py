@@ -10,17 +10,25 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
 ...
 # ===================== 🔌 SYSTEM PATHS ==========================
+# Root of the repository
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Directory for all log files
 LOG_DIR = os.path.join(BASE_DIR, "logs")
+# Location where generated CSVs are stored
 CSV_DIR = os.path.join(BASE_DIR, "output", "csv")
+# Duplicate to keep legacy modules working
 CSV_OUTPUT_DIR = os.path.join(BASE_DIR, "output", "csv")
+# Location for downloaded funded address lists
 DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
 FULL_DIR = os.path.join(DOWNLOADS_DIR, "full")
 UNIQUE_DIR = os.path.join(DOWNLOADS_DIR, "unique")
+# Where matches and encrypted alerts are archived
 MATCHES_DIR = os.path.join(BASE_DIR, "matches")
 VANITY_OUTPUT_DIR = os.path.join(BASE_DIR, "vanity_output")
+# Local audio clips for alerts
 SOUND_CLIPS_DIR = os.path.join(BASE_DIR, "alerts", "sounds")
 CHECKPOINT_PATH = os.path.join(LOG_DIR, "restore_checkpoint.json")
+# Track which CSVs have been processed
 CHECKED_CSV_LOG = os.path.join(LOG_DIR, "checked_csvs.txt")
 RECHECKED_CSV_LOG = os.path.join(LOG_DIR, "rechecked_csvs.txt")
 # Alias for backward compatibility
@@ -44,18 +52,28 @@ CHECKPOINT_ENABLED = True
 CHECKPOINT_INTERVAL_SECONDS = 180
 MAX_CHECKPOINT_HISTORY = 3
 
+# Toggle dashboard process
 ENABLE_DASHBOARD = True
+# Launch the Tkinter GUI
 ENABLE_GUI = True
+# Enable GPU/CPU key generation
 ENABLE_KEYGEN = True
+# Allow match alerts to be sent
 ENABLE_ALERTS = True
+# Convert vanitysearch backlog to CSV
 ENABLE_BACKLOG_CONVERSION = True
+# Initial day-one funded address checks
 ENABLE_DAY_ONE_CHECKS = True
 ENABLE_DAY_ONE_CHECK = ENABLE_DAY_ONE_CHECKS # Alias do not change
+# Daily recheck of unique CSVs
 ENABLE_DAILY_UNIQUE_RECHECK = True
 ENABLE_UNIQUE_RECHECK = ENABLE_DAILY_UNIQUE_RECHECK # Alias do not change
+# Derive altcoin addresses from generated keys
 ENABLE_ALTCOIN_DERIVATION = True
 ENABLE_SEED_VERIFICATION = False
+# Encrypt matches using PGP
 ENABLE_PGP = True
+# Auto resume on crash/startup
 ENABLE_AUTO_RESUME_DEPENDENCIES = True
 
 # === Reference to this config file
@@ -415,6 +433,7 @@ STATS_TO_DISPLAY = {
 DASHBOARD_REFRESH_INTERVAL = 1.0  # seconds between dashboard UI updates
 
 # ===================== 📋 DASHBOARD METRIC LABELS ==========================
+# Human friendly names for dashboard metrics
 METRICS_LABEL_MAP = {
     "keys_per_sec": "Keys/sec",
     "batches_completed": "Batches Completed",

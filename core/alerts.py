@@ -4,6 +4,8 @@ import csv
 import time
 import smtplib
 import requests
+import threading
+import queue
 try:
     from twilio.rest import Client
 except Exception:  # handle missing twilio dependency
@@ -18,7 +20,7 @@ from datetime import datetime
 from config.settings import ENABLE_ALERTS, DOWNLOADS_DIR
 from config.coin_definitions import coin_columns
 from config.settings import (
-    ALERT_SOUND_FILE, ALERT_POPUP_COLOR_1, ALERT_PHRASE,
+    ALERT_SOUND_FILE, ALERT_POPUP_COLOR_1, ALERT_POPUP_COLOR_2, ALERT_PHRASE,
     ENABLE_DESKTOP_WINDOW_ALERT, ENABLE_AUDIO_ALERT_LOCAL,
     ALERT_EMAIL_ENABLED, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD,
     ALERT_EMAIL_TO, ALERT_EMAIL_FROM,
@@ -44,6 +46,31 @@ ALERT_FLAGS = {
     "ENABLE_HOME_ASSISTANT_ALERT": ENABLE_HOME_ASSISTANT_ALERT,
     "ENABLE_CLOUD_UPLOAD": ENABLE_CLOUD_UPLOAD,
 }
+
+# Queue for sequential audio alerts
+audio_queue = queue.Queue()
+audio_thread = None
+
+
+def _audio_worker():
+    """Background worker that plays alert sounds sequentially."""
+    from playsound import playsound  # imported here to avoid startup cost
+    while True:
+        sound = audio_queue.get()
+        if sound is None:
+            break
+        try:
+            playsound(sound)
+            log_message("🔔 Played alert sound.")
+        except Exception as exc:
+            log_message(f"❌ Audio alert error: {exc}", "ERROR")
+
+
+def _start_audio_worker():
+    global audio_thread
+    if audio_thread is None or not audio_thread.is_alive():
+        audio_thread = threading.Thread(target=_audio_worker, daemon=True)
+        audio_thread.start()
 
 
 def set_alert_flag(name, value):
@@ -112,17 +139,14 @@ def alert_match(match_data, test_mode=False):
         except Exception as e:
             log_message(f"❌ Desktop alert error: {e}", "ERROR")
 
-    # 🔊 Sound Alert
-    if ALERT_FLAGS.get("ENABLE_AUDIO_ALERT_LOCAL"):
-        try:
-            from playsound import playsound
-            if os.path.exists(ALERT_SOUND_FILE):
-                playsound(ALERT_SOUND_FILE)
-                log_message("🔔 Played alert sound.", "INFO")
-            else:
-                log_message(f"❌ Sound file not found: {ALERT_SOUND_FILE}", "ERROR")
-        except Exception as e:
-            log_message(f"❌ Audio alert error: {e}", "ERROR")
+    # 🔊 Sound Alert (queued)
+    skip_audio = test_mode or os.path.basename(csv_file) == "test_alerts.csv"
+    if ALERT_FLAGS.get("ENABLE_AUDIO_ALERT_LOCAL") and not skip_audio:
+        if os.path.exists(ALERT_SOUND_FILE):
+            _start_audio_worker()
+            audio_queue.put(ALERT_SOUND_FILE)
+        else:
+            log_message(f"❌ Sound file not found: {ALERT_SOUND_FILE}", "ERROR")
 
     # 📧 Email Alert
     if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED"):

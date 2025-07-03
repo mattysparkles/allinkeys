@@ -53,9 +53,9 @@ def open_new_csv_writer(index):
     Opens a new CSV writer in a batch-named subfolder with appropriate headers.
     Returns: (file_handle, csv_writer, full_path)
     """
-    folder = os.path.join(CSV_DIR, f"Batch_{index:03d}")
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, f"keys_batch_{index:05d}.csv")
+    # CSVs are now written directly to CSV_DIR to simplify downstream checks
+    os.makedirs(CSV_DIR, exist_ok=True)
+    path = os.path.join(CSV_DIR, f"keys_batch_{index:05d}.csv")
     f = open(path, "w", newline='', encoding="utf-8", buffering=1)
     writer = csv.DictWriter(f, fieldnames=[
         "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
