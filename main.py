@@ -8,7 +8,7 @@ import signal
 import argparse
 import multiprocessing
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from multiprocessing import Process, set_start_method
 import psutil
 
@@ -33,6 +33,11 @@ except ImportError:
 
 # Track disk free space to estimate fill ETA
 _last_disk_check = (time.time(), psutil.disk_usage('/').free)
+# Track backlog processing for ETA calculations
+_backlog_total_time = 0.0
+_backlog_processed = 0
+_backlog_last_ts = time.time()
+_last_csv_created = 0
 
 from config.settings import (
     ENABLE_CHECKPOINT_RESTORE, CHECKPOINT_INTERVAL_SECONDS,
@@ -52,6 +57,7 @@ from core.dashboard import (
     _default_metrics,
     init_shared_metrics,
     init_dashboard_manager,
+    get_current_metrics,
 )
 from ui.dashboard_gui import start_dashboard
 from core.gpu_selector import assign_gpu_roles
@@ -94,7 +100,7 @@ def metrics_updater(shared_metrics=None):
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
-    global _last_disk_check
+    global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
     while True:
         try:
             from core.keygen import keygen_progress
@@ -156,23 +162,51 @@ def metrics_updater(shared_metrics=None):
                 try:
                     for platform in cl.get_platforms():
                         for device in platform.get_devices():
-                            already = any(info.get('name').startswith(device.name) for info in stats['gpu_stats'].values())
+                            already = any(
+                                info.get('name', '').startswith(device.name)
+                                for info in stats['gpu_stats'].values()
+                            )
                             if already:
                                 continue
                             name = device.name
+                            roles = []
                             if next_id in vs_ids:
-                                name += " (VS)"
+                                roles.append('VS')
                             if next_id in ad_ids:
-                                name += " (AD)"
+                                roles.append('AD')
+                            if roles:
+                                name += " (" + "/".join(roles) + ")"
+                            usage = 'Active (No Stats)' if roles else 'N/A'
                             stats['gpu_stats'][f"GPU{next_id}"] = {
                                 'name': name,
-                                'usage': 'Active (No Stats)' if next_id in ad_ids | vs_ids else 'N/A',
+                                'usage': usage,
                                 'vram': 'Unavailable',
                                 'temp': 'N/A',
                             }
                             next_id += 1
                 except Exception as e:
                     log_message(f"⚠️ OpenCL GPU read failed: {e}", "WARNING")
+
+            # ----- Backlog ETA Calculation -----
+            metrics_snapshot = get_current_metrics()
+            queue_count = metrics_snapshot.get('backlog_files_queued', 0)
+            created_today = metrics_snapshot.get('csv_created_today', 0)
+            if created_today > _last_csv_created:
+                _backlog_total_time += now - _backlog_last_ts
+                _backlog_processed += created_today - _last_csv_created
+                _backlog_last_ts = now
+                _last_csv_created = created_today
+
+            if _backlog_processed > 0:
+                avg_time = _backlog_total_time / _backlog_processed
+                stats['backlog_avg_time'] = f"{avg_time:.2f}s"
+                if queue_count > 0:
+                    eta_sec = avg_time * queue_count
+                    stats['backlog_eta'] = str(timedelta(seconds=int(eta_sec)))
+                else:
+                    stats['backlog_eta'] = 'N/A'
+            else:
+                stats['backlog_eta'] = 'N/A'
 
             prog = keygen_progress()
             stats['keys_generated_lifetime'] = prog['total_keys_generated']
