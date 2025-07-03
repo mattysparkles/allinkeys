@@ -154,9 +154,9 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
 def check_csvs_day_one(shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
-        print("[debug] Shared metrics initialized for", __name__)
+        print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     address_sets = {}
     for coin, columns in coin_columns.items():
         full_path = os.path.join(FULL_DIR, f"{coin}_funded.txt")
@@ -177,9 +177,9 @@ def check_csvs_day_one(shared_metrics=None):
 def check_csvs(shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
-        print("[debug] Shared metrics initialized for", __name__)
+        print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     address_sets = {}
     for coin, columns in coin_columns.items():
         unique_path = os.path.join(UNIQUE_DIR, f"{coin}_UNIQUE.txt")

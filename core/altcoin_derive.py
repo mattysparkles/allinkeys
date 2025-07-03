@@ -456,9 +456,9 @@ from core.dashboard import init_shared_metrics
 def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
-        print("[debug] Shared metrics initialized for", __name__)
+        print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     """
     Monitors VANITY_OUTPUT_DIR for .txt files and converts them to CSV using GPU derivation.
     Handles multiple files in parallel using ThreadPoolExecutor.
@@ -544,12 +544,12 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None)
 if __name__ == "__main__":
     from multiprocessing import freeze_support, Event
     freeze_support()
-    print("🧪 Running one-shot altcoin conversion test (dev mode)...")
+    print("🧪 Running one-shot altcoin conversion test (dev mode)...", flush=True)
     shared_event = Event()
     try:
         start_altcoin_conversion_process(shared_event)
         while True:
             time.sleep(10)
     except KeyboardInterrupt:
-        print("🛑 Ctrl+C received. Stopping...")
+        print("🛑 Ctrl+C received. Stopping...", flush=True)
         shared_event.set()

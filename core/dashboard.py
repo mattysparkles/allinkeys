@@ -129,7 +129,7 @@ def update_dashboard_stat(key, value=None, retries=5, delay=0.2):
     for attempt in range(retries):
         if metrics is None:
             if attempt == retries - 1:
-                print(f"⚠️ update_dashboard_stat skipped after {retries} tries: metrics is None (key={key})")
+                print(f"⚠️ update_dashboard_stat skipped after {retries} tries: metrics is None (key={key})", flush=True)
                 return
             time.sleep(delay)
         else:
@@ -141,14 +141,14 @@ def update_dashboard_stat(key, value=None, retries=5, delay=0.2):
         else:
             _update_stat_internal(key, value)
     except Exception as e:
-        print(f"❌ update_dashboard_stat failed on key: {key} | {e}")
+        print(f"❌ update_dashboard_stat failed on key: {key} | {e}", flush=True)
         traceback.print_exc()
 
 
 def _update_stat_internal(key, value=None):
     global metrics
     if metrics is None:
-        print(f"⚠️ _update_stat_internal skipped: metrics is None (key={key})")
+        print(f"⚠️ _update_stat_internal skipped: metrics is None (key={key})", flush=True)
         return
 
     if isinstance(key, dict) and value is None:
@@ -156,7 +156,7 @@ def _update_stat_internal(key, value=None):
             metrics[k] = v
     else:
         if value is None:
-            print(f"⚠️ update_dashboard_stat('{key}') called without a value. Defaulting to 'N/A'")
+            print(f"⚠️ update_dashboard_stat('{key}') called without a value. Defaulting to 'N/A'", flush=True)
             value = "N/A"
         metrics[key] = value
 
