@@ -19,6 +19,27 @@ from config.coin_definitions import coin_columns
 from core.logger import log_message
 
 
+def parse_address_lines(file_obj):
+    """Yield cleaned addresses from open file object."""
+    for idx, line in enumerate(file_obj):
+        if idx == 0 and line.lower().startswith(("address", "address,balance")):
+            continue
+        addr = line.split(',', 1)[0].strip()
+        if addr:
+            yield addr
+
+
+def clean_address_file(file_path):
+    """Read, clean and overwrite an address file in place."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            addresses = list(parse_address_lines(f))
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(addresses))
+    except Exception as exc:
+        log_message(f"⚠️ Failed to clean {file_path}: {exc}", "WARN")
+
+
 def generate_test_csv():
     """Create a test CSV using the first two addresses from funded lists."""
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
@@ -135,19 +156,23 @@ def download_and_compare_address_lists():
                     f.writelines(filtered)
                 log_message(f"{coin.upper()}: Filtered for addresses starting with '1'")
 
+            # Clean downloaded file to keep addresses only
+            clean_address_file(output_full)
+
             # Compare with previous file
             previous_files = sorted(glob(os.path.join(DOWNLOADS_DIR, f"{coin.upper()}_addresses_*.txt")))
             if len(previous_files) >= 2:
                 previous_file = previous_files[-2]
                 with open(previous_file, 'r', encoding='utf-8') as f:
-                    old_addrs = set(line.strip() for line in f if line.strip())
+                    old_addrs = set(parse_address_lines(f))
 
                 with open(output_full, 'r', encoding='utf-8') as f:
-                    new_addrs = set(line.strip() for line in f if line.strip())
+                    new_addrs = set(parse_address_lines(f))
 
                 newly_funded = sorted(new_addrs - old_addrs)
                 with open(output_unique, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(newly_funded))
+                clean_address_file(output_unique)
                 log_message(f"{coin.upper()}: {len(newly_funded)} new addresses written to {output_unique}")
 
             # Prune excess files

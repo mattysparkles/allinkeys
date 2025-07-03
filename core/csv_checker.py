@@ -8,6 +8,7 @@ import csv
 import time
 import io
 from datetime import datetime
+import json
 from config.settings import (
     CSV_DIR, UNIQUE_DIR, FULL_DIR, CHECKED_CSV_LOG, RECHECKED_CSV_LOG,
     ENABLE_ALERTS, ENABLE_PGP, PGP_PUBLIC_KEY_PATH
@@ -18,6 +19,7 @@ from core.alerts import alert_match
 from core.logger import log_message
 from utils.pgp_utils import encrypt_with_pgp
 from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics
+from utils.balance_checker import fetch_live_balance
 
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
 os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
@@ -109,6 +111,17 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
                                 alert_match({"encrypted": encrypted})
                             else:
                                 alert_match(match_payload)
+
+                            if filename != "test_alerts.csv":
+                                bal = fetch_live_balance(addr, coin)
+                                if bal is not None:
+                                    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+                                    log_message(
+                                        f"🎯 Matched {coin.upper()} address {addr} – Current balance: {bal} {coin.upper()} (fetched at {ts})",
+                                        "ALERT",
+                                    )
+                                else:
+                                    log_message(f"⚠️ Could not fetch balance for {addr}", "WARN")
 
                             new_matches.add(addr)
                             increment_metric("matched_keys", 1)

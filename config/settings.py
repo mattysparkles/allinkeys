@@ -87,6 +87,9 @@ ENABLE_DESKTOP_WINDOW_ALERT = True
 ALERT_POPUP_COLOR_1 = "#FF0000"
 ALERT_POPUP_COLOR_2 = "#000000"
 
+# ===================== 🔗 API KEYS ==========================
+TOKENVIEW_API_KEY = os.getenv("TOKENVIEW_API_KEY", "")
+
 # ===================== 🌍 COIN SOURCES ==========================
 COIN_DOWNLOAD_URLS = {
     "btc": "http://addresses.loyce.club/Bitcoin_addresses_LATEST.txt.gz",
