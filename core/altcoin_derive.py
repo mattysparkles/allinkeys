@@ -439,12 +439,28 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                 f.flush()
             f.close()
 
-            from core.dashboard import increment_metric
             increment_metric("csv_created_today", 1)
             increment_metric("csv_created_lifetime", 1)
             log_message(f"✅ {os.path.basename(path)} written ({rows_written} rows)", "INFO")
-            for coin, count in address_tally.items():
-                log_message(f"🔢 {coin.upper()}: {count}", "DEBUG")
+            coin_map = {
+                "btc_U": "btc", "btc_C": "btc", "ltc_U": "ltc", "ltc_C": "ltc",
+                "doge_U": "doge", "doge_C": "doge", "bch_U": "bch", "bch_C": "bch",
+                "dash_U": "dash", "dash_C": "dash", "rvn_U": "rvn", "rvn_C": "rvn",
+                "pep_U": "pep", "pep_C": "pep", "eth": "eth"
+            }
+            per_coin = {c: 0 for c in coin_map.values()}
+            for key, count in address_tally.items():
+                coin = coin_map.get(key)
+                if coin:
+                    per_coin[coin] += count
+                log_message(f"🔢 {key.upper()}: {count}", "DEBUG")
+
+            for coin, count in per_coin.items():
+                increment_metric(f"addresses_generated_today.{coin}", count)
+                increment_metric(f"addresses_generated_lifetime.{coin}", count)
+
+            for coin, count in per_coin.items():
+                log_message(f"📈 Generated {count} {coin.upper()} addresses", "DEBUG")
 
             return rows_written
 
