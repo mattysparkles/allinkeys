@@ -174,6 +174,11 @@ def increment_metric(key, amount=1):
             metrics[key] += amount
 
 
+def set_metric(key, value):
+    """Convenience wrapper for updating a single metric key."""
+    update_dashboard_stat(key, value)
+
+
 def get_current_metrics():
     """Return a snapshot of the shared metrics dict.
 

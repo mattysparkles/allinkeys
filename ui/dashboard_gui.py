@@ -333,7 +333,8 @@ class DashboardGUI:
                     widget.config(state="disabled")
                 else:
                     if isinstance(value, dict):
-                        disp = "\n".join(f"{k.upper()}: {v}" for k, v in value.items())
+                        lines = [f"{k.upper()}: {v}" for k, v in value.items()]
+                        disp = "\n".join(lines)
                     else:
                         disp = str(value)
                         if len(disp) > 40:
