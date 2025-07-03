@@ -401,6 +401,7 @@ STATS_TO_DISPLAY = {
     "addresses_checked_today": SHOW_ADDRESS_CHECKED_COUNTS_TODAY,
     "addresses_checked_lifetime": SHOW_ADDRESS_CHECKED_COUNTS_LIFETIME,
     "gpu_stats": True,
+    "last_updated": True,
 }
 # ===================== ⏱️ DASHBOARD REFRESH ==========================
 DASHBOARD_REFRESH_INTERVAL = 1.0  # seconds between dashboard UI updates
@@ -429,6 +430,7 @@ METRICS_LABEL_MAP = {
     "addresses_checked_today": "Addresses Checked Today",
     "addresses_checked_lifetime": "Addresses Checked Lifetime",
     "gpu_stats": "GPU Stats",
+    "last_updated": "Last Updated",
 }
 # ===================== ⚠️ ALERT CONFIG OPTIONS FOR GUI ======================
 ALERT_OPTIONS = {

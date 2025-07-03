@@ -113,6 +113,7 @@ def _default_metrics():
         },
         "pin_reset_required": False,
         "metrics_last_reset": datetime.now().isoformat(),
+        "last_updated": datetime.now().isoformat(),
         "thread_health_flags": THREAD_HEALTH.copy()
     }
 
