@@ -59,10 +59,14 @@ class DashboardGUI:
         self.scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
         self.container = ttk.Frame(self.canvas)
-        self.canvas.create_window((0, 0), window=self.container, anchor="nw")
+        self.container_window = self.canvas.create_window((0, 0), window=self.container, anchor="nw")
         self.container.bind(
             "<Configure>",
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        self.canvas.bind(
+            "<Configure>",
+            lambda e: self.canvas.itemconfig(self.container_window, width=e.width)
         )
 
         # Logo
@@ -81,7 +85,7 @@ class DashboardGUI:
         system_stats = {
             "cpu_usage", "ram_usage", "disk_free_gb", "disk_fill_eta",
             "gpu_stats", "gpu_assignments", "uptime",
-            "vanity_progress_percent", "last_updated", "thread_health_flags",
+            "vanity_progress_percent", "last_updated", "status",
         }
         csv_stats = {
             "csv_checked_today", "csv_rechecked_today",
@@ -138,7 +142,7 @@ class DashboardGUI:
                     pb = ttk.Progressbar(frame, length=150, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
-                elif key in ("gpu_stats", "gpu_assignments", "thread_health_flags", "matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
+                elif key in ("gpu_stats", "gpu_assignments", "status", "matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
                     txt = tk.Text(frame, height=4, width=45, wrap="word", font=FONT)
                     txt.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     txt.configure(state="disabled")
@@ -301,7 +305,7 @@ class DashboardGUI:
                 elif isinstance(widget, tk.Text):
                     lines = []
                     if isinstance(value, dict):
-                        if key == "thread_health_flags":
+                        if key == "status":
                             name_map = {
                                 "keygen": "Keygen",
                                 "csv_check": "CSV Checker",

@@ -408,7 +408,7 @@ STATS_TO_DISPLAY = {
     "backlog_current_file": SHOW_PROGRESS_BAR_CURRENT_BACKLOG_FILENAME_PROCESSING,
     "gpu_stats": True,
     "gpu_assignments": True,
-    "thread_health_flags": True,
+    "status": True,
     "last_updated": True,
 }
 # ===================== ⏱️ DASHBOARD REFRESH ==========================
@@ -442,7 +442,7 @@ METRICS_LABEL_MAP = {
     "backlog_current_file": "Current Backlog File",
     "gpu_stats": "GPU Stats",
     "gpu_assignments": "GPU Assignments",
-    "thread_health_flags": "Module Status",
+    "status": "Module Status",
     "last_updated": "Last Updated",
 }
 # ===================== ⚠️ ALERT CONFIG OPTIONS FOR GUI ======================
