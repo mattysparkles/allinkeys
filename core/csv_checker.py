@@ -86,7 +86,15 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
                 return []
 
             known = {c for cols in coin_columns.values() for c in cols}
-            unknown = [h for h in headers if h not in known]
+            safe_metadata_columns = {
+                'original_seed', 'hex_key', 'private_key',
+                'compressed_address', 'uncompressed_address',
+                'batch_id', 'index'
+            }
+            unknown = [
+                h for h in headers
+                if h not in known and h not in safe_metadata_columns
+            ]
             if unknown:
                 log_message(f"⚠️ Unknown columns in {filename}: {unknown}", "WARN")
 

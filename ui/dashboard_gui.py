@@ -48,6 +48,7 @@ class DashboardGUI:
         self.prev_values = {}
         self.checkbox_vars = {}
         self.module_states = {}
+        self.module_buttons = {}
         self.create_widgets()
         self.refresh_loop()
 
@@ -67,6 +68,10 @@ class DashboardGUI:
         self.canvas.bind(
             "<Configure>",
             lambda e: self.canvas.itemconfig(self.container_window, width=e.width)
+        )
+        self.canvas.bind_all(
+            "<MouseWheel>",
+            lambda e: self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
         )
 
         # Logo
@@ -186,11 +191,12 @@ class DashboardGUI:
             alert_frame = ttk.LabelFrame(self.container, text="Alert Methods")
             alert_frame.pack(fill="x", padx=10, pady=(5, 0))
 
+            from core.alerts import ALERT_FLAGS
             third = (len(ALERT_CHECKBOXES) + 2) // 3
             for idx, option in enumerate(ALERT_CHECKBOXES):
                 row = idx // third
                 col = (idx % third) * 2
-                var = tk.BooleanVar(value=ALERT_CHECKBOXES.get(option, False))
+                var = tk.BooleanVar(value=ALERT_FLAGS.get(option, False))
                 self.checkbox_vars[option] = var
                 cb = tk.Checkbutton(alert_frame, text=option, variable=var,
                                      command=lambda o=option, v=var: self.update_alert_option(o, v.get()))
@@ -226,7 +232,7 @@ class DashboardGUI:
     def _group_button_set(self, parent, label, col):
         sub_frame = ttk.LabelFrame(parent, text=label)
         sub_frame.grid(row=0, column=col, padx=5)
-        self.module_states[label] = "running"
+        self.module_states[label] = "stopped"
 
         btns = {}
 
@@ -264,6 +270,7 @@ class DashboardGUI:
         btns["Resume"].grid(row=1, column=1)
 
         update_buttons()
+        self.module_buttons[label] = update_buttons
 
     def update_alert_option(self, name, value):
         try:
@@ -282,7 +289,18 @@ class DashboardGUI:
 
     def refresh_loop(self):
         try:
+            from core import alerts
             stats = get_current_metrics()
+            # Sync checkbox states with ALERT_FLAGS
+            for name, var in self.checkbox_vars.items():
+                var.set(alerts.ALERT_FLAGS.get(name, False))
+            # Update module button states based on metrics
+            status_dict = stats.get("status", {})
+            for label, updater in self.module_buttons.items():
+                state = "running" if status_dict.get(label.lower(), False) else "stopped"
+                if self.module_states.get(label) != state:
+                    self.module_states[label] = state
+                    updater()
             for key, widget in self.metrics.items():
                 # Compute backlog progress locally
                 if key == "backlog_progress":
@@ -428,6 +446,7 @@ class DashboardGUI:
 
 def start_dashboard():
     root = ttk.Window(themename="darkly")
+    root.geometry("900x600")
     app = DashboardGUI(root)
     root.mainloop()
 

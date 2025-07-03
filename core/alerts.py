@@ -262,15 +262,19 @@ def trigger_startup_alerts():
     """
     Sends startup alerts through configured channels.
     """
+    from core.dashboard import set_metric
     if not ENABLE_ALERTS:
         log_message("🚫 Alerts are disabled in config.", "INFO")
         return
 
+    set_metric("status.alerts", True)
     try:
         log_message("📣 Triggering startup alerts...", "INFO")
         # Extend to alert channels if needed
     except Exception as e:
         log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
+    finally:
+        set_metric("status.alerts", False)
 
 
 def run_test_alerts_from_csv(csv_path=None):

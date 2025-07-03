@@ -59,60 +59,69 @@ def start_backlog_conversion_loop():
     Monitors VANITY_OUTPUT_DIR for .txt files and converts to .csv if ready.
     Skips files that are too small, locked, or recently modified.
     """
+    from core.dashboard import set_metric, init_shared_metrics
+    try:
+        init_shared_metrics(None)
+    except Exception:
+        pass
+    set_metric("status.backlog", True)
     log_message("📦 Backlog converter started...", "INFO")
 
-    while True:
-        try:
-            files = [f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")]
-            for file in files:
-                txt_path = os.path.join(VANITY_OUTPUT_DIR, file)
-                output_path = os.path.join(CSV_DIR, file.replace(".txt", ".csv"))
+    try:
+        while True:
+            try:
+                files = [f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")]
+                for file in files:
+                    txt_path = os.path.join(VANITY_OUTPUT_DIR, file)
+                    output_path = os.path.join(CSV_DIR, file.replace(".txt", ".csv"))
 
-                too_small = os.path.getsize(txt_path) < SKIP_FILE_MIN_SIZE_KB * 1024
-                locked = is_file_locked(txt_path)
-                writing = is_file_still_writing(txt_path)
+                    too_small = os.path.getsize(txt_path) < SKIP_FILE_MIN_SIZE_KB * 1024
+                    locked = is_file_locked(txt_path)
+                    writing = is_file_still_writing(txt_path)
 
-                if file == SKIP_FILE_NAME:
-                    log_message(f"⏭️ Skipping {file} (explicit skip file)", "DEBUG")
-                    continue
-
-                if too_small:
-                    log_message(f"⏭️ Skipping {file} (too small: {os.path.getsize(txt_path)} bytes)", "DEBUG")
-                if locked:
-                    log_message(f"⏭️ Skipping {file} (file is locked)", "DEBUG")
-                if writing:
-                    log_message(f"⏭️ Skipping {file} (file may still be writing)", "DEBUG")
-
-                if too_small or locked or writing:
-                    continue  # Skip conversion
-
-                try:
-                    batch_id = int(file.split("_")[1]) if "part_" in file and "_seed_" in file else None
-                except Exception as e:
-                    log_message(f"⚠️ Could not extract batch_id from {file}: {safe_str(e)}", "WARNING")
-                    batch_id = None
-
-                if not os.path.exists(output_path):
-                    log_message(f"🔁 Converting {file} to CSV...", "INFO")
-                    try:
-                        convert_txt_to_csv(txt_path, batch_id)
-                    except Exception as inner:
-                        log_message(f"❌ Conversion failed for {file}: {safe_str(inner)}", "ERROR")
+                    if file == SKIP_FILE_NAME:
+                        log_message(f"⏭️ Skipping {file} (explicit skip file)", "DEBUG")
                         continue
 
-                    if os.path.exists(output_path):
+                    if too_small:
+                        log_message(f"⏭️ Skipping {file} (too small: {os.path.getsize(txt_path)} bytes)", "DEBUG")
+                    if locked:
+                        log_message(f"⏭️ Skipping {file} (file is locked)", "DEBUG")
+                    if writing:
+                        log_message(f"⏭️ Skipping {file} (file may still be writing)", "DEBUG")
+
+                    if too_small or locked or writing:
+                        continue  # Skip conversion
+
+                    try:
+                        batch_id = int(file.split("_")[1]) if "part_" in file and "_seed_" in file else None
+                    except Exception as e:
+                        log_message(f"⚠️ Could not extract batch_id from {file}: {safe_str(e)}", "WARNING")
+                        batch_id = None
+
+                    if not os.path.exists(output_path):
+                        log_message(f"🔁 Converting {file} to CSV...", "INFO")
                         try:
-                            os.remove(txt_path)
-                            log_message(f"🧹 Deleted original .txt file: {file}", "INFO")
-                        except Exception as e:
-                            log_message(f"⚠️ Could not delete {file}: {safe_str(e)}", "WARNING")
-                else:
-                    log_message(f"✅ Already converted: {file}", "DEBUG")
+                            convert_txt_to_csv(txt_path, batch_id)
+                        except Exception as inner:
+                            log_message(f"❌ Conversion failed for {file}: {safe_str(inner)}", "ERROR")
+                            continue
 
-        except Exception as e:
-            log_message(f"❌ Error in backlog conversion loop: {safe_str(e)}", "ERROR")
+                        if os.path.exists(output_path):
+                            try:
+                                os.remove(txt_path)
+                                log_message(f"🧹 Deleted original .txt file: {file}", "INFO")
+                            except Exception as e:
+                                log_message(f"⚠️ Could not delete {file}: {safe_str(e)}", "WARNING")
+                    else:
+                        log_message(f"✅ Already converted: {file}", "DEBUG")
 
-        time.sleep(10)
+            except Exception as e:
+                log_message(f"❌ Error in backlog conversion loop: {safe_str(e)}", "ERROR")
+
+            time.sleep(10)
+    finally:
+        set_metric("status.backlog", False)
 
 
 # === Legacy Parsing Mode (Rarely Used) ===
