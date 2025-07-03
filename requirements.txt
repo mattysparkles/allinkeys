@@ -5,6 +5,7 @@ pgpy
 pynvml
 openpyxl
 tk
+ttkbootstrap
 tqdm
 pyttsx3
 pyaudio
