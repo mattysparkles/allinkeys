@@ -19,7 +19,6 @@ import time
 import threading
 import multiprocessing
 import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 _gpu_logged_once = False
 

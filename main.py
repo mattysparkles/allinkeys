@@ -12,7 +12,14 @@ from datetime import datetime
 from multiprocessing import Process, set_start_method
 import psutil
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+# Wrap stdout once with UTF-8 encoding if not already wrapped
+if not isinstance(sys.stdout, io.TextIOWrapper):
+    sys.stdout = io.TextIOWrapper(
+        sys.stdout.buffer,
+        encoding='utf-8',
+        errors='replace',
+        line_buffering=True
+    )
 
 try:
     import GPUtil
