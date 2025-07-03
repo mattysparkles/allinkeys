@@ -18,6 +18,11 @@ try:
 except ImportError:
     GPUtil = None
 
+try:
+    import pyopencl as cl
+except ImportError:
+    cl = None
+
 # Track disk free space to estimate fill ETA
 _last_disk_check = (time.time(), psutil.disk_usage('/').free)
 
@@ -31,7 +36,7 @@ from config.settings import (
 
 from core.logger import log_message
 from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint
-from core.downloader import download_and_compare_address_lists
+from core.downloader import download_and_compare_address_lists, generate_test_csv
 from core.csv_checker import check_csvs_day_one, check_csvs
 from core.alerts import trigger_startup_alerts, alert_match
 from core.dashboard import (
@@ -121,6 +126,24 @@ def metrics_updater(shared_metrics=None):
                 except Exception as e:
                     log_message(f"⚠️ GPU read failed: {e}", "WARNING")
 
+            next_id = len(stats['gpu_stats'])
+            if cl:
+                try:
+                    for platform in cl.get_platforms():
+                        for device in platform.get_devices():
+                            # Skip if already added via GPUtil
+                            already = any(info.get('name') == device.name for info in stats['gpu_stats'].values())
+                            if already:
+                                continue
+                            stats['gpu_stats'][f"GPU{next_id}"] = {
+                                'name': device.name,
+                                'usage': 'N/A',
+                                'vram': 'N/A'
+                            }
+                            next_id += 1
+                except Exception as e:
+                    log_message(f"⚠️ OpenCL GPU read failed: {e}", "WARNING")
+
             prog = keygen_progress()
             stats['keys_generated_lifetime'] = prog['total_keys_generated']
             stats['uptime'] = prog['elapsed_time']
@@ -166,6 +189,9 @@ def run_all_processes(args, shutdown_event, shared_metrics):
         else:
             log_message("🌐 Downloading address lists...")
             download_and_compare_address_lists()
+    else:
+        # Ensure test CSV exists even when downloads are skipped
+        generate_test_csv()
 
     if ENABLE_KEYGEN and not args.headless:
         try:
