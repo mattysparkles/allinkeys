@@ -63,7 +63,11 @@ from core.dashboard import init_shared_metrics
 
 
 def metrics_updater(shared_metrics=None):
-    init_shared_metrics(shared_metrics)
+    try:
+        init_shared_metrics(shared_metrics)
+        print("[debug] Shared metrics initialized for", __name__)
+    except Exception as e:
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
     while True:
         try:
             from core.keygen import keygen_progress
@@ -102,7 +106,11 @@ def run_all_processes(args, shutdown_event, shared_metrics):
     from core.backlog import start_backlog_conversion_loop  # Optional non-GPU parser
     from core.dashboard import init_shared_metrics
 
-    init_shared_metrics(shared_metrics)
+    try:
+        init_shared_metrics(shared_metrics)
+        print("[debug] Shared metrics initialized for", __name__)
+    except Exception as e:
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
     processes = []
 
     if ENABLE_CHECKPOINT_RESTORE:
@@ -169,7 +177,11 @@ def run_allinkeys(args):
     manager = multiprocessing.Manager()
     shared_metrics = manager.dict({k: (manager.dict(v) if isinstance(v, dict) else v)
                                    for k, v in _default_metrics().items()})
-    init_shared_metrics(shared_metrics)
+    try:
+        init_shared_metrics(shared_metrics)
+        print("[debug] Shared metrics initialized for", __name__)
+    except Exception as e:
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
 
     if args.match_test:
         test_data = {
