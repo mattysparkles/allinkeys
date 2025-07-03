@@ -43,6 +43,7 @@ def _default_metrics():
         "batches_completed": 0,
         "current_seed_index": 0,
         "vanitysearch_speed": "0 MKeys/s",
+        "keys_per_sec": 0,
         "active_gpus": {},
         "csv_checked_today": 0,
         "csv_checked_lifetime": 0,
@@ -99,6 +100,13 @@ def _default_metrics():
         "backlog_eta": "N/A",
         "backlog_avg_time": "N/A",
         "backlog_current_file": "",
+        "status": {
+            "keygen": False,
+            "altcoin": False,
+            "csv_check": False,
+            "csv_recheck": False,
+        },
+        "global_run_state": "running",
         "auto_resume_enabled": True,
         "alerts_enabled": {
             "email": False,
@@ -177,6 +185,26 @@ def increment_metric(key, amount=1):
 def set_metric(key, value):
     """Convenience wrapper for updating a single metric key."""
     update_dashboard_stat(key, value)
+
+
+def get_metric(key, default=None):
+    """Retrieve a metric value in a threadsafe way."""
+    global metrics
+    if metrics is None:
+        return default
+    if metrics_lock:
+        with metrics_lock:
+            if "." in key:
+                top, sub = key.split(".", 1)
+                if isinstance(metrics.get(top), dict):
+                    return metrics[top].get(sub, default)
+            return metrics.get(key, default)
+    else:
+        if "." in key:
+            top, sub = key.split(".", 1)
+            if isinstance(metrics.get(top), dict):
+                return metrics[top].get(sub, default)
+        return metrics.get(key, default)
 
 
 def get_current_metrics():
