@@ -454,7 +454,11 @@ from core.dashboard import init_shared_metrics
 
 
 def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
-    init_shared_metrics(shared_metrics)
+    try:
+        init_shared_metrics(shared_metrics)
+        print("[debug] Shared metrics initialized for", __name__)
+    except Exception as e:
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
     """
     Monitors VANITY_OUTPUT_DIR for .txt files and converts them to CSV using GPU derivation.
     Handles multiple files in parallel using ThreadPoolExecutor.
