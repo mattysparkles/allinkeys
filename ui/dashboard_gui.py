@@ -7,8 +7,10 @@ from tkinter import messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 
-# Add the config directory to the path for importing settings
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config')))
+# Add repo root so `config` package can be imported reliably
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, BASE_DIR)
+sys.path.insert(0, os.path.join(BASE_DIR, 'config'))
 import settings
 
 from config.settings import (
@@ -36,7 +38,6 @@ from config.settings import (
 )
 
 from core.dashboard import get_current_metrics, reset_all_metrics
-from core.alerts import set_alert_flag, run_test_alerts_from_csv
 
 
 class DashboardGUI:
@@ -51,15 +52,28 @@ class DashboardGUI:
         self.refresh_loop()
 
     def create_widgets(self):
+        # ----- Scrollable container -----
+        self.canvas = tk.Canvas(self.master, borderwidth=0)
+        self.scrollbar = ttk.Scrollbar(self.master, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.container = ttk.Frame(self.canvas)
+        self.canvas.create_window((0, 0), window=self.container, anchor="nw")
+        self.container.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
         # Logo
         if LOGO_ASCII:
-            logo_frame = ttk.Frame(self.master)
+            logo_frame = ttk.Frame(self.container)
             logo_frame.pack(fill="x", padx=10)
             logo_label = tk.Label(logo_frame, text=LOGO_ASCII, font=("Courier", 7), justify="center")
             logo_label.pack()
 
         # Metric Panels
-        self.section_frame = ttk.Frame(self.master)
+        self.section_frame = ttk.Frame(self.container)
         self.section_frame.pack(fill="both", expand=True, padx=10)
 
         grouped_keys = {
@@ -154,12 +168,15 @@ class DashboardGUI:
                 pb = ttk.Progressbar(frame, length=150, mode="determinate")
                 pb.grid(row=bp_row, column=1, sticky="w", padx=2, pady=2)
                 self.metrics["backlog_progress"] = pb
+                pct = tk.Label(frame, text="0%", font=FONT)
+                pct.grid(row=bp_row + 1, column=1, sticky="w", padx=2, pady=(0, 2))
+                self.metrics["backlog_percent"] = pct
 
             row += 1
 
         # Alert Configuration Checkboxes
         if SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES:
-            alert_frame = ttk.LabelFrame(self.master, text="Alert Methods")
+            alert_frame = ttk.LabelFrame(self.container, text="Alert Methods")
             alert_frame.pack(fill="x", padx=10, pady=(5, 0))
 
             third = (len(ALERT_CHECKBOXES) + 2) // 3
@@ -176,7 +193,7 @@ class DashboardGUI:
 
         # Control Panel
         if SHOW_CONTROL_BUTTONS_MAIN:
-            btn_frame = ttk.Frame(self.master)
+            btn_frame = ttk.Frame(self.container)
             btn_frame.pack(pady=10)
             col = 0
             for label in ["vanity", "altcoin", "csv_check", "csv_recheck", "alerts"]:
@@ -185,7 +202,7 @@ class DashboardGUI:
                     col += 1
 
         # Config and Reset
-        bottom_frame = ttk.Frame(self.master)
+        bottom_frame = ttk.Frame(self.container)
         bottom_frame.pack(pady=10)
 
         if OPEN_CONFIG_FILE_FROM_DASHBOARD:
@@ -197,7 +214,7 @@ class DashboardGUI:
 
         if SHOW_DONATION_MESSAGE:
             msg = "If you find AllInKeys useful, consider donating! BTC: 18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y"
-            ttk.Label(self.master, text=msg, font=("Segoe UI", 9, "italic"), foreground="gray").pack(pady=(0, 10))
+            ttk.Label(self.container, text=msg, font=("Segoe UI", 9, "italic"), foreground="gray").pack(pady=(0, 10))
 
     def _group_button_set(self, parent, label, col):
         sub_frame = ttk.LabelFrame(parent, text=label)
@@ -235,7 +252,11 @@ class DashboardGUI:
         update_buttons()
 
     def update_alert_option(self, name, value):
-        set_alert_flag(name, value)
+        try:
+            from core import alerts
+            alerts.set_alert_flag(name, value)
+        except Exception as e:
+            print(f"[GUI] Failed to update alert option: {e}")
 
     def _flash_widget(self, widget, color="#228B22", duration=500):
         orig = widget.cget("background") if hasattr(widget, "cget") else None
@@ -256,6 +277,9 @@ class DashboardGUI:
                     total = backlog + rechecked
                     progress = (rechecked / total) * 100 if total > 0 else 100
                     widget["value"] = progress
+                    pct_lbl = self.metrics.get("backlog_percent")
+                    if pct_lbl:
+                        pct_lbl.config(text=f"{progress:.1f}%")
                     continue
 
                 value = stats.get(key, "N/A")
@@ -292,13 +316,15 @@ class DashboardGUI:
                                 lines.append(f"{title} → {name}")
                         else:
                             for gid, info in value.items():
+                                name = info.get('name', '')
                                 usage = info.get('usage', 'N/A')
                                 vram = info.get('vram', 'N/A')
-                                temp = info.get('temp')
-                                line = f"{gid} {info.get('name','')} {usage} {vram}"
+                                temp = info.get('temp', 'N/A')
+                                lines.append(f"{gid}: {name}")
+                                detail = f"  Usage: {usage}  VRAM: {vram}"
                                 if temp and temp != 'N/A':
-                                    line += f" {temp}"
-                                lines.append(line.strip())
+                                    detail += f"  Temp: {temp}"
+                                lines.append(detail)
                     else:
                         lines.append(str(value))
                     widget.config(state="normal")
@@ -306,10 +332,12 @@ class DashboardGUI:
                     widget.insert("end", "\n".join(lines) or "N/A")
                     widget.config(state="disabled")
                 else:
-                    text_value = value if not isinstance(value, dict) else ", ".join(f"{k}:{v}" for k,v in value.items())
-                    disp = str(text_value)
-                    if len(disp) > 30:
-                        disp = disp[:27] + "..."
+                    if isinstance(value, dict):
+                        disp = "\n".join(f"{k.upper()}: {v}" for k, v in value.items())
+                    else:
+                        disp = str(value)
+                        if len(disp) > 40:
+                            disp = disp[:37] + "..."
                     if self.prev_values.get(key) != disp:
                         self._flash_widget(widget)
                     self.prev_values[key] = disp
@@ -319,15 +347,26 @@ class DashboardGUI:
         self.master.after(int(DASHBOARD_REFRESH_INTERVAL * 1000), self.refresh_loop)
 
     def open_config_file(self):
-        if os.path.exists(CONFIG_FILE_PATH):
-            subprocess.Popen(["notepad.exe", CONFIG_FILE_PATH])
-        else:
+        if not os.path.exists(CONFIG_FILE_PATH):
             messagebox.showerror("Missing Config", f"Could not find: {CONFIG_FILE_PATH}")
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(CONFIG_FILE_PATH)
+            elif sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", CONFIG_FILE_PATH])
+            else:
+                subprocess.Popen(["xdg-open", CONFIG_FILE_PATH])
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
     def test_alerts(self):
-        from core.alerts import run_test_alerts_from_csv
-        run_test_alerts_from_csv()
-        messagebox.showinfo("Test Alerts", "Test alerts dispatched. Check logs for details.")
+        try:
+            from core.alerts import run_test_alerts_from_csv
+            run_test_alerts_from_csv()
+            messagebox.showinfo("Test Alerts", "Test alerts dispatched. Check logs for details.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to send test alerts: {e}")
 
     def reset_metrics_prompt(self):
         resp = messagebox.askyesno("Reset Metrics", "Include lifetime stats?")

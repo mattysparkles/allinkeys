@@ -4,7 +4,10 @@ import csv
 import time
 import smtplib
 import requests
-from twilio.rest import Client
+try:
+    from twilio.rest import Client
+except Exception:  # handle missing twilio dependency
+    Client = None
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from Crypto.PublicKey import RSA
@@ -152,7 +155,7 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ Telegram alert error: {e}", "ERROR")
 
     # 📱 SMS via Twilio
-    if ALERT_FLAGS.get("ENABLE_SMS_ALERT"):
+    if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client:
         try:
             if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_SMS]):
                 raise ValueError("Missing Twilio SMS credentials")
@@ -163,7 +166,7 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ SMS alert error: {e}", "ERROR")
 
     # 📞 Phone Call Alert
-    if ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT"):
+    if ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT") and Client:
         try:
             if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_CALL]):
                 raise ValueError("Missing Twilio call credentials")
