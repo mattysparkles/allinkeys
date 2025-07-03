@@ -19,7 +19,7 @@ import time
 import threading
 import multiprocessing
 import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 _gpu_logged_once = False
 
@@ -440,7 +440,10 @@ def convert_txt_to_csv(input_txt_path, batch_id):
                 f.flush()
             f.close()
 
-            log_message(f"✅ {rows_written} rows written to {path}", "INFO")
+            from core.dashboard import increment_metric
+            increment_metric("csv_created_today", 1)
+            increment_metric("csv_created_lifetime", 1)
+            log_message(f"✅ {os.path.basename(path)} written ({rows_written} rows)", "INFO")
             for coin, count in address_tally.items():
                 log_message(f"🔢 {coin.upper()}: {count}", "DEBUG")
 

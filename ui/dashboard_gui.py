@@ -44,6 +44,7 @@ class DashboardGUI:
         self.master = master
         self.master.title("ALLINKEYS Live Dashboard")
         self.metrics = {}
+        self.prev_values = {}
         self.checkbox_vars = {}
         self.module_states = {}
         self.create_widgets()
@@ -97,14 +98,14 @@ class DashboardGUI:
                 col += 1
                 row = 0
             frame = ttk.LabelFrame(self.section_frame, text=group)
-            frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
+            frame.grid(row=row, column=col, padx=5, pady=10, sticky="nsew")
             self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
             SMALL_FONT_KEYS = {
                 "addresses_checked_today", "addresses_checked_lifetime",
                 "matches_found_today", "matches_found_lifetime"
             }
             for i, (key, label_text) in enumerate(keys):
-                ttk.Label(frame, text=label_text + ":").grid(row=i, column=0, sticky="e")
+                ttk.Label(frame, text=label_text + ":", width=25, anchor="w").grid(row=i, column=0, sticky="w")
                 if key not in ("cpu_usage", "ram_usage") and any(x in key for x in ["usage", "percent", "progress", "keys_per_sec"]):
                     pb = ttk.Progressbar(frame, length=100, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w")
@@ -117,7 +118,7 @@ class DashboardGUI:
                 else:
                     # Higher contrast text for dark theme
                     font_opt = ("Segoe UI", 8) if key in SMALL_FONT_KEYS else None
-                    lbl = tk.Label(frame, text="Loading...", fg="white", font=font_opt,
+                    lbl = tk.Label(frame, text="Loading...", fg="white", bg="#222222", font=font_opt,
                                    wraplength=300, justify="left")
                     lbl.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = lbl
@@ -203,6 +204,14 @@ class DashboardGUI:
     def update_alert_option(self, name, value):
         set_alert_flag(name, value)
 
+    def _flash_widget(self, widget, color="#228B22", duration=500):
+        orig = widget.cget("background") if hasattr(widget, "cget") else None
+        try:
+            widget.config(background=color)
+            widget.after(duration, lambda: widget.config(background=orig))
+        except Exception:
+            pass
+
     def refresh_loop(self):
         try:
             stats = get_current_metrics()
@@ -228,6 +237,9 @@ class DashboardGUI:
                         disp = str(text_value)
                         if len(disp) > 30:
                             disp = disp[:27] + "..."
+                        if self.prev_values.get(key) != disp:
+                            self._flash_widget(widget)
+                        self.prev_values[key] = disp
                         widget.config(text=disp)
         except Exception as e:
             print(f"[Dashboard Error] {e}")
