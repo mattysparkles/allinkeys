@@ -69,16 +69,26 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
     check_type = "Recheck" if recheck else "First Check"
     rows_scanned = 0
     start_time = time.perf_counter()
+
+    if not os.path.exists(csv_file) or os.path.getsize(csv_file) == 0:
+        log_message(f"❌ {filename} is empty or missing. Skipping.", "ERROR")
+        return []
+
     log_message(f"🔎 Checking {filename}...")
 
     try:
-        with open(csv_file, newline="", encoding="utf-8") as f:
+        with open(csv_file, newline="", encoding="utf-8", errors="replace") as f:
             reader = csv.DictReader(f)
             headers = reader.fieldnames
 
             if not headers:
                 log_message(f"❌ {filename} missing headers. Skipping file.", "ERROR")
                 return []
+
+            known = {c for cols in coin_columns.values() for c in cols}
+            unknown = [h for h in headers if h not in known]
+            if unknown:
+                log_message(f"⚠️ Unknown columns in {filename}: {unknown}", "WARN")
 
             for coin, columns in coin_columns.items():
                 missing = [col for col in columns if col not in headers]
@@ -243,3 +253,15 @@ def inject_test_match(test_address="1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"):
     matches = check_csv_against_addresses(test_csv, {test_address})
     os.remove(test_csv)
     return bool(matches)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Check generated CSVs for funded addresses")
+    parser.add_argument("--recheck", action="store_true", help="Run unique recheck mode")
+    args = parser.parse_args()
+
+    if args.recheck:
+        check_csvs()
+    else:
+        check_csvs_day_one()

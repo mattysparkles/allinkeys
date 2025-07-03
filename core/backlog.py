@@ -134,9 +134,9 @@ def get_file_size_mb(path):
 
 
 def open_new_csv_writer(index):
-    folder = os.path.join(CSV_BASE_DIR, f"Batch_{index:03d}")
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, f"keys_batch_{index:05d}.csv")
+    """Create a new CSV writer directly in CSV_BASE_DIR."""
+    os.makedirs(CSV_BASE_DIR, exist_ok=True)
+    path = os.path.join(CSV_BASE_DIR, f"keys_batch_{index:05d}.csv")
     f = open(path, "w", newline='', encoding="utf-8")
     writer = csv.DictWriter(f, fieldnames=[
         "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
