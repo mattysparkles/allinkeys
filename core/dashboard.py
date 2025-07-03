@@ -81,6 +81,7 @@ def _default_metrics():
         "cpu_usage": "0%",
         "ram_usage": "0 GB / 0 GB (0%)",
         "gpu_stats": {},
+        "gpu_assignments": {"vanitysearch": "N/A", "altcoin_derive": "N/A"},
         "state": "Initializing",
         "active_processes": [],
         "csv_check_queue": [],

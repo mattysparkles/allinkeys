@@ -86,76 +86,108 @@ def alert_match(match_data, test_mode=False):
     if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT"):
         try:
             import tkinter as tk
-            win = tk.Tk()
+            root = tk.Tk()
+            root.withdraw()
+            win = tk.Toplevel(root)
             win.title(alert_type)
-            win.geometry("500x150")
             win.configure(bg=ALERT_POPUP_COLOR_1)
-            tk.Label(win, text=ALERT_PHRASE, font=("Courier", 16), fg="white", bg=ALERT_POPUP_COLOR_1).pack(expand=True)
-            win.after(8000, lambda: win.destroy())
-            win.mainloop()
+            win.geometry("520x180")
+            lbl = tk.Label(win, text=ALERT_PHRASE, fg="white", bg=ALERT_POPUP_COLOR_1,
+                            font=("Helvetica", 18, "bold"))
+            lbl.pack(expand=True, fill="both", padx=10, pady=10)
+
+            def flash():
+                new = ALERT_POPUP_COLOR_2 if win["bg"] == ALERT_POPUP_COLOR_1 else ALERT_POPUP_COLOR_1
+                win.configure(bg=new)
+                lbl.configure(bg=new)
+                win.after(500, flash)
+
+            flash()
+            win.after(8000, root.destroy)
+            root.mainloop()
+            log_message("✅ Desktop popup displayed.", "INFO")
         except Exception as e:
-            print(f"Window alert error: {e}")
+            log_message(f"❌ Desktop alert error: {e}", "ERROR")
 
     # 🔊 Sound Alert
     if ALERT_FLAGS.get("ENABLE_AUDIO_ALERT_LOCAL"):
         try:
-            import playsound
-            playsound.playsound(ALERT_SOUND_FILE)
+            from playsound import playsound
+            if os.path.exists(ALERT_SOUND_FILE):
+                playsound(ALERT_SOUND_FILE)
+                log_message("🔔 Played alert sound.", "INFO")
+            else:
+                log_message(f"❌ Sound file not found: {ALERT_SOUND_FILE}", "ERROR")
         except Exception as e:
-            print(f"Sound alert error: {e}")
+            log_message(f"❌ Audio alert error: {e}", "ERROR")
 
     # 📧 Email Alert
     if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED"):
         try:
             msg = MIMEMultipart()
             msg['From'] = ALERT_EMAIL_FROM
-            msg['To'] = ALERT_EMAIL_TO
+            msg['To'] = ",".join(ALERT_EMAIL_TO) if isinstance(ALERT_EMAIL_TO, list) else ALERT_EMAIL_TO
             msg['Subject'] = f"AllInKeys {alert_type}"
             msg.attach(MIMEText(match_text, 'plain'))
 
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
             server.starttls()
             server.login(SMTP_USERNAME, SMTP_PASSWORD)
             server.send_message(msg)
             server.quit()
+            log_message("📧 Email alert sent.", "INFO")
         except Exception as e:
-            print(f"Email alert error: {e}")
+            log_message(f"❌ Email alert error: {e}", "ERROR")
 
     # 📲 Telegram Alert
     if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT"):
         try:
             telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text})
+            resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
+            if resp.ok and resp.json().get("ok"):
+                log_message("📨 Telegram alert sent.", "INFO")
+            else:
+                log_message(f"❌ Telegram alert failed: {resp.text}", "ERROR")
         except Exception as e:
-            print(f"Telegram alert error: {e}")
+            log_message(f"❌ Telegram alert error: {e}", "ERROR")
 
     # 📱 SMS via Twilio
     if ALERT_FLAGS.get("ENABLE_SMS_ALERT"):
         try:
+            if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_SMS]):
+                raise ValueError("Missing Twilio SMS credentials")
             client = Client(TWILIO_SID, TWILIO_TOKEN)
             client.messages.create(body=match_text, from_=TWILIO_FROM, to=TWILIO_TO_SMS)
+            log_message("📲 SMS alert sent.", "INFO")
         except Exception as e:
-            print(f"SMS alert error: {e}")
+            log_message(f"❌ SMS alert error: {e}", "ERROR")
 
     # 📞 Phone Call Alert
     if ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT"):
         try:
+            if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_CALL]):
+                raise ValueError("Missing Twilio call credentials")
             client = Client(TWILIO_SID, TWILIO_TOKEN)
             client.calls.create(
                 url='http://demo.twilio.com/docs/voice.xml',
                 from_=TWILIO_FROM,
                 to=TWILIO_TO_CALL
             )
+            log_message("📞 Phone call alert triggered.", "INFO")
         except Exception as e:
-            print(f"Phone call error: {e}")
+            log_message(f"❌ Phone call error: {e}", "ERROR")
 
     # 💬 Discord Alert
     if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):
         try:
             data = {"content": match_text}
-            requests.post(DISCORD_WEBHOOK_URL, json=data)
+            resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
+            if resp.ok:
+                log_message("💬 Discord alert sent.", "INFO")
+            else:
+                log_message(f"❌ Discord alert failed: {resp.text}", "ERROR")
         except Exception as e:
-            print(f"Discord alert error: {e}")
+            log_message(f"❌ Discord alert error: {e}", "ERROR")
 
     # 🏠 Home Assistant Alert
     if ALERT_FLAGS.get("ENABLE_HOME_ASSISTANT_ALERT"):
@@ -165,9 +197,13 @@ def alert_match(match_data, test_mode=False):
                 "Content-Type": "application/json"
             }
             payload = {"message": match_text}
-            requests.post(HOME_ASSISTANT_URL, headers=headers, json=payload)
+            resp = requests.post(HOME_ASSISTANT_URL, headers=headers, json=payload, timeout=10)
+            if resp.ok:
+                log_message("🏠 Home Assistant alert sent.", "INFO")
+            else:
+                log_message(f"❌ Home Assistant alert failed: {resp.text}", "ERROR")
         except Exception as e:
-            print(f"Home Assistant alert error: {e}")
+            log_message(f"❌ Home Assistant alert error: {e}", "ERROR")
 
     # ☁ PGP + Cloud Upload
     if ALERT_FLAGS.get("ENABLE_CLOUD_UPLOAD"):
@@ -181,16 +217,18 @@ def alert_match(match_data, test_mode=False):
             full_path = os.path.join(MATCH_LOG_DIR, timestamp_filename)
             with open(full_path, 'w') as f:
                 f.write(b64_encrypted)
+            log_message("☁ Encrypted match uploaded locally.", "INFO")
         except Exception as e:
-            print(f"PGP/cloud upload error: {e}")
+            log_message(f"❌ PGP/cloud upload error: {e}", "ERROR")
 
     # 📜 Local match log
     try:
         log_path = os.path.join(MATCH_LOG_DIR, "matches.log")
         with open(log_path, 'a') as f:
             f.write(f"{match_text}\n\n")
+        log_message("📝 Match written to local log.", "INFO")
     except Exception as e:
-        print(f"Local match logging error: {e}")
+        log_message(f"❌ Local match logging error: {e}", "ERROR")
 
 
 def trigger_startup_alerts():
