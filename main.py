@@ -146,6 +146,7 @@ def metrics_updater(shared_metrics=None):
                             'name': name,
                             'usage': usage,
                             'vram': vram,
+                            'temp': f"{gpu.temperature}°C" if hasattr(gpu, 'temperature') else 'N/A',
                         }
                 except Exception as e:
                     log_message(f"⚠️ GPU read failed: {e}", "WARNING")
@@ -166,7 +167,8 @@ def metrics_updater(shared_metrics=None):
                             stats['gpu_stats'][f"GPU{next_id}"] = {
                                 'name': name,
                                 'usage': 'Active (No Stats)' if next_id in ad_ids | vs_ids else 'N/A',
-                                'vram': 'Unavailable'
+                                'vram': 'Unavailable',
+                                'temp': 'N/A',
                             }
                             next_id += 1
                 except Exception as e:
