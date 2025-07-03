@@ -222,33 +222,53 @@ class DashboardGUI:
                         widget["value"] = float(value.strip('%')) if isinstance(value, str) else float(value)
                     except:
                         widget["value"] = 0
-                else:
-                    if key in ("gpu_stats", "gpu_assignments", "thread_health_flags") and isinstance(value, dict):
-                        lines = []
+                elif isinstance(widget, tk.Text):
+                    lines = []
+                    if isinstance(value, dict):
                         if key == "thread_health_flags":
+                            name_map = {
+                                "keygen": "Keygen",
+                                "csv_check": "CSV Checker",
+                                "csv_recheck": "CSV Recheck",
+                                "altcoin": "Altcoin",
+                                "alerts": "Alerts",
+                                "checkpoint": "Checkpoint",
+                                "metrics": "Metrics",
+                            }
                             for mod, running in value.items():
+                                title = name_map.get(mod, mod.title())
                                 icon = "✅" if running else "❌"
-                                lines.append(f"{mod.capitalize()}: {'Running' if running else 'Stopped'} {icon}")
+                                state = "Running" if running else "Stopped"
+                                lines.append(f"{title}: {state} {icon}")
                         elif key == "gpu_assignments":
+                            name_map = {
+                                "vanitysearch": "VanitySearch",
+                                "altcoin_derive": "Altcoin Derive",
+                            }
                             for mod, name in value.items():
-                                lines.append(f"{mod.replace('_',' ').title()} → {name}")
+                                title = name_map.get(mod, mod.replace('_', ' ').title())
+                                lines.append(f"{title} → {name}")
                         else:
                             for gid, info in value.items():
-                                line = f"{gid} {info.get('name','')} {info.get('usage','N/A')} {info.get('vram','N/A')}"
+                                usage = info.get('usage', 'N/A')
+                                vram = info.get('vram', 'N/A')
+                                line = f"{gid} {info.get('name','')} {usage} {vram}"
                                 lines.append(line.strip())
-                        widget.config(state="normal")
-                        widget.delete("1.0", "end")
-                        widget.insert("end", "\n".join(lines) or "N/A")
-                        widget.config(state="disabled")
                     else:
-                        text_value = value if not isinstance(value, dict) else ", ".join(f"{k}:{v}" for k,v in value.items())
-                        disp = str(text_value)
-                        if len(disp) > 30:
-                            disp = disp[:27] + "..."
-                        if self.prev_values.get(key) != disp:
-                            self._flash_widget(widget)
-                        self.prev_values[key] = disp
-                        widget.config(text=disp)
+                        lines.append(str(value))
+                    widget.config(state="normal")
+                    widget.delete("1.0", "end")
+                    widget.insert("end", "\n".join(lines) or "N/A")
+                    widget.config(state="disabled")
+                else:
+                    text_value = value if not isinstance(value, dict) else ", ".join(f"{k}:{v}" for k,v in value.items())
+                    disp = str(text_value)
+                    if len(disp) > 30:
+                        disp = disp[:27] + "..."
+                    if self.prev_values.get(key) != disp:
+                        self._flash_widget(widget)
+                    self.prev_values[key] = disp
+                    widget.config(text=disp)
         except Exception as e:
             print(f"[Dashboard Error] {e}")
         self.master.after(int(DASHBOARD_REFRESH_INTERVAL * 1000), self.refresh_loop)
