@@ -28,10 +28,14 @@ def generate_test_csv():
         return test_csv_path
 
     headers = [
-        "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
-        "doge_C", "doge_U", "bch_C", "bch_U", "eth", "dash_C", "dash_U",
-        "rvn_C", "rvn_U", "pep_C", "pep_U", "private_key",
-        "compressed_address", "uncompressed_address", "batch_id", "index"
+        "original_seed", "hex_key",
+        "btc_C", "btc_U", "ltc_C", "ltc_U",
+        "doge_C", "doge_U", "bch_C", "bch_U",
+        "eth",  # ✅ Single address format for ETH
+        "dash_C", "dash_U", "rvn_C", "rvn_U",
+        "pep_C", "pep_U",
+        "private_key", "compressed_address", "uncompressed_address",
+        "batch_id", "index"
     ]
 
     row = {h: "" for h in headers}
@@ -56,8 +60,11 @@ def generate_test_csv():
             with open(file_path, "r", encoding="utf-8") as f:
                 lines = [ln.strip() for ln in f if ln.strip()][:2]
                 if lines:
-                    row[f"{coin}_C"] = lines[0]
-                    row[f"{coin}_U"] = lines[1] if len(lines) > 1 else lines[0]
+                    if coin == "eth":
+                        row["eth"] = lines[0]
+                    else:
+                        row[f"{coin}_C"] = lines[0]
+                        row[f"{coin}_U"] = lines[1] if len(lines) > 1 else lines[0]
                     found_any = True
         except Exception as exc:
             log_message(f"⚠️ Failed reading {file_path}: {exc}", "WARN")
