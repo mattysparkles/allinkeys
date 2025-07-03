@@ -14,14 +14,15 @@ def run_vanitysearch(start, end, pattern, output_dir, batch_id):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = f"vanity_output_batch{batch_id}_{timestamp}"
 
-        cmd = [
-            VANITYSEARCH_PATH,
-            "-s", hex_seed,
-            "-gpu",
-            "-o", current_output_path,
-            "-u", VANITY_PATTERN
-        ]
-
+    hex_seed = hex(start)[2:]
+    current_output_path = os.path.join(output_dir, f"{base_name}_part{file_index:03d}.txt")
+    cmd = [
+        "vanitysearch",
+        "-s", hex_seed,
+        "-gpu",
+        "-o", current_output_path,
+        "-u", pattern
+    ]
 
     process = subprocess.Popen(
         cmd,

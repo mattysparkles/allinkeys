@@ -384,8 +384,8 @@ STATS_TO_DISPLAY = {
     "current_seed_index": SHOW_CURRENT_SEED_INDEX,
     "avg_keygen_time": SHOW_AVG_KEYGEN_FILE_TIME,
     "avg_check_time": SHOW_AVG_CSV_FILE_CHECK_TIME,
-    "cpu_usage_percent": SHOW_CPU_USAGE_STATS,
-    "ram_usage_gb": SHOW_RAM_USAGE_STATS,
+    "cpu_usage": SHOW_CPU_USAGE_STATS,
+    "ram_usage": SHOW_RAM_USAGE_STATS,
     "disk_free_gb": SHOW_DISK_FREE,
     "disk_fill_eta": SHOW_DISK_FREE,
     "uptime": SHOW_UPTIME,
@@ -400,6 +400,7 @@ STATS_TO_DISPLAY = {
     "csv_created_lifetime": SHOW_CSV_CREATED_LIFETIME,
     "addresses_checked_today": SHOW_ADDRESS_CHECKED_COUNTS_TODAY,
     "addresses_checked_lifetime": SHOW_ADDRESS_CHECKED_COUNTS_LIFETIME,
+    "gpu_stats": True,
 }
 # ===================== ⏱️ DASHBOARD REFRESH ==========================
 DASHBOARD_REFRESH_INTERVAL = 1.0  # seconds between dashboard UI updates
@@ -411,8 +412,8 @@ METRICS_LABEL_MAP = {
     "current_seed_index": "Current Seed Index",
     "avg_keygen_time": "Avg. Keygen Time",
     "avg_check_time": "Avg. CSV Check Time",
-    "cpu_usage_percent": "CPU Usage",
-    "ram_usage_gb": "RAM Usage (GB)",
+    "cpu_usage": "CPU Usage",
+    "ram_usage": "RAM Usage",
     "disk_free_gb": "Disk Free (GB)",
     "disk_fill_eta": "Disk Fill ETA",
     "uptime": "Uptime",
@@ -427,6 +428,7 @@ METRICS_LABEL_MAP = {
     "vanity_progress_percent": "Keygen Progress %",
     "addresses_checked_today": "Addresses Checked Today",
     "addresses_checked_lifetime": "Addresses Checked Lifetime",
+    "gpu_stats": "GPU Stats",
 }
 # ===================== ⚠️ ALERT CONFIG OPTIONS FOR GUI ======================
 ALERT_OPTIONS = {
