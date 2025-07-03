@@ -199,6 +199,8 @@ def start_keygen_loop(shared_metrics=None):
                 KEYGEN_STATE["index_within_batch"] = index
                 KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
                 set_metric("current_seed_index", index)
+                progress = round((index / float(BATCH_SIZE)) * 100, 2)
+                set_metric("vanity_progress_percent", progress)
 
                 run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index)
 
@@ -216,6 +218,7 @@ def start_keygen_loop(shared_metrics=None):
 
             KEYGEN_STATE["batch_id"] += 1
             KEYGEN_STATE["index_within_batch"] = 0
+            set_metric("vanity_progress_percent", 0)
             save_checkpoint({
                 "batch_id": KEYGEN_STATE["batch_id"],
                 "index_within_batch": 0,
