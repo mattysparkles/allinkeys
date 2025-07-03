@@ -81,6 +81,11 @@ def save_checkpoint_loop():
 
 
 from core.dashboard import init_shared_metrics
+from core.gpu_selector import (
+    get_vanitysearch_gpu_ids,
+    get_altcoin_gpu_ids,
+    get_gpu_assignments,
+)
 
 
 def metrics_updater(shared_metrics=None):
@@ -117,11 +122,6 @@ def metrics_updater(shared_metrics=None):
                 'gpu_stats': {},
                 'gpu_assignments': get_gpu_assignments(),
             }
-            from core.gpu_selector import (
-                get_vanitysearch_gpu_ids,
-                get_altcoin_gpu_ids,
-                get_gpu_assignments,
-            )
             vs_ids = set(get_vanitysearch_gpu_ids())
             ad_ids = set(get_altcoin_gpu_ids())
 
@@ -134,7 +134,7 @@ def metrics_updater(shared_metrics=None):
                             vram = f"{gpu.memoryUsed/1024:.1f}GB / {gpu.memoryTotal/1024:.1f}GB"
                         except Exception:
                             usage = "N/A"
-                            vram = "N/A"
+                            vram = "Unavailable"
                         name = gpu.name
                         if gpu.id in vs_ids:
                             name += " (VS)"
@@ -166,7 +166,7 @@ def metrics_updater(shared_metrics=None):
                             stats['gpu_stats'][f"GPU{next_id}"] = {
                                 'name': name,
                                 'usage': 'Active (No Stats)' if next_id in ad_ids | vs_ids else 'N/A',
-                                'vram': 'N/A'
+                                'vram': 'Unavailable'
                             }
                             next_id += 1
                 except Exception as e:
