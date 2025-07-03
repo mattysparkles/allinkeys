@@ -110,13 +110,14 @@ class DashboardGUI:
                     pb.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = pb
                 elif key == "gpu_stats":
-                    lbl = ttk.Label(frame, text="Loading...", foreground="white")
-                    lbl.grid(row=i, column=1, sticky="w")
-                    self.metrics[key] = lbl
+                    txt = tk.Text(frame, height=3, width=35, wrap="word")
+                    txt.grid(row=i, column=1, sticky="w")
+                    txt.configure(state="disabled")
+                    self.metrics[key] = txt
                 else:
                     # Higher contrast text for dark theme
                     font_opt = ("Segoe UI", 8) if key in SMALL_FONT_KEYS else None
-                    lbl = ttk.Label(frame, text="Loading...", foreground="white", font=font_opt)
+                    lbl = ttk.Label(frame, text="Loading...", foreground="white", font=font_opt, wraplength=280, justify="left")
                     lbl.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = lbl
             row += 1
@@ -215,10 +216,18 @@ class DashboardGUI:
                     if key == "gpu_stats" and isinstance(value, dict):
                         lines = []
                         for gid, info in value.items():
-                            lines.append(f"GPU{gid} {info['name']} {info['usage']} {info['vram']}")
-                        widget.config(text="; ".join(lines) or "N/A")
+                            line = f"{gid} {info.get('name','')} {info.get('usage','N/A')} {info.get('vram','N/A')}"
+                            lines.append(line.strip())
+                        widget.config(state="normal")
+                        widget.delete("1.0", "end")
+                        widget.insert("end", "\n".join(lines) or "N/A")
+                        widget.config(state="disabled")
                     else:
-                        widget.config(text=value)
+                        text_value = value if not isinstance(value, dict) else ", ".join(f"{k}:{v}" for k,v in value.items())
+                        disp = str(text_value)
+                        if len(disp) > 30:
+                            disp = disp[:27] + "..."
+                        widget.config(text=disp)
         except Exception as e:
             print(f"[Dashboard Error] {e}")
         self.master.after(int(DASHBOARD_REFRESH_INTERVAL * 1000), self.refresh_loop)

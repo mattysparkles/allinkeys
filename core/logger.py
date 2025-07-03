@@ -56,10 +56,10 @@ def log_message(message, level="INFO"):
     # Print to console with fallback if terminal encoding breaks
     if LOG_TO_CONSOLE and level_severity(level) >= level_severity(LOG_LEVEL):
         try:
-            print(timestamped)
+            print(timestamped, flush=True)
         except UnicodeEncodeError:
             fallback = timestamped.encode("ascii", errors="replace").decode()
-            print(fallback)
+            print(fallback, flush=True)
 
     # Write to file (UTF-8 with emoji-safe fallback)
     if LOG_TO_FILE and level in LOG_FILE_PATHS:
@@ -68,6 +68,6 @@ def log_message(message, level="INFO"):
                 f.write(timestamped + "\n")
         except Exception as e:
             try:
-                print(f"[ERROR] Failed to write log: {e}")
+                print(f"[ERROR] Failed to write log: {e}", flush=True)
             except UnicodeEncodeError:
-                print("[ERROR] Failed to write log: <encoding issue>")
+                print("[ERROR] Failed to write log: <encoding issue>", flush=True)

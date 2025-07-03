@@ -46,14 +46,14 @@ from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated 
 
 
 def display_logo():
-    print(LOGO_ART)
-    print("\nIf you like this software...donate!\n")
-    print("BTC: 18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y")
-    print("LTC: LNmgLkonXtecopmGauqsDFvci4XQTZAWmg")
-    print("DOGE: DPoHJNbYHEuvNHyCFcUnvtTVmRDMNgnAs5")
-    print("XMR: 43DUJ1MA7Mv1n4BTRHemEbDmvYzMysVt2djHnjGzrHZBb4WgMDtQHWh51ZfbcVwHP8We6pML4f1Q7SNEtveYCk4HDdb14ik")
-    print("ETH: 0xCb8B2937D60c47438562A2E53d08B85865B57741")
-    print("PEP: PbCiPTNrYaCgv1aqNCds5n7Q73znGrTkgp\n")
+    print(LOGO_ART, flush=True)
+    print("\nIf you like this software...donate!\n", flush=True)
+    print("BTC: 18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y", flush=True)
+    print("LTC: LNmgLkonXtecopmGauqsDFvci4XQTZAWmg", flush=True)
+    print("DOGE: DPoHJNbYHEuvNHyCFcUnvtTVmRDMNgnAs5", flush=True)
+    print("XMR: 43DUJ1MA7Mv1n4BTRHemEbDmvYzMysVt2djHnjGzrHZBb4WgMDtQHWh51ZfbcVwHP8We6pML4f1Q7SNEtveYCk4HDdb14ik", flush=True)
+    print("ETH: 0xCb8B2937D60c47438562A2E53d08B85865B57741", flush=True)
+    print("PEP: PbCiPTNrYaCgv1aqNCds5n7Q73znGrTkgp\n", flush=True)
 
 
 def save_checkpoint_loop():
@@ -73,9 +73,9 @@ from core.dashboard import init_shared_metrics
 def metrics_updater(shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
-        print("[debug] Shared metrics initialized for", __name__)
+        print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     global _last_disk_check
     while True:
         try:
@@ -107,10 +107,16 @@ def metrics_updater(shared_metrics=None):
                 try:
                     gpus = GPUtil.getGPUs()
                     for gpu in gpus:
-                        stats['gpu_stats'][gpu.id] = {
+                        try:
+                            usage = f"{gpu.load * 100:.0f}%"
+                            vram = f"{gpu.memoryUsed/1024:.1f}GB / {gpu.memoryTotal/1024:.1f}GB"
+                        except Exception:
+                            usage = "N/A"
+                            vram = "N/A"
+                        stats['gpu_stats'][f"GPU{gpu.id}"] = {
                             'name': gpu.name,
-                            'usage': f"{gpu.load * 100:.0f}%",
-                            'vram': f"{gpu.memoryUsed/1024:.1f}GB / {gpu.memoryTotal/1024:.1f}GB"
+                            'usage': usage,
+                            'vram': vram,
                         }
                 except Exception as e:
                     log_message(f"⚠️ GPU read failed: {e}", "WARNING")
@@ -145,9 +151,9 @@ def run_all_processes(args, shutdown_event, shared_metrics):
 
     try:
         init_shared_metrics(shared_metrics)
-        print("[debug] Shared metrics initialized for", __name__)
+        print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     processes = []
 
     if ENABLE_CHECKPOINT_RESTORE:
@@ -162,50 +168,71 @@ def run_all_processes(args, shutdown_event, shared_metrics):
             download_and_compare_address_lists()
 
     if ENABLE_KEYGEN and not args.headless:
-        p = Process(target=start_keygen_loop, args=(shared_metrics,))
-        p.daemon = True
-        p.start()
-        processes.append(p)
-        log_message("🧬 Keygen loop started.", "INFO")
+        try:
+            p = Process(target=start_keygen_loop, args=(shared_metrics,))
+            p.daemon = True
+            p.start()
+            log_message("[Started] Keygen subprocess", "INFO")
+            processes.append(p)
+        except Exception as e:
+            log_message(f"❌ Failed to launch keygen: {e}", "ERROR")
 
     if ENABLE_DAY_ONE_CHECK:
-        p = Process(target=check_csvs_day_one, args=(shared_metrics,))
-        p.daemon = True
-        p.start()
-        processes.append(p)
-        log_message("🧾 Day One CSV check scheduled.", "INFO")
+        try:
+            p = Process(target=check_csvs_day_one, args=(shared_metrics,))
+            p.daemon = True
+            p.start()
+            log_message("[Started] Day One CSV checker", "INFO")
+            processes.append(p)
+        except Exception as e:
+            log_message(f"❌ Failed to start day-one checker: {e}", "ERROR")
 
     if ENABLE_UNIQUE_RECHECK:
-        p = Process(target=check_csvs, args=(shared_metrics,))
-        p.daemon = True
-        p.start()
-        processes.append(p)
-        log_message("🔁 Unique recheck scheduled.", "INFO")
+        try:
+            p = Process(target=check_csvs, args=(shared_metrics,))
+            p.daemon = True
+            p.start()
+            log_message("[Started] Unique recheck", "INFO")
+            processes.append(p)
+        except Exception as e:
+            log_message(f"❌ Failed to start recheck: {e}", "ERROR")
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
-        p = start_altcoin_conversion_process(shutdown_event, shared_metrics)
-        processes.append(p)
-        log_message("📁 Altcoin conversion loop scheduled.", "INFO")
+        try:
+            p = start_altcoin_conversion_process(shutdown_event, shared_metrics)
+            log_message("[Started] Altcoin derive subprocess", "INFO")
+            processes.append(p)
+        except Exception as e:
+            log_message(f"❌ Failed to start altcoin convert: {e}", "ERROR")
 
     if ENABLE_ALERTS:
-        p = Process(target=trigger_startup_alerts)
-        p.daemon = True
-        p.start()
-        processes.append(p)
-        log_message("🚨 Alert system primed.", "INFO")
+        try:
+            p = Process(target=trigger_startup_alerts)
+            p.daemon = True
+            p.start()
+            log_message("[Started] Startup alerts", "INFO")
+            processes.append(p)
+        except Exception as e:
+            log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
 
     if CHECKPOINT_INTERVAL_SECONDS:
-        p = Process(target=save_checkpoint_loop)
+        try:
+            p = Process(target=save_checkpoint_loop)
+            p.daemon = True
+            p.start()
+            log_message("[Started] Checkpoint saver", "INFO")
+            processes.append(p)
+        except Exception as e:
+            log_message(f"❌ Failed to start checkpoint saver: {e}", "ERROR")
+
+    try:
+        p = Process(target=metrics_updater, args=(shared_metrics,))
         p.daemon = True
         p.start()
+        log_message("[Started] Metrics updater", "INFO")
         processes.append(p)
-        log_message("🕒 Checkpoint thread started.", "INFO")
-
-    p = Process(target=metrics_updater, args=(shared_metrics,))
-    p.daemon = True
-    p.start()
-    processes.append(p)
-    log_message("📈 Metrics updater thread launched.")
+    except Exception as e:
+        log_message(f"❌ Failed to launch metrics updater: {e}", "ERROR")
 
     return processes
 
@@ -213,6 +240,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
 def run_allinkeys(args):
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(CSV_DIR, exist_ok=True)
+    os.environ.setdefault("PYOPENCL_COMPILER_OUTPUT", "1")
     display_logo()
 
     assign_gpu_roles()
@@ -227,9 +255,9 @@ def run_allinkeys(args):
     shared_metrics = init_dashboard_manager()
     try:
         init_shared_metrics(shared_metrics)
-        print("[debug] Shared metrics initialized for", __name__)
+        print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 
     if args.match_test:
         test_data = {
@@ -246,7 +274,7 @@ def run_allinkeys(args):
     processes = run_all_processes(args, shutdown_event, shared_metrics)
 
     def shutdown_handler(sig, frame):
-        print("\n🛑 Ctrl+C received. Shutting down gracefully...")
+        print("\n🛑 Ctrl+C received. Shutting down gracefully...", flush=True)
         shutdown_event.set()
         for p in processes:
             if p.is_alive():
@@ -270,7 +298,7 @@ if __name__ == "__main__":
     if not os.path.exists(VANITYSEARCH_PATH):
         raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")
     else:
-        print(f"✅ VanitySearch found: {VANITYSEARCH_PATH}")
+        print(f"✅ VanitySearch found: {VANITYSEARCH_PATH}", flush=True)
 
     parser = argparse.ArgumentParser(description="AllInKeys Modular Runner")
     parser.add_argument("--skip-backlog", action="store_true", help="Skip backlog conversion on startup")
