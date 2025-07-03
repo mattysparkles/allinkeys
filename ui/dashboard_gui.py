@@ -242,6 +242,7 @@ class DashboardGUI:
     def test_alerts(self):
         from core.alerts import run_test_alerts_from_csv
         run_test_alerts_from_csv()
+        messagebox.showinfo("Test Alerts", "Test alerts dispatched. Check logs for details.")
 
     def reset_metrics_prompt(self):
         resp = messagebox.askyesno("Reset Metrics", "Include lifetime stats?")

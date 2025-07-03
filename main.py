@@ -147,6 +147,7 @@ def metrics_updater(shared_metrics=None):
             prog = keygen_progress()
             stats['keys_generated_lifetime'] = prog['total_keys_generated']
             stats['uptime'] = prog['elapsed_time']
+            stats['last_updated'] = datetime.utcnow().strftime('%H:%M:%S')
             try:
                 from config.settings import BATCH_SIZE
                 stats['vanity_progress_percent'] = round(
@@ -270,6 +271,9 @@ def run_allinkeys(args):
     display_logo()
 
     assign_gpu_roles()
+    test_csv = os.path.join(DOWNLOAD_DIR, "test_alerts.csv")
+    if not os.path.exists(test_csv):
+        generate_test_csv()
     shutdown_event = multiprocessing.Event()
 
     # Use dashboard's helper to create a Manager-backed shared metrics dict with

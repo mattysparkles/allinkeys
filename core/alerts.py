@@ -214,8 +214,11 @@ def run_test_alerts_from_csv(csv_path=None):
         csv_path = os.path.join(DOWNLOADS_DIR, "test_alerts.csv")
 
     if not os.path.exists(csv_path):
-        log_message("⚠️ test_alerts.csv not found. Run downloader first.", "WARN")
-        return
+        from core.downloader import generate_test_csv
+        csv_path = generate_test_csv()
+        if not csv_path or not os.path.exists(csv_path):
+            log_message("⚠️ test_alerts.csv not found and could not be generated.", "WARN")
+            return
 
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
