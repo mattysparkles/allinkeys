@@ -114,9 +114,14 @@ def metrics_updater(shared_metrics=None):
                 'ram_usage': f"{vm.used / (1024 ** 3):.1f} GB / {vm.total / (1024 ** 3):.1f} GB ({ram_percent}%)",
                 'disk_free_gb': round(disk_free / (1024 ** 3), 2),
                 'disk_fill_eta': disk_eta,
-                'gpu_stats': {}
+                'gpu_stats': {},
+                'gpu_assignments': get_gpu_assignments(),
             }
-            from core.gpu_selector import get_vanitysearch_gpu_ids, get_altcoin_gpu_ids
+            from core.gpu_selector import (
+                get_vanitysearch_gpu_ids,
+                get_altcoin_gpu_ids,
+                get_gpu_assignments,
+            )
             vs_ids = set(get_vanitysearch_gpu_ids())
             ad_ids = set(get_altcoin_gpu_ids())
 

@@ -110,7 +110,7 @@ class DashboardGUI:
                     pb = ttk.Progressbar(frame, length=100, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = pb
-                elif key == "gpu_stats":
+                elif key in ("gpu_stats", "gpu_assignments", "thread_health_flags"):
                     txt = tk.Text(frame, height=3, width=35, wrap="word")
                     txt.grid(row=i, column=1, sticky="w")
                     txt.configure(state="disabled")
@@ -223,11 +223,19 @@ class DashboardGUI:
                     except:
                         widget["value"] = 0
                 else:
-                    if key == "gpu_stats" and isinstance(value, dict):
+                    if key in ("gpu_stats", "gpu_assignments", "thread_health_flags") and isinstance(value, dict):
                         lines = []
-                        for gid, info in value.items():
-                            line = f"{gid} {info.get('name','')} {info.get('usage','N/A')} {info.get('vram','N/A')}"
-                            lines.append(line.strip())
+                        if key == "thread_health_flags":
+                            for mod, running in value.items():
+                                icon = "✅" if running else "❌"
+                                lines.append(f"{mod.capitalize()}: {'Running' if running else 'Stopped'} {icon}")
+                        elif key == "gpu_assignments":
+                            for mod, name in value.items():
+                                lines.append(f"{mod.replace('_',' ').title()} → {name}")
+                        else:
+                            for gid, info in value.items():
+                                line = f"{gid} {info.get('name','')} {info.get('usage','N/A')} {info.get('vram','N/A')}"
+                                lines.append(line.strip())
                         widget.config(state="normal")
                         widget.delete("1.0", "end")
                         widget.insert("end", "\n".join(lines) or "N/A")

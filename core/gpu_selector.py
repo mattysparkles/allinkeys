@@ -173,6 +173,15 @@ def get_altcoin_gpu_ids():
     return [g["id"] for g in assigned_gpus.get("altcoin_derive", [])]
 
 
+def get_gpu_assignments():
+    """Return a simple mapping of module to assigned GPU names."""
+    load_gpu_assignments()
+    return {
+        "vanitysearch": ", ".join(g.get("name", "N/A") for g in assigned_gpus.get("vanitysearch", [])) or "N/A",
+        "altcoin_derive": ", ".join(g.get("name", "N/A") for g in assigned_gpus.get("altcoin_derive", [])) or "N/A",
+    }
+
+
 def clear_gpu_assignments():
     if os.path.exists(GPU_ASSIGN_FILE):
         os.remove(GPU_ASSIGN_FILE)
