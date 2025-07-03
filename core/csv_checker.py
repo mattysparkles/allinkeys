@@ -170,13 +170,13 @@ def check_csvs_day_one(shared_metrics=None):
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 
     address_sets = {}
-    for coin, _ in coin_columns.items():
-        full_path = find_latest_funded_file(coin, FULL_DIR) or find_latest_funded_file(coin, DOWNLOADS_DIR)
+    for coin, columns in coin_columns.items():
+        full_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR)
         if full_path:
             log_message(f"🔎 Using funded list {os.path.basename(full_path)} for {coin.upper()}.")
             address_sets[coin] = load_funded_addresses(full_path)
         else:
-            log_message(f"⚠️ No funded list found for {coin.upper()} in FULL_DIR or fallback.", "WARN")
+            log_message(f"⚠️ No funded list found for {coin.upper()} in DOWNLOADS_DIR", "WARN")
 
     combined_set = set.union(*address_sets.values()) if address_sets else set()
 
@@ -189,6 +189,7 @@ def check_csvs_day_one(shared_metrics=None):
 
     update_csv_eta()
 
+
 def check_csvs(shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
@@ -197,13 +198,13 @@ def check_csvs(shared_metrics=None):
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 
     address_sets = {}
-    for coin, _ in coin_columns.items():
-        unique_path = find_latest_funded_file(coin, UNIQUE_DIR) or find_latest_funded_file(coin, DOWNLOADS_DIR)
+    for coin, columns in coin_columns.items():
+        unique_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR)
         if unique_path:
             log_message(f"🔎 Using unique list {os.path.basename(unique_path)} for {coin.upper()}.")
             address_sets[coin] = load_funded_addresses(unique_path)
         else:
-            log_message(f"⚠️ No unique list found for {coin.upper()} in UNIQUE_DIR or fallback.", "WARN")
+            log_message(f"⚠️ No unique list found for {coin.upper()} in DOWNLOADS_DIR", "WARN")
 
     combined_set = set.union(*address_sets.values()) if address_sets else set()
 
