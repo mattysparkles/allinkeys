@@ -146,7 +146,11 @@ from core.dashboard import init_shared_metrics
 
 
 def start_keygen_loop(shared_metrics=None):
-    init_shared_metrics(shared_metrics)
+    try:
+        init_shared_metrics(shared_metrics)
+        print("[debug] Shared metrics initialized for", __name__)
+    except Exception as e:
+        print(f"[error] init_shared_metrics failed in {__name__}: {e}")
     if not os.path.exists(VANITY_OUTPUT_DIR):
         os.makedirs(VANITY_OUTPUT_DIR)
 
