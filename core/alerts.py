@@ -208,27 +208,37 @@ def trigger_startup_alerts():
         log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
 
 
-def trigger_test_alerts():
-    """Fire test alerts using addresses from test_alerts.csv."""
-    csv_path = os.path.join(DOWNLOADS_DIR, "test_alerts.csv")
+def run_test_alerts_from_csv(csv_path=None):
+    """Send test alerts for each address in the CSV file."""
+    if csv_path is None:
+        csv_path = os.path.join(DOWNLOADS_DIR, "test_alerts.csv")
+
     if not os.path.exists(csv_path):
         log_message("⚠️ test_alerts.csv not found. Run downloader first.", "WARN")
         return
 
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        for row in reader:
-            for coin, columns in coin_columns.items():
-                for col in columns:
-                    addr = row.get(col, "").strip()
-                    if not addr:
-                        continue
-                    payload = {
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "coin": coin,
-                        "address": addr,
-                        "csv_file": "test_alerts.csv",
-                        "privkey": row.get("private_key", "TEST")
-                    }
-                    log_message(f"📡 Test alert match triggered for {addr}")
-                    alert_match(payload, test_mode=True)
+        for row_num, row in enumerate(reader, 1):
+            try:
+                for coin, columns in coin_columns.items():
+                    for col in columns:
+                        addr = row.get(col, "").strip()
+                        if not addr:
+                            continue
+                        payload = {
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "coin": coin,
+                            "address": addr,
+                            "csv_file": os.path.basename(csv_path),
+                            "privkey": row.get("private_key", "TEST")
+                        }
+                        alert_match(payload, test_mode=True)
+                        log_message(f"✅ Test alert sent for {addr}", "INFO")
+            except Exception as exc:
+                log_message(f"❌ Failed sending test alert row {row_num}: {exc}", "ERROR")
+
+
+# Backwards compatibility
+def trigger_test_alerts():
+    run_test_alerts_from_csv()

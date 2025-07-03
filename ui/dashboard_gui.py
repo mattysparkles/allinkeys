@@ -36,7 +36,7 @@ from config.settings import (
 )
 
 from core.dashboard import get_current_metrics, reset_all_metrics
-from core.alerts import set_alert_flag, trigger_test_alerts
+from core.alerts import set_alert_flag, run_test_alerts_from_csv
 
 
 class DashboardGUI:
@@ -117,7 +117,8 @@ class DashboardGUI:
                 else:
                     # Higher contrast text for dark theme
                     font_opt = ("Segoe UI", 8) if key in SMALL_FONT_KEYS else None
-                    lbl = ttk.Label(frame, text="Loading...", foreground="white", font=font_opt, wraplength=280, justify="left")
+                    lbl = tk.Label(frame, text="Loading...", fg="white", font=font_opt,
+                                   wraplength=300, justify="left")
                     lbl.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = lbl
             row += 1
@@ -131,7 +132,7 @@ class DashboardGUI:
             for idx, option in enumerate(ALERT_CHECKBOXES):
                 row = idx // third
                 col = (idx % third) * 2
-                var = tk.BooleanVar(value=ALERT_OPTIONS.get(option, False))
+                var = tk.BooleanVar(value=ALERT_CHECKBOXES.get(option, False))
                 self.checkbox_vars[option] = var
                 cb = tk.Checkbutton(alert_frame, text=option, variable=var,
                                      command=lambda o=option, v=var: self.update_alert_option(o, v.get()))
@@ -239,8 +240,8 @@ class DashboardGUI:
             messagebox.showerror("Missing Config", f"Could not find: {CONFIG_FILE_PATH}")
 
     def test_alerts(self):
-        from core.alerts import trigger_test_alerts
-        trigger_test_alerts()
+        from core.alerts import run_test_alerts_from_csv
+        run_test_alerts_from_csv()
 
     def reset_metrics_prompt(self):
         resp = messagebox.askyesno("Reset Metrics", "Include lifetime stats?")
