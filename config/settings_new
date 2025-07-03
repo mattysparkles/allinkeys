@@ -33,6 +33,7 @@ $$ |  $$ |$$ |_____ $$ |_____  _$$ |_ $$ |$$$$ |      $$ |$$  \ $$ |_____     $$
 $$ |  $$ |$$       |$$       |/ $$   |$$ | $$$ |      $$ | $$  |$$       |    $$ |   $$    $$/ 
 $$/   $$/ $$$$$$$$/ $$$$$$$$/ $$$$$$/ $$/   $$/       $$/   $$/ $$$$$$$$/     $$/     $$$$$$/  
 """
+LOGO_ASCII = LOGO_ART
 
 
 # ===================== 📈 STATISTICS TO DISPLAY MAPPING ==========================
@@ -72,6 +73,7 @@ STATS_TO_DISPLAY = {
     "SHOW_ADDRESS_CHECKED_COUNTS_TODAY": True,
     "SHOW_ADDRESS_CHECKED_COUNTS_LIFETIME": True
 }
+globals().update(STATS_TO_DISPLAY)
 
 # ===================== 📋 DASHBOARD METRIC LABELS ==========================
 METRICS_LABEL_MAP = {
@@ -139,6 +141,23 @@ OPEN_CONFIG_FILE_FROM_DASHBOARD = True
 SHOW_REFRESH_DASHBOARD_DATA_BUTTON = True
 SHOW_DELETE_DASHBOARD_DATA_BUTTON = True
 SHOW_DONATION_MESSAGE = True
+DONATION_ADDRESSES = {
+    "BTC": "18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y",
+    "DOGE": "DPoHJNbYHEuvNHyCFcUnvtTVmRDMNgnAs5",
+    "LTC": "LNmgLkonXtecopmGauqsDFvci4XQTZAWmg",
+    "ETH_BSC_ERC-20": "0xCb8B2937D60c47438562A2E53d08B85865B57741",
+    "XRP": "rNEq4vB5yAKNj52UzNwok4TJKSQuHXQNnc",
+    "XMR": "43DUJ1MA7Mv1n4BTRHemEbDmvYzMysVt2djHnjGzrHZBb4WgMDtQHWh51ZfbcVwHP8We6pML4f1Q7SNEtveYCk4HDdb14ik",
+    "SOL": "wNR4sffGQwvK4vh6cgxPhhoN71wQT5gdn2Ksy7ueBYa",
+    "ADA": "addr1qye3f4jszpwcdwz2dzn8lcgjjfsllfyrd7zypmmjx9h6a3nyuw3zpuku8w3kpe47t83pgd8tq4yz9sqndxyv4g2py8nsseve6s",
+    "DASH": "XrHT9dWzXW3yxcyeUQKhc9yocTFw2iFj3b",
+    "RVN": "R9StG74J6q15iyxvXySEghF7FbKKJBKRQB",
+    "ZEC": "t1RBJ6BVrPuiZ5Gq2Wh8SAMkSSK9aqd3xvh",
+    "BTG": "GRt4a119DHFSN9oGGw1tGwUzg5qtNCprCH",
+    "PEP": "PbCiPTNrYaCgv1aqNCds5n7Q73znGrTkgp",
+    "BCH_BSV": "bitcoincash:qpnyvtz65u9nf4ddd0wewjrge4jedu7l2sayuy09fw",
+    "XLM": "GBGMRI6Z3JFMEZSUSZROASNLWOIDLRAUEX5RNAVCAFC7A52X5HCG5UYJ"
+}
 
 # ===================== 🗑️ FILE CLEANUP BUTTON TOGGLES ==========================
 DELETE_VANITY_SEARCH_LOGS = True
@@ -149,6 +168,7 @@ DELETE_CSV_CHECKING_LOGS = True
 # ===================== 💥 VANITY SEARCH SETTINGS ==========================
 VANITY_PATTERN = "1**"
 VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")
+MAX_KEYS_PER_FILE = 100_000  # Deprecated
 MAX_OUTPUT_FILE_SIZE = 250 * 1024 * 1024  # 250 MB
 MAX_OUTPUT_LINES = 200_000
 ROTATE_INTERVAL_SECONDS = 60
@@ -301,6 +321,9 @@ DROPBOX_FILE_PATH = "/dropbox/folder"
 # === LOCAL MATCH FILE SAVE ===
 ALERT_SAVE_MATCHES_TO_LOCAL_FILE = True
 MATCH_LOG_DIR = MATCHES_DIR
+FILE_PATH = MATCHES_DIR  # Matches folder
+INCLUDE_MATCH_INFO = True
+ENCRYPTED_MESSAGE = False
 
 # ===================== ⚙️ ALERT TOGGLE OPTIONS ==========================
 ALERT_OPTIONS = {
