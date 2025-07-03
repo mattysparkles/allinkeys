@@ -468,6 +468,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
     log_message("📦 Altcoin conversion loop (multi-threaded) started...", "INFO")
 
     processed = set()
+    durations = []  # track per-file processing times
     max_workers = 6  # ⚠️ Tune this based on GPU memory and throughput
 
     def handle_file(txt_file):
@@ -476,7 +477,10 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
         try:
             full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
             batch_id = None
+            update_dashboard_stat("backlog_current_file", txt_file)
+            start_t = time.perf_counter()
             convert_txt_to_csv(full_path, batch_id)
+            durations.append(time.perf_counter() - start_t)
             processed.add(txt_file)
         except Exception as e:
             log_message(f"❌ Failed to convert {txt_file}: {safe_str(e)}", "ERROR")
@@ -494,6 +498,18 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
                 if f.endswith(".txt") and f not in processed
             ]
 
+            update_dashboard_stat("backlog_files_queued", len(all_txt))
+            if durations:
+                avg = sum(durations) / len(durations)
+                eta_sec = avg * len(all_txt)
+                hrs = int(eta_sec // 3600)
+                mins = int((eta_sec % 3600) // 60)
+                secs = int(eta_sec % 60)
+                update_dashboard_stat({
+                    "backlog_avg_time": f"{avg:.2f}s",
+                    "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
+                })
+
             if not all_txt:
                 time.sleep(3)
                 continue
@@ -503,6 +519,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
                 for future in as_completed(futures):
                     if shared_shutdown_event.is_set():
                         break
+            update_dashboard_stat("backlog_current_file", "")
         except Exception as e:
             log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
 

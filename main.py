@@ -18,6 +18,9 @@ try:
 except ImportError:
     GPUtil = None
 
+# Track disk free space to estimate fill ETA
+_last_disk_check = (time.time(), psutil.disk_usage('/').free)
+
 from config.settings import (
     ENABLE_CHECKPOINT_RESTORE, CHECKPOINT_INTERVAL_SECONDS,
     LOGO_ART, ENABLE_DAY_ONE_CHECK, ENABLE_UNIQUE_RECHECK,
@@ -31,7 +34,12 @@ from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint
 from core.downloader import download_and_compare_address_lists
 from core.csv_checker import check_csvs_day_one, check_csvs
 from core.alerts import trigger_startup_alerts, alert_match
-from core.dashboard import update_dashboard_stat, _default_metrics, init_shared_metrics
+from core.dashboard import (
+    update_dashboard_stat,
+    _default_metrics,
+    init_shared_metrics,
+    init_dashboard_manager,
+)
 from ui.dashboard_gui import start_dashboard
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
@@ -68,13 +76,29 @@ def metrics_updater(shared_metrics=None):
         print("[debug] Shared metrics initialized for", __name__)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}")
+    global _last_disk_check
     while True:
         try:
             from core.keygen import keygen_progress
+            now = time.time()
+            disk_free = psutil.disk_usage('/').free
+            prev_t, prev_free = _last_disk_check
+            _last_disk_check = (now, disk_free)
+            rate = (prev_free - disk_free) / max(1, now - prev_t)
+            if rate > 0:
+                eta_sec = disk_free / rate
+                hrs = int(eta_sec // 3600)
+                mins = int((eta_sec % 3600) // 60)
+                secs = int(eta_sec % 60)
+                disk_eta = f"{hrs:02}:{mins:02}:{secs:02}"
+            else:
+                disk_eta = "N/A"
+
             stats = {
                 'cpu_usage_percent': psutil.cpu_percent(),
                 'ram_usage_gb': round(psutil.virtual_memory().used / (1024 ** 3), 2),
-                'disk_free_gb': round(psutil.disk_usage('/').free / (1024 ** 3), 2),
+                'disk_free_gb': round(disk_free / (1024 ** 3), 2),
+                'disk_fill_eta': disk_eta,
             }
             if GPUtil:
                 try:
@@ -89,6 +113,14 @@ def metrics_updater(shared_metrics=None):
             prog = keygen_progress()
             stats['keys_generated_lifetime'] = prog['total_keys_generated']
             stats['uptime'] = prog['elapsed_time']
+            try:
+                from config.settings import BATCH_SIZE
+                stats['vanity_progress_percent'] = round(
+                    (prog.get('index_within_batch', 0) / float(BATCH_SIZE)) * 100,
+                    2,
+                )
+            except Exception:
+                stats['vanity_progress_percent'] = 0
             update_dashboard_stat(stats)
             log_message(f"📊 Metrics updated: {stats}", "DEBUG")
         except Exception as e:
@@ -174,9 +206,14 @@ def run_allinkeys(args):
 
     assign_gpu_roles()
     shutdown_event = multiprocessing.Event()
-    manager = multiprocessing.Manager()
-    shared_metrics = manager.dict({k: (manager.dict(v) if isinstance(v, dict) else v)
-                                   for k, v in _default_metrics().items()})
+
+    # Use dashboard's helper to create a Manager-backed shared metrics dict with
+    # an associated lock.  Previously this file manually created its own
+    # ``Manager`` without initializing ``metrics_lock`` which caused
+    # ``get_current_metrics()`` to return an empty dict.  By delegating to
+    # :func:`init_dashboard_manager` we ensure the lock and defaults are set up
+    # correctly for all subprocesses.
+    shared_metrics = init_dashboard_manager()
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__)

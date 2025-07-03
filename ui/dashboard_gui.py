@@ -101,12 +101,13 @@ class DashboardGUI:
             self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
             for i, (key, label_text) in enumerate(keys):
                 ttk.Label(frame, text=label_text + ":").grid(row=i, column=0, sticky="e")
-                if "usage" in key or "keys_per_sec" in key:
+                if any(x in key for x in ["usage", "percent", "progress", "keys_per_sec"]):
                     pb = ttk.Progressbar(frame, length=100, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = pb
                 else:
-                    lbl = ttk.Label(frame, text="Loading...", foreground="blue")
+                    # Higher contrast text for dark theme
+                    lbl = ttk.Label(frame, text="Loading...", foreground="white")
                     lbl.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = lbl
             row += 1
