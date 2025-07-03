@@ -9,6 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 import base64
+from datetime import datetime
 
 from config.settings import ENABLE_ALERTS
 from config.settings import (
@@ -203,3 +204,15 @@ def trigger_startup_alerts():
         # Extend to alert channels if needed
     except Exception as e:
         log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
+
+
+def trigger_test_alerts():
+    """Fire a test alert using sample data."""
+    test_payload = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "coin": "BTC",
+        "address": "1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY",
+        "csv_file": "test_alerts.csv",
+        "privkey": "TESTKEY"
+    }
+    alert_match(test_payload, test_mode=True)

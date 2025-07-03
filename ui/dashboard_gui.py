@@ -36,7 +36,7 @@ from config.settings import (
 )
 
 from core.dashboard import get_current_metrics, reset_all_metrics
-from core.alerts import set_alert_flag
+from core.alerts import set_alert_flag, trigger_test_alerts
 
 
 class DashboardGUI:
@@ -75,7 +75,7 @@ class DashboardGUI:
                 continue
             label = METRICS_LABEL_MAP.get(key, key)
             key_lower = key.lower()
-            if any(x in key_lower for x in ["cpu", "ram", "disk"]):
+            if any(x in key_lower for x in ["cpu", "ram", "disk", "gpu"]):
                 grouped_keys["System Stats"].append((key, label))
             elif any(x in key_lower for x in ["keygen", "keys_per_sec", "batches"]):
                 grouped_keys["Keygen Metrics"].append((key, label))
@@ -101,10 +101,14 @@ class DashboardGUI:
             self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
             for i, (key, label_text) in enumerate(keys):
                 ttk.Label(frame, text=label_text + ":").grid(row=i, column=0, sticky="e")
-                if any(x in key for x in ["usage", "percent", "progress", "keys_per_sec"]):
+                if key not in ("cpu_usage", "ram_usage") and any(x in key for x in ["usage", "percent", "progress", "keys_per_sec"]):
                     pb = ttk.Progressbar(frame, length=100, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w")
                     self.metrics[key] = pb
+                elif key == "gpu_stats":
+                    lbl = ttk.Label(frame, text="Loading...", foreground="white")
+                    lbl.grid(row=i, column=1, sticky="w")
+                    self.metrics[key] = lbl
                 else:
                     # Higher contrast text for dark theme
                     lbl = ttk.Label(frame, text="Loading...", foreground="white")
@@ -146,6 +150,7 @@ class DashboardGUI:
         if OPEN_CONFIG_FILE_FROM_DASHBOARD:
             ttk.Button(bottom_frame, text="Open Config File", command=self.open_config_file).pack(side="left", padx=5)
         ttk.Button(bottom_frame, text="Reset Metrics", command=self.reset_metrics_prompt).pack(side="left", padx=5)
+        ttk.Button(bottom_frame, text="Test Alerts", command=self.test_alerts).pack(side="left", padx=5)
         if SHOW_DELETE_DASHBOARD_DATA_BUTTON:
             ttk.Button(bottom_frame, text="Delete All Data", command=self.delete_data_prompt).pack(side="left", padx=5)
 
@@ -156,7 +161,7 @@ class DashboardGUI:
     def _group_button_set(self, parent, label, col):
         sub_frame = ttk.LabelFrame(parent, text=label)
         sub_frame.grid(row=0, column=col, padx=5)
-        self.module_states[label] = "stopped"
+        self.module_states[label] = "running"
 
         btns = {}
 
@@ -202,7 +207,13 @@ class DashboardGUI:
                     except:
                         widget["value"] = 0
                 else:
-                    widget.config(text=value)
+                    if key == "gpu_stats" and isinstance(value, dict):
+                        lines = []
+                        for gid, info in value.items():
+                            lines.append(f"GPU{gid} {info['name']} {info['usage']} {info['vram']}")
+                        widget.config(text="; ".join(lines) or "N/A")
+                    else:
+                        widget.config(text=value)
         except Exception as e:
             print(f"[Dashboard Error] {e}")
         self.master.after(int(DASHBOARD_REFRESH_INTERVAL * 1000), self.refresh_loop)
@@ -212,6 +223,10 @@ class DashboardGUI:
             subprocess.Popen(["notepad.exe", CONFIG_FILE_PATH])
         else:
             messagebox.showerror("Missing Config", f"Could not find: {CONFIG_FILE_PATH}")
+
+    def test_alerts(self):
+        from core.alerts import trigger_test_alerts
+        trigger_test_alerts()
 
     def reset_metrics_prompt(self):
         resp = messagebox.askyesno("Reset Metrics", "Include lifetime stats?")

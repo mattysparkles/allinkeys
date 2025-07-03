@@ -536,6 +536,7 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None)
         args=(shared_shutdown_event, shared_metrics),
         name="AltcoinConverter"
     )
+    process.daemon = True
     process.start()
     log_message("🚀 Altcoin derive subprocess started...", "INFO")
     return process

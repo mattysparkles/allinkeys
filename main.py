@@ -94,21 +94,26 @@ def metrics_updater(shared_metrics=None):
             else:
                 disk_eta = "N/A"
 
+            vm = psutil.virtual_memory()
+            ram_percent = vm.percent
             stats = {
-                'cpu_usage_percent': psutil.cpu_percent(),
-                'ram_usage_gb': round(psutil.virtual_memory().used / (1024 ** 3), 2),
+                'cpu_usage': f"{psutil.cpu_percent()}%",
+                'ram_usage': f"{vm.used / (1024 ** 3):.1f} GB / {vm.total / (1024 ** 3):.1f} GB ({ram_percent}%)",
                 'disk_free_gb': round(disk_free / (1024 ** 3), 2),
                 'disk_fill_eta': disk_eta,
+                'gpu_stats': {}
             }
             if GPUtil:
                 try:
                     gpus = GPUtil.getGPUs()
-                    stats['gpu'] = gpus[0].load * 100 if gpus else 0
+                    for gpu in gpus:
+                        stats['gpu_stats'][gpu.id] = {
+                            'name': gpu.name,
+                            'usage': f"{gpu.load * 100:.0f}%",
+                            'vram': f"{gpu.memoryUsed/1024:.1f}GB / {gpu.memoryTotal/1024:.1f}GB"
+                        }
                 except Exception as e:
-                    stats['gpu'] = 0
                     log_message(f"⚠️ GPU read failed: {e}", "WARNING")
-            else:
-                stats['gpu'] = 0
 
             prog = keygen_progress()
             stats['keys_generated_lifetime'] = prog['total_keys_generated']
@@ -158,18 +163,21 @@ def run_all_processes(args, shutdown_event, shared_metrics):
 
     if ENABLE_KEYGEN and not args.headless:
         p = Process(target=start_keygen_loop, args=(shared_metrics,))
+        p.daemon = True
         p.start()
         processes.append(p)
         log_message("🧬 Keygen loop started.", "INFO")
 
     if ENABLE_DAY_ONE_CHECK:
         p = Process(target=check_csvs_day_one, args=(shared_metrics,))
+        p.daemon = True
         p.start()
         processes.append(p)
         log_message("🧾 Day One CSV check scheduled.", "INFO")
 
     if ENABLE_UNIQUE_RECHECK:
         p = Process(target=check_csvs, args=(shared_metrics,))
+        p.daemon = True
         p.start()
         processes.append(p)
         log_message("🔁 Unique recheck scheduled.", "INFO")
@@ -181,17 +189,20 @@ def run_all_processes(args, shutdown_event, shared_metrics):
 
     if ENABLE_ALERTS:
         p = Process(target=trigger_startup_alerts)
+        p.daemon = True
         p.start()
         processes.append(p)
         log_message("🚨 Alert system primed.", "INFO")
 
     if CHECKPOINT_INTERVAL_SECONDS:
         p = Process(target=save_checkpoint_loop)
+        p.daemon = True
         p.start()
         processes.append(p)
         log_message("🕒 Checkpoint thread started.", "INFO")
 
     p = Process(target=metrics_updater, args=(shared_metrics,))
+    p.daemon = True
     p.start()
     processes.append(p)
     log_message("📈 Metrics updater thread launched.")
