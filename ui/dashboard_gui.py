@@ -93,6 +93,9 @@ class DashboardGUI:
         per_col = (len(frames) + 2) // 3
         col = 0
         row = 0
+        FONT = ("Segoe UI", 9)
+        SMALL_FONT = ("Segoe UI", 8)
+
         for idx, (group, keys) in enumerate(frames):
             if idx and idx % per_col == 0:
                 col += 1
@@ -105,23 +108,53 @@ class DashboardGUI:
                 "matches_found_today", "matches_found_lifetime"
             }
             for i, (key, label_text) in enumerate(keys):
-                ttk.Label(frame, text=label_text + ":", width=25, anchor="w").grid(row=i, column=0, sticky="w")
+                ttk.Label(
+                    frame,
+                    text=label_text + ":",
+                    anchor="w",
+                    wraplength=150,
+                    justify="left",
+                    font=FONT,
+                ).grid(row=i, column=0, sticky="nw", padx=2, pady=2)
+
                 if key not in ("cpu_usage", "ram_usage") and any(x in key for x in ["usage", "percent", "progress", "keys_per_sec"]):
-                    pb = ttk.Progressbar(frame, length=100, mode="determinate")
-                    pb.grid(row=i, column=1, sticky="w")
+                    pb = ttk.Progressbar(frame, length=150, mode="determinate")
+                    pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
                 elif key in ("gpu_stats", "gpu_assignments", "thread_health_flags"):
-                    txt = tk.Text(frame, height=3, width=35, wrap="word")
-                    txt.grid(row=i, column=1, sticky="w")
+                    txt = tk.Text(frame, height=4, width=45, wrap="word", font=FONT)
+                    txt.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     txt.configure(state="disabled")
                     self.metrics[key] = txt
                 else:
-                    # Higher contrast text for dark theme
-                    font_opt = ("Segoe UI", 8) if key in SMALL_FONT_KEYS else None
-                    lbl = tk.Label(frame, text="Loading...", fg="white", bg="#222222", font=font_opt,
-                                   wraplength=300, justify="left")
-                    lbl.grid(row=i, column=1, sticky="w")
+                    font_opt = SMALL_FONT if key in SMALL_FONT_KEYS else FONT
+                    lbl = tk.Label(
+                        frame,
+                        text="Loading...",
+                        fg="white",
+                        bg="#222222",
+                        font=font_opt,
+                        wraplength=300,
+                        justify="left",
+                    )
+                    lbl.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = lbl
+
+            # Insert backlog progress bar below backlog metrics
+            if group == "Backlog":
+                bp_row = len(keys)
+                ttk.Label(
+                    frame,
+                    text="Backlog Progress:",
+                    anchor="w",
+                    wraplength=150,
+                    justify="left",
+                    font=FONT,
+                ).grid(row=bp_row, column=0, sticky="nw", padx=2, pady=2)
+                pb = ttk.Progressbar(frame, length=150, mode="determinate")
+                pb.grid(row=bp_row, column=1, sticky="w", padx=2, pady=2)
+                self.metrics["backlog_progress"] = pb
+
             row += 1
 
         # Alert Configuration Checkboxes
@@ -216,6 +249,15 @@ class DashboardGUI:
         try:
             stats = get_current_metrics()
             for key, widget in self.metrics.items():
+                # Compute backlog progress locally
+                if key == "backlog_progress":
+                    backlog = stats.get("backlog_files_queued", 0) or 0
+                    rechecked = stats.get("csv_rechecked_today", 0) or 0
+                    total = backlog + rechecked
+                    progress = (rechecked / total) * 100 if total > 0 else 100
+                    widget["value"] = progress
+                    continue
+
                 value = stats.get(key, "N/A")
                 if isinstance(widget, ttk.Progressbar):
                     try:
@@ -252,7 +294,10 @@ class DashboardGUI:
                             for gid, info in value.items():
                                 usage = info.get('usage', 'N/A')
                                 vram = info.get('vram', 'N/A')
+                                temp = info.get('temp')
                                 line = f"{gid} {info.get('name','')} {usage} {vram}"
+                                if temp and temp != 'N/A':
+                                    line += f" {temp}"
                                 lines.append(line.strip())
                     else:
                         lines.append(str(value))
