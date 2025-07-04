@@ -9,6 +9,9 @@ import time
 import io
 import json
 from datetime import datetime
+
+# Increase CSV field size limit to handle large entries (up to 10MB)
+csv.field_size_limit(10 * 1024 * 1024)
 from config.settings import (
     CSV_DIR, UNIQUE_DIR, FULL_DIR, DOWNLOADS_DIR,
     CHECKED_CSV_LOG, RECHECKED_CSV_LOG,
@@ -105,49 +108,57 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
                 else:
                     log_message(f"🔎 {coin.upper()} columns scanned: {columns}", "DEBUG")
 
-            for row in reader:
-                if get_metric("global_run_state") == "paused":
-                    time.sleep(1)
-                    continue
-                rows_scanned += 1
-                for coin, columns in coin_columns.items():
-                    for col in columns:
-                        addr = row.get(col, "").strip()
-                        if addr and addr in address_set and addr not in new_matches:
-                            match_payload = {
-                                "timestamp": datetime.utcnow().isoformat(),
-                                "coin": coin,
-                                "address": addr,
-                                "csv_file": filename,
-                                "privkey": row.get("wif") or row.get("private_key") or row.get("priv_hex") or "unknown",
-                                "batch_id": row.get("batch_id", "n/a"),
-                                "index": row.get("index", "n/a"),
-                                "row_number": rows_scanned
-                            }
+            try:
+                for row in reader:
+                    if get_metric("global_run_state") == "paused":
+                        time.sleep(1)
+                        continue
+                    rows_scanned += 1
+                    try:
+                        for coin, columns in coin_columns.items():
+                            for col in columns:
+                                raw = row.get(col)
+                                addr = raw.strip() if raw else ""
+                                if addr and addr in address_set and addr not in new_matches:
+                                    match_payload = {
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                        "coin": coin,
+                                        "address": addr,
+                                        "csv_file": filename,
+                                        "privkey": row.get("wif") or row.get("private_key") or row.get("priv_hex") or "unknown",
+                                        "batch_id": row.get("batch_id", "n/a"),
+                                        "index": row.get("index", "n/a"),
+                                        "row_number": rows_scanned
+                                    }
 
-                            log_message(f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}", "ALERT")
+                                    log_message(f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}", "ALERT")
 
-                            if ENABLE_PGP:
-                                encrypted = encrypt_with_pgp(json.dumps(match_payload), PGP_PUBLIC_KEY_PATH)
-                                alert_match({"encrypted": encrypted})
-                            else:
-                                alert_match(match_payload)
+                                    if ENABLE_PGP:
+                                        encrypted = encrypt_with_pgp(json.dumps(match_payload), PGP_PUBLIC_KEY_PATH)
+                                        alert_match({"encrypted": encrypted})
+                                    else:
+                                        alert_match(match_payload)
 
-                            if filename != "test_alerts.csv":
-                                bal = fetch_live_balance(addr, coin)
-                                if bal is not None:
-                                    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-                                    log_message(
-                                        f"🎯 Matched {coin.upper()} address {addr} – Current balance: {bal} {coin.upper()} (fetched at {ts})",
-                                        "ALERT",
-                                    )
-                                else:
-                                    log_message(f"⚠️ Could not fetch balance for {addr}", "WARN")
+                                    if filename != "test_alerts.csv":
+                                        bal = fetch_live_balance(addr, coin)
+                                        if bal is not None:
+                                            ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+                                            log_message(
+                                                f"🎯 Matched {coin.upper()} address {addr} – Current balance: {bal} {coin.upper()} (fetched at {ts})",
+                                                "ALERT",
+                                            )
+                                        else:
+                                            log_message(f"⚠️ Could not fetch balance for {addr}", "WARN")
 
-                            new_matches.add(addr)
-                            increment_metric("matched_keys", 1)
-                            increment_metric(f"matches_found_today.{coin}", 1)
-                            increment_metric(f"matches_found_lifetime.{coin}", 1)
+                                    new_matches.add(addr)
+                                    increment_metric("matched_keys", 1)
+                                    increment_metric(f"matches_found_today.{coin}", 1)
+                                    increment_metric(f"matches_found_lifetime.{coin}", 1)
+                    except Exception as row_err:
+                        log_message(f"❌ Skipping malformed row {rows_scanned} in {filename}: {row_err}", "ERROR")
+                        continue
+            except csv.Error as e:
+                log_message(f"❌ CSV parsing error in {filename}: {e}", "ERROR")
 
         end_time = time.perf_counter()
         duration_sec = round(end_time - start_time, 2)
