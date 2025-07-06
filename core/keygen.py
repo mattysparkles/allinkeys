@@ -89,6 +89,12 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
 
     while True:
+        # If the user has paused key generation, simply wait without launching
+        # new VanitySearch processes. This prevents rapid creation of empty files
+        # when the pause button is activated.
+        if pause_event and pause_event.is_set():
+            time.sleep(1)
+            continue
         hex_seed_full = hex(seed_int)[2:].rjust(64, "0")
         hex_seed_short = hex(seed_int)[2:].lstrip("0")[:8] or "00000000"
 
