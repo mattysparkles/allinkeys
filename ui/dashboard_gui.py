@@ -50,8 +50,8 @@ class DashboardGUI:
         self.module_states = {}
         self.module_buttons = {}
         self.create_widgets()
-        # Sync initial module states with metrics so buttons reflect actual status
-        self.sync_module_states()
+        # Allow other modules a moment to update metrics before syncing button states
+        self.master.after(2000, self.sync_module_states)
         self.refresh_loop()
 
     def create_widgets(self):

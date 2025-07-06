@@ -4,15 +4,24 @@ from datetime import datetime
 import core.checkpoint as checkpoint
 import traceback
 import multiprocessing
+from config.settings import (
+    ENABLE_KEYGEN,
+    ENABLE_DAY_ONE_CHECK,
+    ENABLE_UNIQUE_RECHECK,
+    ENABLE_ALTCOIN_DERIVATION,
+    ENABLE_BACKLOG_CONVERSION,
+    ENABLE_ALERTS,
+)
 
 # Thread health tracking (expanded)
 THREAD_HEALTH = {
-    "keygen": False,
-    "csv_check": False,
-    "csv_recheck": False,
-    "backlog": False,
+    "keygen": ENABLE_KEYGEN,
+    "csv_check": ENABLE_DAY_ONE_CHECK,
+    "csv_recheck": ENABLE_UNIQUE_RECHECK,
+    "backlog": ENABLE_BACKLOG_CONVERSION,
+    "altcoin": ENABLE_ALTCOIN_DERIVATION,
     "dashboard": True,
-    "alerts": True
+    "alerts": ENABLE_ALERTS,
 }
 
 # Control events propagated from the main process
@@ -124,10 +133,12 @@ def _default_metrics():
         "backlog_avg_time": "N/A",
         "backlog_current_file": "",
         "status": {
-            "keygen": False,
-            "altcoin": False,
-            "csv_check": False,
-            "csv_recheck": False,
+            "keygen": ENABLE_KEYGEN,
+            "altcoin": ENABLE_ALTCOIN_DERIVATION,
+            "csv_check": ENABLE_DAY_ONE_CHECK,
+            "csv_recheck": ENABLE_UNIQUE_RECHECK,
+            "backlog": ENABLE_BACKLOG_CONVERSION,
+            "alerts": ENABLE_ALERTS,
         },
         "global_run_state": "running",
         "auto_resume_enabled": True,
