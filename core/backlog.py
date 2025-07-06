@@ -113,7 +113,7 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
 
                     if not os.path.exists(output_path):
                         log_message(f"🔁 Converting {file} to CSV...", "INFO")
-                        futures.append(executor.submit(convert_txt_to_csv, txt_path, batch_id))
+                        futures.append(executor.submit(convert_txt_to_csv, txt_path, batch_id, pause_event, get_shutdown_event()))
                     else:
                         log_message(f"✅ Already converted: {file}", "DEBUG")
 
