@@ -182,6 +182,11 @@ def start_keygen_loop(shared_metrics=None):
         KEYGEN_STATE["index_within_batch"] = secrets.randbelow(BATCH_SIZE)
         logger.info("🚀 No checkpoint found. Starting with randomized batch/index.")
 
+    # Initialize dashboard metrics so the GUI never shows N/A
+    set_metric("keys_generated_today", 0)
+    set_metric("vanity_progress_percent", 0)
+    set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
+
     try:
         set_metric("status.keygen", True)
         from core.dashboard import (

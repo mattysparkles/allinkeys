@@ -478,6 +478,9 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     try:
         init_shared_metrics(shared_metrics)
         set_metric("status.altcoin", True)
+        set_metric("altcoin_files_converted", 0)
+        set_metric("derived_addresses_today", 0)
+        set_metric("backlog_files_completed", 0)
         from core.dashboard import set_thread_health
         set_thread_health("altcoin", True)
         register_control_events(shared_shutdown_event, pause_event)
@@ -505,7 +508,11 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
             batch_id = None
             update_dashboard_stat("backlog_current_file", txt_file)
             start_t = time.perf_counter()
-            convert_txt_to_csv(full_path, batch_id)
+            rows = convert_txt_to_csv(full_path, batch_id)
+            increment_metric("altcoin_files_converted", 1)
+            if rows:
+                increment_metric("derived_addresses_today", rows)
+            increment_metric("backlog_files_completed", 1)
             durations.append(time.perf_counter() - start_t)
             with proc_lock:
                 processed.add(txt_file)

@@ -66,6 +66,8 @@ def start_backlog_conversion_loop():
         pass
     from core.dashboard import set_thread_health
     set_metric("status.backlog", True)
+    set_metric("backlog_files_queued", 0)
+    set_metric("backlog_files_completed", 0)
     set_thread_health("backlog", True)
     log_message("📦 Backlog converter started...", "INFO")
 
@@ -78,6 +80,7 @@ def start_backlog_conversion_loop():
                 break
             try:
                 files = [f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")]
+                update_dashboard_stat("backlog_files_queued", len(files))
                 futures = []
                 for file in files:
                     txt_path = os.path.join(VANITY_OUTPUT_DIR, file)
@@ -119,7 +122,7 @@ def start_backlog_conversion_loop():
                     except Exception as e:
                         log_message(f"❌ Backlog task error: {safe_str(e)}", "ERROR")
                     else:
-                        pass
+                        increment_metric("backlog_files_completed", 1)
 
             except Exception as e:
                 log_message(f"❌ Error in backlog conversion loop: {safe_str(e)}", "ERROR")
