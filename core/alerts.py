@@ -32,6 +32,7 @@ from config.settings import (
 )
 
 from core.logger import log_message
+from core.dashboard import set_metric, increment_metric, get_metric
 
 # runtime alert flags that can be toggled from the GUI
 ALERT_FLAGS = {
@@ -46,6 +47,20 @@ ALERT_FLAGS = {
     "ENABLE_HOME_ASSISTANT_ALERT": ENABLE_HOME_ASSISTANT_ALERT,
     "ENABLE_CLOUD_UPLOAD": ENABLE_CLOUD_UPLOAD,
 }
+
+# Mapping of alert channels for metrics tracking
+ALERT_CHANNELS = [
+    "email",
+    "telegram",
+    "popup",
+    "sms",
+    "file",
+    "cloud",
+    "phone",
+    "discord",
+    "webhook",
+    "home_assistant",
+]
 
 # Queue for sequential audio alerts
 audio_queue = queue.Queue()
@@ -100,6 +115,9 @@ def alert_match(match_data, test_mode=False):
         log_message("🚫 Alerts are disabled in config.", "INFO")
         return
 
+    if get_metric("alerts_sent_today") is None:
+        set_metric("alerts_sent_today", {c: 0 for c in ALERT_CHANNELS})
+
     # Handle PGP-only encrypted blob
     if "encrypted" in match_data:
         try:
@@ -147,6 +165,7 @@ def alert_match(match_data, test_mode=False):
             win.after(8000, root.destroy)
             root.mainloop()
             log_message("✅ Desktop popup displayed.", "INFO")
+            increment_metric("alerts_sent_today.popup")
         except Exception as e:
             log_message(f"❌ Desktop alert error: {e}", "ERROR")
 
@@ -156,6 +175,7 @@ def alert_match(match_data, test_mode=False):
         if os.path.exists(ALERT_SOUND_FILE):
             _start_audio_worker()
             audio_queue.put(ALERT_SOUND_FILE)
+            increment_metric("alerts_sent_today.popup")
         else:
             log_message(f"❌ Sound file not found: {ALERT_SOUND_FILE}", "ERROR")
 
@@ -174,6 +194,7 @@ def alert_match(match_data, test_mode=False):
             server.send_message(msg)
             server.quit()
             log_message("📧 Email alert sent.", "INFO")
+            increment_metric("alerts_sent_today.email")
         except Exception as e:
             log_message(f"❌ Email alert error: {e}", "ERROR")
 
@@ -184,6 +205,7 @@ def alert_match(match_data, test_mode=False):
             resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
             if resp.ok and resp.json().get("ok"):
                 log_message("📨 Telegram alert sent.", "INFO")
+                increment_metric("alerts_sent_today.telegram")
             else:
                 log_message(f"❌ Telegram alert failed: {resp.text}", "ERROR")
         except Exception as e:
@@ -197,6 +219,7 @@ def alert_match(match_data, test_mode=False):
             client = Client(TWILIO_SID, TWILIO_TOKEN)
             client.messages.create(body=match_text, from_=TWILIO_FROM, to=TWILIO_TO_SMS)
             log_message("📲 SMS alert sent.", "INFO")
+            increment_metric("alerts_sent_today.sms")
         except Exception as e:
             log_message(f"❌ SMS alert error: {e}", "ERROR")
 
@@ -212,6 +235,7 @@ def alert_match(match_data, test_mode=False):
                 to=TWILIO_TO_CALL
             )
             log_message("📞 Phone call alert triggered.", "INFO")
+            increment_metric("alerts_sent_today.phone")
         except Exception as e:
             log_message(f"❌ Phone call error: {e}", "ERROR")
 
@@ -222,6 +246,7 @@ def alert_match(match_data, test_mode=False):
             resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
             if resp.ok:
                 log_message("💬 Discord alert sent.", "INFO")
+                increment_metric("alerts_sent_today.discord")
             else:
                 log_message(f"❌ Discord alert failed: {resp.text}", "ERROR")
         except Exception as e:
@@ -238,6 +263,7 @@ def alert_match(match_data, test_mode=False):
             resp = requests.post(HOME_ASSISTANT_URL, headers=headers, json=payload, timeout=10)
             if resp.ok:
                 log_message("🏠 Home Assistant alert sent.", "INFO")
+                increment_metric("alerts_sent_today.home_assistant")
             else:
                 log_message(f"❌ Home Assistant alert failed: {resp.text}", "ERROR")
         except Exception as e:
@@ -256,6 +282,7 @@ def alert_match(match_data, test_mode=False):
             with open(full_path, 'w') as f:
                 f.write(b64_encrypted)
             log_message("☁ Encrypted match uploaded locally.", "INFO")
+            increment_metric("alerts_sent_today.cloud")
         except Exception as e:
             log_message(f"❌ PGP/cloud upload error: {e}", "ERROR")
 
@@ -267,6 +294,7 @@ def alert_match(match_data, test_mode=False):
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(match_data) + "\n")
         log_message("📝 Match written to local log.", "INFO")
+        increment_metric("alerts_sent_today.file")
     except Exception as e:
         log_message(f"❌ Local match logging error: {e}", "ERROR")
 

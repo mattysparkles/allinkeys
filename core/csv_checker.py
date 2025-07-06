@@ -207,6 +207,9 @@ def check_csvs_day_one(shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
         set_metric("status.csv_check", True)
+        set_metric("csv_checked_today", 0)
+        set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
+        set_metric("matches_found_today", {c: 0 for c in coin_columns})
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -248,6 +251,9 @@ def check_csvs(shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
         set_metric("status.csv_recheck", True)
+        set_metric("csv_rechecked_today", 0)
+        set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
+        set_metric("matches_found_today", {c: 0 for c in coin_columns})
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
