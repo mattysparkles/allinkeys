@@ -65,6 +65,7 @@ def open_new_csv_writer(index):
         "batch_id", "index"
     ])
     writer.writeheader()
+    f.flush()
     return f, writer, path
 
 def get_compressed_pubkey(priv_bytes):
@@ -179,10 +180,7 @@ def cashaddr_encode(prefix, payload):
 
 
 def derive_addresses_gpu(hex_keys):
-    """
-    Given a list of 64-character hex private keys, uses the GPU to run SHA-256 kernel (for future compatibility),
-    but derives Bitcoin and altcoin addresses from the **original key** (not the GPU-hashed output).
-    """
+    """Derive addresses using the GPU if available."""
 
     context, device = get_gpu_context_for_altcoin()
     queue = cl.CommandQueue(context)
@@ -264,9 +262,57 @@ def derive_addresses_gpu(hex_keys):
 
     return results
 
+
+def derive_addresses_cpu(hex_keys):
+    """Derive addresses purely with Python when no GPU is available."""
+    results = []
+    for key in hex_keys:
+        priv = bytes.fromhex(key.lstrip("0x").zfill(64))
+        try:
+            sk = SigningKey.from_string(priv, curve=SECP256k1)
+            vk_bytes = sk.get_verifying_key().to_string()
+            x = vk_bytes[:32]
+            y = vk_bytes[32:]
+            prefix = b"\x03" if (y[-1] % 2) else b"\x02"
+            pubkey_compressed = prefix + x
+            pubkey_uncompressed = b"\x04" + x + y
+            hash160_c = hash160(pubkey_compressed)
+            hash160_u = hash160(pubkey_uncompressed)
+
+            result = {
+                "btc_C": b58(b"\x00", hash160_c),
+                "btc_U": b58(b"\x00", hash160_u),
+                "ltc_C": b58(b"\x30", hash160_c),
+                "ltc_U": b58(b"\x30", hash160_u),
+                "doge_C": b58(b"\x1e", hash160_c),
+                "doge_U": b58(b"\x1e", hash160_u),
+                "dash_C": b58(b"\x4c", hash160_c),
+                "dash_U": b58(b"\x4c", hash160_u),
+                "bch_C": cashaddr_encode("bitcoincash", hash160_c) if BCH_CASHADDR_ENABLED else b58(b"\x00", hash160_c),
+                "bch_U": cashaddr_encode("bitcoincash", hash160_u) if BCH_CASHADDR_ENABLED else b58(b"\x00", hash160_u),
+                "rvn_C": b58(b"\x3c", hash160_c),
+                "rvn_U": b58(b"\x3c", hash160_u),
+                "pep_C": b58(b"\x37", hash160_c),
+                "pep_U": b58(b"\x37", hash160_u),
+                "eth": "0x" + keccak(pubkey_compressed[1:])[-20:].hex(),
+            }
+            results.append(result)
+        except Exception as e:
+            results.append({"error": str(e)})
+    return results
+
+
+def derive_addresses(hex_keys):
+    """Try GPU derivation then fall back to CPU on failure."""
+    try:
+        return derive_addresses_gpu(hex_keys)
+    except Exception as e:
+        log_message(f"⚠️ GPU derive failed, falling back to CPU: {safe_str(e)}", "WARNING")
+        return derive_addresses_cpu(hex_keys)
+
 def derive_altcoin_addresses_from_hex(hex_key):
     sanitized = hex_key.lower().replace("0x", "").zfill(64)
-    results = derive_addresses_gpu([sanitized])
+    results = derive_addresses([sanitized])
     return results[0] if results else {}
 
 
@@ -346,7 +392,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                         meta_map[priv_hex] = (int_seed, wif, pub)
 
                         if len(hex_batch) >= batch_size:
-                            results = derive_addresses_gpu(hex_batch)
+                            results = derive_addresses(hex_batch)
                             for idx, derived in enumerate(results):
                                 priv_hex = hex_batch[idx]
                                 seed, wif, pub = meta_map[priv_hex]
@@ -411,7 +457,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
             # Final flush
             if hex_batch:
-                results = derive_addresses_gpu(hex_batch)
+                results = derive_addresses(hex_batch)
                 for idx, derived in enumerate(results):
                     if (
                         (pause_event and pause_event.is_set())
@@ -474,7 +520,6 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
             increment_metric("csv_created_today", 1)
             increment_metric("csv_created_lifetime", 1)
-            from core.dashboard import update_dashboard_stat, get_metric
             update_dashboard_stat("csv_created_today", get_metric("csv_created_today"))
             update_dashboard_stat("csv_created_lifetime", get_metric("csv_created_lifetime"))
             log_message(f"✅ {os.path.basename(path)} written ({rows_written} rows)", "INFO")
@@ -507,6 +552,25 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 from core.dashboard import init_shared_metrics, register_control_events
 
 
+def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics):
+    """Helper for ProcessPoolExecutor to convert a single file."""
+    try:
+        init_shared_metrics(shared_metrics)
+        full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
+        batch_id = None
+        update_dashboard_stat("backlog_current_file", txt_file)
+        start_t = time.perf_counter()
+        rows = convert_txt_to_csv(full_path, batch_id, pause_event, shutdown_event)
+        increment_metric("altcoin_files_converted", 1)
+        if rows:
+            increment_metric("derived_addresses_today", rows)
+        increment_metric("backlog_files_completed", 1)
+        duration = time.perf_counter() - start_t
+        return txt_file, duration, None
+    except Exception as e:
+        return txt_file, 0.0, safe_str(e)
+
+
 def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None):
     try:
         init_shared_metrics(shared_metrics)
@@ -532,25 +596,6 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     proc_lock = threading.Lock()
     durations = []  # track per-file processing times
     max_workers = 6  # ⚠️ Tune this based on GPU memory and throughput
-
-    def handle_file(txt_file):
-        if shared_shutdown_event.is_set():
-            return
-        try:
-            full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
-            batch_id = None
-            update_dashboard_stat("backlog_current_file", txt_file)
-            start_t = time.perf_counter()
-            rows = convert_txt_to_csv(full_path, batch_id, pause_event, shared_shutdown_event)
-            increment_metric("altcoin_files_converted", 1)
-            if rows:
-                increment_metric("derived_addresses_today", rows)
-            increment_metric("backlog_files_completed", 1)
-            durations.append(time.perf_counter() - start_t)
-            with proc_lock:
-                processed.add(txt_file)
-        except Exception as e:
-            log_message(f"❌ Failed to convert {txt_file}: {safe_str(e)}", "ERROR")
 
     def graceful_shutdown(sig, frame):
         log_message("🛑 Ctrl+C received in altcoin conversion loop. Shutting down...", "WARNING")
@@ -585,11 +630,22 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                 time.sleep(3)
                 continue
 
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(handle_file, f): f for f in all_txt}
+            ctx = multiprocessing.get_context("spawn")
+            with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
+                futures = {
+                    executor.submit(_convert_file_worker, f, pause_event, shared_shutdown_event, shared_metrics): f
+                    for f in all_txt
+                }
                 for future in as_completed(futures):
                     if shared_shutdown_event.is_set():
                         break
+                    txt_file, dur, err = future.result()
+                    if err:
+                        log_message(f"❌ Failed to convert {txt_file}: {err}", "ERROR")
+                    else:
+                        with proc_lock:
+                            processed.add(txt_file)
+                        durations.append(dur)
             update_dashboard_stat("backlog_current_file", "")
         except Exception as e:
             log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
