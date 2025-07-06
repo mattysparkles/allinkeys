@@ -11,6 +11,7 @@ from config.settings import (
     ENABLE_ALTCOIN_DERIVATION,
     ENABLE_BACKLOG_CONVERSION,
     ENABLE_ALERTS,
+    FILES_PER_BATCH,
 )
 
 # Thread health tracking (expanded)
@@ -124,7 +125,7 @@ def _default_metrics():
         "vanity_last_batch_id": 0,
         "vanity_current_batch_id": 0,
         "vanity_next_batch_id": 0,
-        "vanity_batch_size": 1024000,
+        "vanity_batch_size": FILES_PER_BATCH,
         "vanity_progress_percent": 0,
         "vanity_max_file_size_mb": 500,
         "vanity_custom_flags": "",

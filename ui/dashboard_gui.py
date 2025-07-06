@@ -255,10 +255,15 @@ class DashboardGUI:
                 else:
                     btn.config(text=bname, bootstyle="secondary")
 
+        # Map display labels to metric keys
+        key_map = {
+            "vanity": "keygen",
+        }
+
         def set_state(new_state):
             self.module_states[label] = new_state
             try:
-                mod_key = label.lower()
+                mod_key = key_map.get(label.lower(), label.lower())
                 from core.dashboard import (
                     get_shutdown_event,
                     get_pause_event,
@@ -287,7 +292,7 @@ class DashboardGUI:
                     set_thread_health(mod_key, True)
                     set_metric(f"status.{mod_key}", True)
 
-                if mod_key == "vanity" and new_state in ("paused", "running"):
+                if label.lower() == "vanity" and new_state in ("paused", "running"):
                     set_metric("global_run_state", new_state)
             except Exception:
                 pass
@@ -327,8 +332,13 @@ class DashboardGUI:
         try:
             stats = get_current_metrics()
             status_dict = stats.get("thread_health_flags", stats.get("status", {}))
+            key_map = {"vanity": "keygen"}
             for label, updater in self.module_buttons.items():
-                state = "running" if status_dict.get(label.lower(), False) else "stopped"
+                metric_key = key_map.get(label.lower(), label.lower())
+                if label.lower() == "vanity" and stats.get("global_run_state") == "paused":
+                    state = "paused"
+                else:
+                    state = "running" if status_dict.get(metric_key, False) else "stopped"
                 self.module_states[label] = state
                 updater()
         except Exception:
@@ -345,8 +355,13 @@ class DashboardGUI:
                     var.set(live)
             # Update module button states based on metrics
             status_dict = stats.get("thread_health_flags", stats.get("status", {}))
+            key_map = {"vanity": "keygen"}
             for label, updater in self.module_buttons.items():
-                state = "running" if status_dict.get(label.lower(), False) else "stopped"
+                metric_key = key_map.get(label.lower(), label.lower())
+                if label.lower() == "vanity" and stats.get("global_run_state") == "paused":
+                    state = "paused"
+                else:
+                    state = "running" if status_dict.get(metric_key, False) else "stopped"
                 if self.module_states.get(label) != state:
                     self.module_states[label] = state
                     updater()
@@ -354,9 +369,9 @@ class DashboardGUI:
                 # Compute backlog progress locally
                 if key == "backlog_progress":
                     backlog = stats.get("backlog_files_queued", 0) or 0
-                    rechecked = stats.get("csv_rechecked_today", 0) or 0
-                    total = backlog + rechecked
-                    progress = (rechecked / total) * 100 if total > 0 else 100
+                    completed = stats.get("backlog_files_completed", 0) or 0
+                    total = backlog + completed
+                    progress = (completed / total) * 100 if total > 0 else 100
                     widget["value"] = progress
                     pct_lbl = self.metrics.get("backlog_percent")
                     if pct_lbl:
