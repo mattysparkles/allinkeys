@@ -252,15 +252,24 @@ class DashboardGUI:
             self.module_states[label] = new_state
             try:
                 mod_key = label.lower()
-                from core.dashboard import get_shutdown_event, get_pause_event
+                from core.dashboard import (
+                    get_shutdown_event,
+                    get_pause_event,
+                    set_thread_health,
+                )
+
                 if new_state == "stopped":
                     ev = get_shutdown_event()
                     if ev:
                         ev.set()
+                    set_thread_health(mod_key, False)
+                    set_metric(f"status.{mod_key}", False)
                 elif new_state == "paused":
                     pe = get_pause_event()
                     if pe:
                         pe.set()
+                    set_thread_health(mod_key, True)
+                    set_metric(f"status.{mod_key}", True)
                 elif new_state == "running":
                     pe = get_pause_event()
                     if pe and pe.is_set():
@@ -268,11 +277,14 @@ class DashboardGUI:
                     ev = get_shutdown_event()
                     if ev and ev.is_set():
                         ev.clear()
-                if new_state in ("paused", "running") and mod_key == "vanity":
+                    set_thread_health(mod_key, True)
+                    set_metric(f"status.{mod_key}", True)
+
+                if mod_key == "vanity" and new_state in ("paused", "running"):
                     set_metric("global_run_state", new_state)
-                set_metric(f"status.{mod_key}", new_state == "running")
             except Exception:
                 pass
+
             update_buttons()
 
         btns["Start"] = ttk.Button(sub_frame, text="Start", width=8, command=lambda: set_state("running"))

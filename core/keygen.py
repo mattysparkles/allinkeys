@@ -184,21 +184,31 @@ def start_keygen_loop(shared_metrics=None):
 
     try:
         set_metric("status.keygen", True)
-        from core.dashboard import set_thread_health
+        from core.dashboard import (
+            set_thread_health,
+            get_shutdown_event,
+            get_pause_event,
+        )
         set_thread_health("keygen", True)
+
+        shutdown_evt = get_shutdown_event()
+        pause_evt = get_pause_event()
+
         batches_completed = 0
         total_time = 0.0
-        from core.dashboard import get_shutdown_event
+
         while True:
-            if get_shutdown_event() and get_shutdown_event().is_set():
+            if shutdown_evt and shutdown_evt.is_set():
                 break
             batch_start = time.perf_counter()
             index = KEYGEN_STATE["index_within_batch"]
             while index < BATCH_SIZE:
-                if get_shutdown_event() and get_shutdown_event().is_set():
+                if shutdown_evt and shutdown_evt.is_set():
                     break
-                from core.dashboard import get_pause_event
-                if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
+                if (
+                    get_metric("global_run_state") == "paused"
+                    or (pause_evt and pause_evt.is_set())
+                ):
                     time.sleep(1)
                     continue
 
