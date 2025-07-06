@@ -81,7 +81,11 @@ def generate_random_seed(min_bits=128):
 
 
 def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None):
-    """Run VanitySearch once and return when the output file is rotated."""
+    """Run VanitySearch once and return when the output file is rotated.
+
+    Returns ``True`` if the file was generated successfully, ``False`` if the
+    process was interrupted (e.g. via the pause button).
+    """
     global total_keys_generated, last_output_file
 
     selected_gpu_ids = get_vanitysearch_gpu_ids()
@@ -108,6 +112,9 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'default'}"
     )
     logger.info(f"🚀 Running command: {' '.join(cmd)}")
+    if pause_event and pause_event.is_set():
+        logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
+        return False
 
     with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
         proc = subprocess.Popen(
@@ -145,6 +152,11 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         timer_thread.join()
 
     if os.path.exists(current_output_path):
+        size = os.path.getsize(current_output_path)
+        if size == 0:
+            logger.warning(f"⚠️ Output file empty: {current_output_path}")
+            os.remove(current_output_path)
+            return False
         try:
             with open(current_output_path, 'r', encoding='utf-8') as f:
                 lines = sum(1 for _ in f)
@@ -157,8 +169,10 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
         except Exception as e:
             logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
+        return True
     else:
         logger.error(f"❌ Output file not created: {current_output_path}")
+        return False
 
 
 
@@ -232,7 +246,10 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                 progress = round((index / float(FILES_PER_BATCH)) * 100, 2)
                 set_metric("vanity_progress_percent", progress)
 
-                run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index, pause_evt)
+                success = run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index, pause_evt)
+                if not success:
+                    time.sleep(1)
+                    continue
 
                 save_checkpoint({
                     "batch_id": KEYGEN_STATE["batch_id"],

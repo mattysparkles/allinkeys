@@ -580,7 +580,10 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
         args=(shared_shutdown_event, shared_metrics, pause_event),
         name="AltcoinConverter"
     )
-    process.daemon = True
+    # This process launches a ``ProcessPoolExecutor`` for parallel conversions
+    # and therefore cannot be a daemon.  Marking it as non-daemonic avoids
+    # ``daemonic processes are not allowed to have children`` errors.
+    process.daemon = False
     process.start()
     log_message("🚀 Altcoin derive subprocess started...", "INFO")
     return process
