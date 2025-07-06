@@ -18,7 +18,8 @@ from config.settings import (
     CHECKPOINT_PATH,
     MAX_OUTPUT_FILE_SIZE,
     MAX_OUTPUT_LINES,
-    ROTATE_INTERVAL_SECONDS
+    ROTATE_INTERVAL_SECONDS,
+    FILES_PER_BATCH
 
 )
 
@@ -79,7 +80,7 @@ def generate_random_seed(min_bits=128):
     return secrets.randbelow(range_span) + min_val
 
 
-def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
+def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None):
     global total_keys_generated, last_output_file
     file_index = 0
     seed_int = initial_seed_int
@@ -119,6 +120,10 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
             def monitor_process(p, path):
                 start = time.time()
                 while p.poll() is None:
+                    if pause_event and pause_event.is_set():
+                        logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
+                        p.terminate()
+                        break
                     if time.time() - start >= ROTATE_INTERVAL_SECONDS:
                         logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
                         p.terminate()
@@ -181,7 +186,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         logger.info("✅ Checkpoint loaded successfully")
     else:
         KEYGEN_STATE["batch_id"] = secrets.randbelow(1_000_000)
-        KEYGEN_STATE["index_within_batch"] = secrets.randbelow(BATCH_SIZE)
+        KEYGEN_STATE["index_within_batch"] = secrets.randbelow(FILES_PER_BATCH)
         logger.info("🚀 No checkpoint found. Starting with randomized batch/index.")
 
     # Initialize dashboard metrics so the GUI never shows N/A
@@ -209,7 +214,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                 break
             batch_start = time.perf_counter()
             index = KEYGEN_STATE["index_within_batch"]
-            while index < BATCH_SIZE:
+            while index < FILES_PER_BATCH:
                 if shutdown_evt and shutdown_evt.is_set():
                     break
                 if (
@@ -227,10 +232,10 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                 KEYGEN_STATE["index_within_batch"] = index
                 KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
                 set_metric("current_seed_index", index)
-                progress = round((index / float(BATCH_SIZE)) * 100, 2)
+                progress = round((index / float(FILES_PER_BATCH)) * 100, 2)
                 set_metric("vanity_progress_percent", progress)
 
-                run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index)
+                run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index, pause_evt)
 
                 save_checkpoint({
                     "batch_id": KEYGEN_STATE["batch_id"],
@@ -269,4 +274,4 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
 if __name__ == "__main__":
     print("🧪 Running one-shot VanitySearch test with random seed...")
     test_seed = generate_random_seed()
-    run_vanitysearch_stream(test_seed, 999, 0)
+    run_vanitysearch_stream(test_seed, 999, 0, None)
