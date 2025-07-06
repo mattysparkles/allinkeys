@@ -81,88 +81,85 @@ def generate_random_seed(min_bits=128):
 
 
 def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None):
+    """Run VanitySearch once and return when the output file is rotated."""
     global total_keys_generated, last_output_file
-    file_index = 0
-    seed_int = initial_seed_int
 
     selected_gpu_ids = get_vanitysearch_gpu_ids()
     gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
 
-    while True:
-        hex_seed_full = hex(seed_int)[2:].rjust(64, "0")
-        hex_seed_short = hex(seed_int)[2:].lstrip("0")[:8] or "00000000"
+    hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
+    hex_seed_short = hex(initial_seed_int)[2:].lstrip("0")[:8] or "00000000"
 
-        current_output_path = os.path.join(
-            VANITY_OUTPUT_DIR,
-            f"batch_{batch_id}_part_{file_index}_seed_{hex_seed_short}.txt"
+    current_output_path = os.path.join(
+        VANITY_OUTPUT_DIR,
+        f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}.txt"
+    )
+    last_output_file = current_output_path
+
+    cmd = [
+        VANITYSEARCH_PATH,
+        "-s", hex_seed_full,
+        "-gpu",
+        "-o", current_output_path,
+        "-u", VANITY_PATTERN
+    ]
+
+    logger.info(
+        f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'default'}"
+    )
+    logger.info(f"🚀 Running command: {' '.join(cmd)}")
+
+    with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=outfile,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, **gpu_env}
         )
-        last_output_file = current_output_path
 
-        cmd = [
-            VANITYSEARCH_PATH,
-            "-s", hex_seed_full,
-            "-gpu",
-            "-o", current_output_path,
-            "-u", VANITY_PATTERN
-        ]
-
-        logger.info(f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'default'}")
-        logger.info(f"🚀 Running command: {' '.join(cmd)}")
-
-        with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=outfile,
-                stderr=subprocess.STDOUT,
-                env={**os.environ, **gpu_env}
-            )
-
-            def monitor_process(p, path):
-                start = time.time()
-                while p.poll() is None:
-                    if pause_event and pause_event.is_set():
-                        logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
+        def monitor_process(p, path):
+            start = time.time()
+            while p.poll() is None:
+                if pause_event and pause_event.is_set():
+                    logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
+                    p.terminate()
+                    break
+                if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                    logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
+                    p.terminate()
+                    break
+                try:
+                    if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
+                        logger.info(
+                            f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {os.path.basename(path)}"
+                        )
                         p.terminate()
                         break
-                    if time.time() - start >= ROTATE_INTERVAL_SECONDS:
-                        logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
-                        p.terminate()
-                        break
-                    try:
-                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
-                            logger.info(
-                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {os.path.basename(path)}"
-                            )
-                            p.terminate()
-                            break
-                    except FileNotFoundError:
-                        pass
-                    time.sleep(1)
+                except FileNotFoundError:
+                    pass
+                time.sleep(1)
 
-            timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
-            timer_thread.start()
-            proc.wait()
-            timer_thread.join()
+        timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
+        timer_thread.start()
+        proc.wait()
+        timer_thread.join()
 
-        if os.path.exists(current_output_path):
-            try:
-                with open(current_output_path, 'r', encoding='utf-8') as f:
-                    lines = sum(1 for _ in f)
-                    total_keys_generated += lines
-                    increment_metric("keys_generated_today", lines)
-                    increment_metric("keys_generated_lifetime", lines)
-                    from core.dashboard import update_dashboard_stat, get_metric
-                    update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
-                    update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
-                    logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
-        else:
-            logger.error(f"❌ Output file not created: {current_output_path}")
+    if os.path.exists(current_output_path):
+        try:
+            with open(current_output_path, 'r', encoding='utf-8') as f:
+                lines = sum(1 for _ in f)
+                total_keys_generated += lines
+                increment_metric("keys_generated_today", lines)
+                increment_metric("keys_generated_lifetime", lines)
+                from core.dashboard import update_dashboard_stat, get_metric
+                update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
+                update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
+                logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
+    else:
+        logger.error(f"❌ Output file not created: {current_output_path}")
 
-        file_index += 1
-        seed_int = generate_random_seed()
-        logger.info(f"🔁 Rotating to new seed: {hex(seed_int)[2:].rjust(64, '0')} | New file index: {file_index}")
 
 
 from core.dashboard import init_shared_metrics, set_metric, increment_metric, get_metric
