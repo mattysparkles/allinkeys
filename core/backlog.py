@@ -64,13 +64,21 @@ def start_backlog_conversion_loop():
         init_shared_metrics(None)
     except Exception:
         pass
+    from core.dashboard import set_thread_health
     set_metric("status.backlog", True)
+    set_thread_health("backlog", True)
     log_message("📦 Backlog converter started...", "INFO")
 
     try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        executor = ThreadPoolExecutor(max_workers=4)
+        from core.dashboard import get_shutdown_event, get_pause_event
         while True:
+            if get_shutdown_event() and get_shutdown_event().is_set():
+                break
             try:
                 files = [f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")]
+                futures = []
                 for file in files:
                     txt_path = os.path.join(VANITY_OUTPUT_DIR, file)
                     output_path = os.path.join(CSV_DIR, file.replace(".txt", ".csv"))
@@ -91,7 +99,7 @@ def start_backlog_conversion_loop():
                         log_message(f"⏭️ Skipping {file} (file may still be writing)", "DEBUG")
 
                     if too_small or locked or writing:
-                        continue  # Skip conversion
+                        continue
 
                     try:
                         batch_id = int(file.split("_")[1]) if "part_" in file and "_seed_" in file else None
@@ -101,27 +109,31 @@ def start_backlog_conversion_loop():
 
                     if not os.path.exists(output_path):
                         log_message(f"🔁 Converting {file} to CSV...", "INFO")
-                        try:
-                            convert_txt_to_csv(txt_path, batch_id)
-                        except Exception as inner:
-                            log_message(f"❌ Conversion failed for {file}: {safe_str(inner)}", "ERROR")
-                            continue
-
-                        if os.path.exists(output_path):
-                            try:
-                                os.remove(txt_path)
-                                log_message(f"🧹 Deleted original .txt file: {file}", "INFO")
-                            except Exception as e:
-                                log_message(f"⚠️ Could not delete {file}: {safe_str(e)}", "WARNING")
+                        futures.append(executor.submit(convert_txt_to_csv, txt_path, batch_id))
                     else:
                         log_message(f"✅ Already converted: {file}", "DEBUG")
+
+                for fut in as_completed(futures):
+                    try:
+                        fut.result()
+                    except Exception as e:
+                        log_message(f"❌ Backlog task error: {safe_str(e)}", "ERROR")
+                    else:
+                        pass
 
             except Exception as e:
                 log_message(f"❌ Error in backlog conversion loop: {safe_str(e)}", "ERROR")
 
+            if get_pause_event() and get_pause_event().is_set():
+                time.sleep(1)
+                continue
             time.sleep(10)
     finally:
         set_metric("status.backlog", False)
+        try:
+            set_thread_health("backlog", False)
+        except Exception:
+            pass
 
 
 # === Legacy Parsing Mode (Rarely Used) ===

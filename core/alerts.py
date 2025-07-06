@@ -76,6 +76,12 @@ def _start_audio_worker():
 def set_alert_flag(name, value):
     if name in ALERT_FLAGS:
         ALERT_FLAGS[name] = value
+        try:
+            import config.settings as settings
+            if hasattr(settings, 'ALERT_CHECKBOXES'):
+                settings.ALERT_CHECKBOXES[name] = value
+        except Exception:
+            pass
 
 
 def alert_match(match_data, test_mode=False):
@@ -87,6 +93,10 @@ def alert_match(match_data, test_mode=False):
     """
     if not isinstance(match_data, dict):
         log_message("❌ Malformed alert_match call — expected dict.", "ERROR")
+        return
+
+    if not ENABLE_ALERTS:
+        log_message("🚫 Alerts are disabled in config.", "INFO")
         return
 
     # Handle PGP-only encrypted blob
@@ -250,9 +260,11 @@ def alert_match(match_data, test_mode=False):
 
     # 📜 Local match log
     try:
-        log_path = os.path.join(MATCH_LOG_DIR, "matches.log")
-        with open(log_path, 'a') as f:
-            f.write(f"{match_text}\n\n")
+        os.makedirs(MATCH_LOG_DIR, exist_ok=True)
+        ts = datetime.utcnow().strftime('%Y-%m-%d')
+        log_path = os.path.join(MATCH_LOG_DIR, f"matches_{ts}.log")
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(match_data) + "\n")
         log_message("📝 Match written to local log.", "INFO")
     except Exception as e:
         log_message(f"❌ Local match logging error: {e}", "ERROR")

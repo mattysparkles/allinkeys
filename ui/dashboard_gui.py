@@ -252,6 +252,22 @@ class DashboardGUI:
             self.module_states[label] = new_state
             try:
                 mod_key = label.lower()
+                from core.dashboard import get_shutdown_event, get_pause_event
+                if new_state == "stopped":
+                    ev = get_shutdown_event()
+                    if ev:
+                        ev.set()
+                elif new_state == "paused":
+                    pe = get_pause_event()
+                    if pe:
+                        pe.set()
+                elif new_state == "running":
+                    pe = get_pause_event()
+                    if pe and pe.is_set():
+                        pe.clear()
+                    ev = get_shutdown_event()
+                    if ev and ev.is_set():
+                        ev.clear()
                 if new_state in ("paused", "running") and mod_key == "vanity":
                     set_metric("global_run_state", new_state)
                 set_metric(f"status.{mod_key}", new_state == "running")
@@ -295,7 +311,7 @@ class DashboardGUI:
             for name, var in self.checkbox_vars.items():
                 var.set(alerts.ALERT_FLAGS.get(name, False))
             # Update module button states based on metrics
-            status_dict = stats.get("status", {})
+            status_dict = stats.get("thread_health_flags", stats.get("status", {}))
             for label, updater in self.module_buttons.items():
                 state = "running" if status_dict.get(label.lower(), False) else "stopped"
                 if self.module_states.get(label) != state:

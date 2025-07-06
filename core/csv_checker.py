@@ -109,8 +109,9 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
                     log_message(f"🔎 {coin.upper()} columns scanned: {columns}", "DEBUG")
 
             try:
+                from core.dashboard import get_pause_event
                 for row in reader:
-                    if get_metric("global_run_state") == "paused":
+                    if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
                         time.sleep(1)
                         continue
                     rows_scanned += 1
@@ -134,8 +135,13 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
                                     log_message(f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}", "ALERT")
 
                                     if ENABLE_PGP:
-                                        encrypted = encrypt_with_pgp(json.dumps(match_payload), PGP_PUBLIC_KEY_PATH)
-                                        alert_match({"encrypted": encrypted})
+                                        try:
+                                            encrypted = encrypt_with_pgp(json.dumps(match_payload), PGP_PUBLIC_KEY_PATH)
+                                            alert_match(match_payload)
+                                            alert_match({"encrypted": encrypted})
+                                        except Exception as pgp_err:
+                                            log_message(f"⚠️ PGP failed for {addr}: {pgp_err}", "WARN")
+                                            alert_match(match_payload)
                                     else:
                                         alert_match(match_payload)
 
@@ -201,6 +207,8 @@ def check_csvs_day_one(shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
         set_metric("status.csv_check", True)
+        from core.dashboard import set_thread_health
+        set_thread_health("csv_check", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
@@ -216,8 +224,9 @@ def check_csvs_day_one(shared_metrics=None):
 
     combined_set = set.union(*address_sets.values()) if address_sets else set()
 
+    from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
-        if get_metric("global_run_state") == "paused":
+        if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
             time.sleep(1)
             continue
         if not filename.endswith(".csv") or has_been_checked(filename, CHECKED_CSV_LOG):
@@ -228,12 +237,19 @@ def check_csvs_day_one(shared_metrics=None):
 
     update_csv_eta()
     set_metric("status.csv_check", False)
+    try:
+        from core.dashboard import set_thread_health
+        set_thread_health("csv_check", False)
+    except Exception:
+        pass
 
 
 def check_csvs(shared_metrics=None):
     try:
         init_shared_metrics(shared_metrics)
         set_metric("status.csv_recheck", True)
+        from core.dashboard import set_thread_health
+        set_thread_health("csv_recheck", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
@@ -249,8 +265,9 @@ def check_csvs(shared_metrics=None):
 
     combined_set = set.union(*address_sets.values()) if address_sets else set()
 
+    from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
-        if get_metric("global_run_state") == "paused":
+        if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
             time.sleep(1)
             continue
         if not filename.endswith(".csv") or has_been_checked(filename, RECHECKED_CSV_LOG):
@@ -261,6 +278,11 @@ def check_csvs(shared_metrics=None):
 
     update_csv_eta()
     set_metric("status.csv_recheck", False)
+    try:
+        from core.dashboard import set_thread_health
+        set_thread_health("csv_recheck", False)
+    except Exception:
+        pass
 
 def inject_test_match(test_address="1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"):
     test_csv = os.path.join(CSV_DIR, "test_match.csv")
