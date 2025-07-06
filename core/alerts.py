@@ -74,14 +74,15 @@ def _start_audio_worker():
 
 
 def set_alert_flag(name, value):
-    if name in ALERT_FLAGS:
-        ALERT_FLAGS[name] = value
-        try:
-            import config.settings as settings
-            if hasattr(settings, 'ALERT_CHECKBOXES'):
-                settings.ALERT_CHECKBOXES[name] = value
-        except Exception:
-            pass
+    """Update runtime alert flags and reflect changes in settings."""
+    ALERT_FLAGS[name] = value
+    try:
+        import config.settings as settings
+        setattr(settings, name, value)
+        if hasattr(settings, "ALERT_CHECKBOXES"):
+            settings.ALERT_CHECKBOXES[name] = value
+    except Exception:
+        pass
 
 
 def alert_match(match_data, test_mode=False):
