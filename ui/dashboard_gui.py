@@ -191,17 +191,20 @@ class DashboardGUI:
             alert_frame = ttk.LabelFrame(self.container, text="Alert Methods")
             alert_frame.pack(fill="x", padx=10, pady=(5, 0))
 
-            from core.alerts import ALERT_FLAGS
+            from core import alerts
             third = (len(ALERT_CHECKBOXES) + 2) // 3
-            for idx, option in enumerate(ALERT_CHECKBOXES):
+            for idx, name in enumerate(ALERT_CHECKBOXES):
                 row = idx // third
                 col = (idx % third) * 2
-                var = tk.BooleanVar(value=ALERT_FLAGS.get(option, False))
-                self.checkbox_vars[option] = var
-                cb = tk.Checkbutton(alert_frame, text=option, variable=var,
-                                     command=lambda o=option, v=var: self.update_alert_option(o, v.get()))
+                var = tk.BooleanVar(value=alerts.ALERT_FLAGS.get(name, False))
+                var.trace_add(
+                    "write",
+                    lambda *_, n=name, v=var: self.update_alert_option(n, v.get())
+                )
+                self.checkbox_vars[name] = var
+                cb = tk.Checkbutton(alert_frame, text=name, variable=var)
                 cb.grid(row=row, column=col, sticky="w", padx=(0, 2))
-                if ALERT_CREDENTIAL_WARNINGS.get(option):
+                if ALERT_CREDENTIAL_WARNINGS.get(name):
                     tk.Label(alert_frame, text="⚠", fg="red").grid(row=row, column=col + 1)
 
         # Control Panel
@@ -321,7 +324,9 @@ class DashboardGUI:
             stats = get_current_metrics()
             # Sync checkbox states with ALERT_FLAGS
             for name, var in self.checkbox_vars.items():
-                var.set(alerts.ALERT_FLAGS.get(name, False))
+                live = alerts.ALERT_FLAGS.get(name, False)
+                if var.get() != live:
+                    var.set(live)
             # Update module button states based on metrics
             status_dict = stats.get("thread_health_flags", stats.get("status", {}))
             for label, updater in self.module_buttons.items():
