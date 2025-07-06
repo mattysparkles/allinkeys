@@ -54,14 +54,15 @@ def is_file_still_writing(path, delay=2.0):
         return True
 
 
-def start_backlog_conversion_loop():
+def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, pause_event=None):
     """
     Monitors VANITY_OUTPUT_DIR for .txt files and converts to .csv if ready.
     Skips files that are too small, locked, or recently modified.
     """
-    from core.dashboard import set_metric, init_shared_metrics
+    from core.dashboard import set_metric, init_shared_metrics, register_control_events
     try:
-        init_shared_metrics(None)
+        init_shared_metrics(shared_metrics)
+        register_control_events(shutdown_event, pause_event)
     except Exception:
         pass
     from core.dashboard import set_thread_health

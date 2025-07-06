@@ -186,12 +186,24 @@ def _update_stat_internal(key, value=None):
 
     if isinstance(key, dict) and value is None:
         for k, v in key.items():
-            metrics[k] = v
-    else:
-        if value is None:
-            print(f"⚠️ update_dashboard_stat('{key}') called without a value. Defaulting to 'N/A'", flush=True)
-            value = "N/A"
-        metrics[key] = value
+            _update_stat_internal(k, v)
+        return
+
+    if value is None:
+        print(
+            f"⚠️ update_dashboard_stat('{key}') called without a value. Defaulting to 'N/A'",
+            flush=True,
+        )
+        value = "N/A"
+
+    # Support dotted keys for nested dict updates
+    if isinstance(key, str) and "." in key:
+        top, sub = key.split(".", 1)
+        if isinstance(metrics.get(top), dict):
+            metrics[top][sub] = value
+            return
+
+    metrics[key] = value
 
 def increment_metric(key, amount=1):
     if not metrics_lock:
