@@ -270,7 +270,7 @@ def derive_altcoin_addresses_from_hex(hex_key):
     return results[0] if results else {}
 
 
-def convert_txt_to_csv(input_txt_path, batch_id):
+def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_event=None):
     filename = os.path.basename(input_txt_path)
     base_name = os.path.splitext(filename)[0]
 
@@ -310,6 +310,23 @@ def convert_txt_to_csv(input_txt_path, batch_id):
             batch_size = 16384
 
             for line in infile:
+                if (
+                    (pause_event and pause_event.is_set())
+                    or get_metric("global_run_state") == "paused"
+                ):
+                    while (
+                        (pause_event and pause_event.is_set())
+                        or get_metric("global_run_state") == "paused"
+                    ):
+                        if shutdown_event and shutdown_event.is_set():
+                            break
+                        time.sleep(1)
+                    if shutdown_event and shutdown_event.is_set():
+                        break
+
+                if shutdown_event and shutdown_event.is_set():
+                    break
+
                 i += 1
                 stripped = line.strip()
                 if stripped.startswith("PubAddress:") or stripped.startswith("Pub Addr:"):
@@ -396,6 +413,22 @@ def convert_txt_to_csv(input_txt_path, batch_id):
             if hex_batch:
                 results = derive_addresses_gpu(hex_batch)
                 for idx, derived in enumerate(results):
+                    if (
+                        (pause_event and pause_event.is_set())
+                        or get_metric("global_run_state") == "paused"
+                    ):
+                        while (
+                            (pause_event and pause_event.is_set())
+                            or get_metric("global_run_state") == "paused"
+                        ):
+                            if shutdown_event and shutdown_event.is_set():
+                                break
+                            time.sleep(1)
+                        if shutdown_event and shutdown_event.is_set():
+                            break
+
+                    if shutdown_event and shutdown_event.is_set():
+                        break
                     priv_hex = hex_batch[idx]
                     seed, wif, pub = meta_map[priv_hex]
                     btc_u = derived.get("btc_U", "")
@@ -508,7 +541,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
             batch_id = None
             update_dashboard_stat("backlog_current_file", txt_file)
             start_t = time.perf_counter()
-            rows = convert_txt_to_csv(full_path, batch_id)
+            rows = convert_txt_to_csv(full_path, batch_id, pause_event, shared_shutdown_event)
             increment_metric("altcoin_files_converted", 1)
             if rows:
                 increment_metric("derived_addresses_today", rows)

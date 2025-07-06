@@ -235,10 +235,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                     time.sleep(1)
                     continue
 
-                seed = generate_seed_from_batch(KEYGEN_STATE["batch_id"], index)
-                if seed is None:
-                    index += 1
-                    continue
+                seed = generate_random_seed()
 
                 KEYGEN_STATE["index_within_batch"] = index
                 KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
