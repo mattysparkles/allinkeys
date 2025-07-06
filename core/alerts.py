@@ -299,11 +299,15 @@ def alert_match(match_data, test_mode=False):
         log_message(f"❌ Local match logging error: {e}", "ERROR")
 
 
-def trigger_startup_alerts():
+def trigger_startup_alerts(shared_metrics=None):
     """
     Sends startup alerts through configured channels.
     """
-    from core.dashboard import set_metric
+    from core.dashboard import set_metric, init_shared_metrics
+    try:
+        init_shared_metrics(shared_metrics)
+    except Exception:
+        pass
     if not ENABLE_ALERTS:
         log_message("🚫 Alerts are disabled in config.", "INFO")
         return

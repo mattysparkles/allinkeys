@@ -163,12 +163,14 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
 from core.dashboard import init_shared_metrics, set_metric, increment_metric, get_metric
 
 
-def start_keygen_loop(shared_metrics=None):
+def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None):
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
+    from core.dashboard import register_control_events
+    register_control_events(shutdown_event, pause_event)
     if not os.path.exists(VANITY_OUTPUT_DIR):
         os.makedirs(VANITY_OUTPUT_DIR)
 

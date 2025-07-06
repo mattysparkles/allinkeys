@@ -10,8 +10,8 @@ import io
 import json
 from datetime import datetime
 
-# Increase CSV field size limit to handle large entries (up to 10MB)
-csv.field_size_limit(10 * 1024 * 1024)
+# Increase CSV field size limit to handle large entries (up to 100MB)
+csv.field_size_limit(100 * 1024 * 1024)
 from config.settings import (
     CSV_DIR, UNIQUE_DIR, FULL_DIR, DOWNLOADS_DIR,
     CHECKED_CSV_LOG, RECHECKED_CSV_LOG,
@@ -203,9 +203,11 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
         log_message(f"❌ Error reading {filename}: {str(e)}", "ERROR")
         return []
 
-def check_csvs_day_one(shared_metrics=None):
+def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=None):
     try:
         init_shared_metrics(shared_metrics)
+        from core.dashboard import register_control_events
+        register_control_events(shutdown_event, pause_event)
         set_metric("status.csv_check", True)
         set_metric("csv_checked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
@@ -247,9 +249,11 @@ def check_csvs_day_one(shared_metrics=None):
         pass
 
 
-def check_csvs(shared_metrics=None):
+def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None):
     try:
         init_shared_metrics(shared_metrics)
+        from core.dashboard import register_control_events
+        register_control_events(shutdown_event, pause_event)
         set_metric("status.csv_recheck", True)
         set_metric("csv_rechecked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})

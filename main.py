@@ -233,7 +233,7 @@ def should_skip_download_today(download_dir):
     return any(today_str in f for f in os.listdir(download_dir) if f.endswith(".txt"))
 
 
-def run_all_processes(args, shutdown_event, shared_metrics):
+def run_all_processes(args, shutdown_event, shared_metrics, pause_event):
     from core.keygen import start_keygen_loop
     from core.backlog import start_backlog_conversion_loop  # Optional non-GPU parser
     from core.dashboard import init_shared_metrics
@@ -262,7 +262,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
 
     if ENABLE_KEYGEN and not args.headless:
         try:
-            p = Process(target=start_keygen_loop, args=(shared_metrics,))
+            p = Process(target=start_keygen_loop, args=(shared_metrics, shutdown_event, pause_event))
             p.daemon = True
             p.start()
             log_message("[Started] Keygen subprocess", "INFO")
@@ -273,7 +273,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
 
     if ENABLE_DAY_ONE_CHECK:
         try:
-            p = Process(target=check_csvs_day_one, args=(shared_metrics,))
+            p = Process(target=check_csvs_day_one, args=(shared_metrics, shutdown_event, pause_event))
             p.daemon = True
             p.start()
             log_message("[Started] Day One CSV checker", "INFO")
@@ -284,7 +284,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
 
     if ENABLE_UNIQUE_RECHECK:
         try:
-            p = Process(target=check_csvs, args=(shared_metrics,))
+            p = Process(target=check_csvs, args=(shared_metrics, shutdown_event, pause_event))
             p.daemon = True
             p.start()
             log_message("[Started] Unique recheck", "INFO")
@@ -304,7 +304,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
 
     if ENABLE_ALERTS:
         try:
-            p = Process(target=trigger_startup_alerts)
+            p = Process(target=trigger_startup_alerts, args=(shared_metrics,))
             p.daemon = True
             p.start()
             log_message("[Started] Startup alerts", "INFO")
@@ -377,7 +377,7 @@ def run_allinkeys(args):
         log_message("🧺 Running simulated match alert...")
         alert_match(test_data, test_mode=True)
 
-    processes, named_processes = run_all_processes(args, shutdown_event, shared_metrics)
+    processes, named_processes = run_all_processes(args, shutdown_event, shared_metrics, pause_event)
 
     def monitor():
         from core.dashboard import get_current_metrics
