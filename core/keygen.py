@@ -146,6 +146,9 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch):
                     total_keys_generated += lines
                     increment_metric("keys_generated_today", lines)
                     increment_metric("keys_generated_lifetime", lines)
+                    from core.dashboard import update_dashboard_stat, get_metric
+                    update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
+                    update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
                     logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
@@ -181,13 +184,21 @@ def start_keygen_loop(shared_metrics=None):
 
     try:
         set_metric("status.keygen", True)
+        from core.dashboard import set_thread_health
+        set_thread_health("keygen", True)
         batches_completed = 0
         total_time = 0.0
+        from core.dashboard import get_shutdown_event
         while True:
+            if get_shutdown_event() and get_shutdown_event().is_set():
+                break
             batch_start = time.perf_counter()
             index = KEYGEN_STATE["index_within_batch"]
             while index < BATCH_SIZE:
-                if get_metric("global_run_state") == "paused":
+                if get_shutdown_event() and get_shutdown_event().is_set():
+                    break
+                from core.dashboard import get_pause_event
+                if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
                     time.sleep(1)
                     continue
 
@@ -230,6 +241,11 @@ def start_keygen_loop(shared_metrics=None):
         logger.error(f"❌ Unexpected error: {e}")
     finally:
         set_metric("status.keygen", False)
+        try:
+            from core.dashboard import set_thread_health
+            set_thread_health("keygen", False)
+        except Exception:
+            pass
 
 
 # 🧪 One-time run (for debugging only)

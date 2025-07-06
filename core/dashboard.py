@@ -15,6 +15,29 @@ THREAD_HEALTH = {
     "alerts": True
 }
 
+# Control events propagated from the main process
+shutdown_event = None
+pause_event = None
+
+# Simple helpers for modules to report alive/dead status
+def set_thread_health(name, running: bool):
+    THREAD_HEALTH[name] = running
+    update_dashboard_stat("thread_health_flags", THREAD_HEALTH.copy())
+
+
+def register_control_events(shutdown, pause):
+    global shutdown_event, pause_event
+    shutdown_event = shutdown
+    pause_event = pause
+
+
+def get_shutdown_event():
+    return shutdown_event
+
+
+def get_pause_event():
+    return pause_event
+
 # Delayed initialization of Manager and Lock to avoid multiprocessing import issues on Windows
 manager = None
 metrics_lock = None

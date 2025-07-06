@@ -295,7 +295,7 @@ def run_all_processes(args, shutdown_event, shared_metrics):
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
         try:
-            p = start_altcoin_conversion_process(shutdown_event, shared_metrics)
+            p = start_altcoin_conversion_process(shutdown_event, shared_metrics, pause_event)
             log_message("[Started] Altcoin derive subprocess", "INFO")
             processes.append(p)
             named_processes.append(("altcoin", p))
@@ -348,6 +348,9 @@ def run_allinkeys(args):
     if not os.path.exists(test_csv):
         generate_test_csv()
     shutdown_event = multiprocessing.Event()
+    pause_event = multiprocessing.Event()
+    from core.dashboard import register_control_events
+    register_control_events(shutdown_event, pause_event)
 
     # Use dashboard's helper to create a Manager-backed shared metrics dict with
     # an associated lock.  Previously this file manually created its own

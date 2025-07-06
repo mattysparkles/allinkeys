@@ -441,6 +441,9 @@ def convert_txt_to_csv(input_txt_path, batch_id):
 
             increment_metric("csv_created_today", 1)
             increment_metric("csv_created_lifetime", 1)
+            from core.dashboard import update_dashboard_stat, get_metric
+            update_dashboard_stat("csv_created_today", get_metric("csv_created_today"))
+            update_dashboard_stat("csv_created_lifetime", get_metric("csv_created_lifetime"))
             log_message(f"✅ {os.path.basename(path)} written ({rows_written} rows)", "INFO")
             coin_map = {
                 "btc_U": "btc", "btc_C": "btc", "ltc_U": "ltc", "ltc_C": "ltc",
@@ -468,13 +471,16 @@ def convert_txt_to_csv(input_txt_path, batch_id):
         log_message(f"❌ Fatal error in convert_txt_to_csv: {safe_str(e)}", "ERROR")
         return 0
 
-from core.dashboard import init_shared_metrics
+from core.dashboard import init_shared_metrics, register_control_events
 
 
-def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
+def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None):
     try:
         init_shared_metrics(shared_metrics)
         set_metric("status.altcoin", True)
+        from core.dashboard import set_thread_health
+        set_thread_health("altcoin", True)
+        register_control_events(shared_shutdown_event, pause_event)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
@@ -487,6 +493,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
     log_message("📦 Altcoin conversion loop (multi-threaded) started...", "INFO")
 
     processed = set()
+    proc_lock = threading.Lock()
     durations = []  # track per-file processing times
     max_workers = 6  # ⚠️ Tune this based on GPU memory and throughput
 
@@ -500,7 +507,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
             start_t = time.perf_counter()
             convert_txt_to_csv(full_path, batch_id)
             durations.append(time.perf_counter() - start_t)
-            processed.add(txt_file)
+            with proc_lock:
+                processed.add(txt_file)
         except Exception as e:
             log_message(f"❌ Failed to convert {txt_file}: {safe_str(e)}", "ERROR")
 
@@ -510,8 +518,9 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
 
     signal.signal(signal.SIGINT, graceful_shutdown)
 
+    from core.dashboard import get_pause_event
     while not shared_shutdown_event.is_set():
-        if get_metric("global_run_state") == "paused":
+        if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
             time.sleep(1)
             continue
         try:
@@ -547,8 +556,13 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None):
 
     log_message("✅ Altcoin derive loop exited cleanly.", "INFO")
     set_metric("status.altcoin", False)
+    try:
+        from core.dashboard import set_thread_health
+        set_thread_health("altcoin", False)
+    except Exception:
+        pass
 
-def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None):
+def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None, pause_event=None):
     """
     Starts a subprocess that monitors VANITY_OUTPUT_DIR for .txt files and converts them to multi-coin CSVs.
     Gracefully shuts down on Ctrl+C or when shutdown_event is triggered.
@@ -556,7 +570,7 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None)
     """
     process = multiprocessing.Process(
         target=convert_txt_to_csv_loop,
-        args=(shared_shutdown_event, shared_metrics),
+        args=(shared_shutdown_event, shared_metrics, pause_event),
         name="AltcoinConverter"
     )
     process.daemon = True
@@ -570,7 +584,7 @@ if __name__ == "__main__":
     print("🧪 Running one-shot altcoin conversion test (dev mode)...", flush=True)
     shared_event = Event()
     try:
-        start_altcoin_conversion_process(shared_event)
+        start_altcoin_conversion_process(shared_event, None, shared_event)
         while True:
             time.sleep(10)
     except KeyboardInterrupt:
