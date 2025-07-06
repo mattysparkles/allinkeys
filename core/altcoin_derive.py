@@ -489,11 +489,11 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     """
     Monitors VANITY_OUTPUT_DIR for .txt files and converts them to CSV using GPU derivation.
-    Handles multiple files in parallel using ThreadPoolExecutor.
+    Handles multiple files in parallel using a process pool for true concurrency.
     Terminates cleanly on shared shutdown event (e.g. Ctrl+C).
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    log_message("📦 Altcoin conversion loop (multi-threaded) started...", "INFO")
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    log_message("📦 Altcoin conversion loop (multi-process) started...", "INFO")
 
     processed = set()
     proc_lock = threading.Lock()
@@ -552,7 +552,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                 time.sleep(3)
                 continue
 
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 futures = {executor.submit(handle_file, f): f for f in all_txt}
                 for future in as_completed(futures):
                     if shared_shutdown_event.is_set():
