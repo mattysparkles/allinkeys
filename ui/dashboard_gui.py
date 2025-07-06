@@ -50,6 +50,8 @@ class DashboardGUI:
         self.module_states = {}
         self.module_buttons = {}
         self.create_widgets()
+        # Sync initial module states with metrics so buttons reflect actual status
+        self.sync_module_states()
         self.refresh_loop()
 
     def create_widgets(self):
@@ -129,6 +131,7 @@ class DashboardGUI:
             frame = ttk.LabelFrame(self.section_frame, text=group)
             frame.grid(row=row, column=col, padx=5, pady=10, sticky="nsew")
             self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
+            frame.grid_columnconfigure(1, weight=1)
             SMALL_FONT_KEYS = {
                 "addresses_checked_today", "addresses_checked_lifetime",
                 "matches_found_lifetime"
@@ -148,8 +151,8 @@ class DashboardGUI:
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
                 elif key in ("gpu_stats", "gpu_assignments", "status", "matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
-                    txt = tk.Text(frame, height=4, width=45, wrap="word", font=FONT)
-                    txt.grid(row=i, column=1, sticky="w", padx=2, pady=2)
+                    txt = tk.Text(frame, height=5, width=45, wrap="word", font=FONT)
+                    txt.grid(row=i, column=1, sticky="nsew", padx=2, pady=2)
                     txt.configure(state="disabled")
                     self.metrics[key] = txt
                 else:
@@ -235,7 +238,8 @@ class DashboardGUI:
     def _group_button_set(self, parent, label, col):
         sub_frame = ttk.LabelFrame(parent, text=label)
         sub_frame.grid(row=0, column=col, padx=5)
-        self.module_states[label] = "stopped"
+        # Default to running so buttons show correct state until metrics sync
+        self.module_states[label] = "running"
 
         btns = {}
 
@@ -315,6 +319,18 @@ class DashboardGUI:
         try:
             widget.config(background=color)
             widget.after(duration, lambda: widget.config(background=orig))
+        except Exception:
+            pass
+
+    def sync_module_states(self):
+        """Synchronize button states with current metrics on startup."""
+        try:
+            stats = get_current_metrics()
+            status_dict = stats.get("thread_health_flags", stats.get("status", {}))
+            for label, updater in self.module_buttons.items():
+                state = "running" if status_dict.get(label.lower(), False) else "stopped"
+                self.module_states[label] = state
+                updater()
         except Exception:
             pass
 
