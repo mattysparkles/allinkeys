@@ -593,6 +593,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     log_message("📦 Altcoin conversion loop (multi-process) started...", "INFO")
 
     processed = set()
+    queued = set()
     proc_lock = threading.Lock()
     durations = []  # track per-file processing times
     max_workers = 6  # ⚠️ Tune this based on GPU memory and throughput
@@ -604,51 +605,54 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     signal.signal(signal.SIGINT, graceful_shutdown)
 
     from core.dashboard import get_pause_event
-    while not shared_shutdown_event.is_set():
-        if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
-            time.sleep(1)
-            continue
-        try:
-            all_txt = [
-                f for f in os.listdir(VANITY_OUTPUT_DIR)
-                if f.endswith(".txt") and f not in processed
-            ]
-
-            update_dashboard_stat("backlog_files_queued", len(all_txt))
-            if durations:
-                avg = sum(durations) / len(durations)
-                eta_sec = avg * len(all_txt)
-                hrs = int(eta_sec // 3600)
-                mins = int((eta_sec % 3600) // 60)
-                secs = int(eta_sec % 60)
-                update_dashboard_stat({
-                    "backlog_avg_time": f"{avg:.2f}s",
-                    "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
-                })
-
-            if not all_txt:
-                time.sleep(3)
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
+        futures = {}
+        while not shared_shutdown_event.is_set():
+            if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
+                time.sleep(1)
                 continue
+            try:
+                all_txt = [
+                    f for f in os.listdir(VANITY_OUTPUT_DIR)
+                    if f.endswith(".txt") and f not in processed and f not in queued
+                ]
 
-            ctx = multiprocessing.get_context("spawn")
-            with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
-                futures = {
-                    executor.submit(_convert_file_worker, f, pause_event, shared_shutdown_event, shared_metrics): f
-                    for f in all_txt
-                }
-                for future in as_completed(futures):
-                    if shared_shutdown_event.is_set():
-                        break
-                    txt_file, dur, err = future.result()
+                update_dashboard_stat("backlog_files_queued", len(all_txt) + len(queued))
+                if durations:
+                    avg = sum(durations) / len(durations)
+                    eta_sec = avg * (len(all_txt) + len(queued))
+                    hrs = int(eta_sec // 3600)
+                    mins = int((eta_sec % 3600) // 60)
+                    secs = int(eta_sec % 60)
+                    update_dashboard_stat({
+                        "backlog_avg_time": f"{avg:.2f}s",
+                        "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
+                    })
+
+                while all_txt and len(futures) < max_workers:
+                    txt = all_txt.pop(0)
+                    future = executor.submit(_convert_file_worker, txt, pause_event, shared_shutdown_event, shared_metrics)
+                    futures[future] = txt
+                    queued.add(txt)
+
+                done = [fut for fut in futures if fut.done()]
+                for fut in done:
+                    txt_file, dur, err = fut.result()
+                    queued.discard(futures[fut])
                     if err:
                         log_message(f"❌ Failed to convert {txt_file}: {err}", "ERROR")
                     else:
                         with proc_lock:
                             processed.add(txt_file)
                         durations.append(dur)
-            update_dashboard_stat("backlog_current_file", "")
-        except Exception as e:
-            log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
+                    del futures[fut]
+
+                update_dashboard_stat("backlog_current_file", list(queued)[0] if queued else "")
+                if not futures and not all_txt:
+                    time.sleep(3)
+            except Exception as e:
+                log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
 
     log_message("✅ Altcoin derive loop exited cleanly.", "INFO")
     set_metric("status.altcoin", False)
