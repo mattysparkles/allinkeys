@@ -58,6 +58,7 @@ from core.dashboard import (
     init_shared_metrics,
     init_dashboard_manager,
     get_current_metrics,
+    manager as dashboard_manager,
 )
 from ui.dashboard_gui import start_dashboard
 from core.gpu_selector import assign_gpu_roles
@@ -347,18 +348,14 @@ def run_allinkeys(args):
     test_csv = os.path.join(DOWNLOAD_DIR, "test_alerts.csv")
     if not os.path.exists(test_csv):
         generate_test_csv()
-    shutdown_event = multiprocessing.Event()
-    pause_event = multiprocessing.Event()
+
+    # Initialize shared metrics manager and create events from it so they can be
+    # passed safely to worker processes spawned via ``spawn``.
+    shared_metrics = init_dashboard_manager()
+    shutdown_event = dashboard_manager.Event()
+    pause_event = dashboard_manager.Event()
     from core.dashboard import register_control_events
     register_control_events(shutdown_event, pause_event)
-
-    # Use dashboard's helper to create a Manager-backed shared metrics dict with
-    # an associated lock.  Previously this file manually created its own
-    # ``Manager`` without initializing ``metrics_lock`` which caused
-    # ``get_current_metrics()`` to return an empty dict.  By delegating to
-    # :func:`init_dashboard_manager` we ensure the lock and defaults are set up
-    # correctly for all subprocesses.
-    shared_metrics = init_dashboard_manager()
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
