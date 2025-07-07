@@ -678,10 +678,11 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
     return process
     
 if __name__ == "__main__":
-    from multiprocessing import freeze_support, Event
+    from multiprocessing import freeze_support, Manager
     freeze_support()
     print("🧪 Running one-shot altcoin conversion test (dev mode)...", flush=True)
-    shared_event = Event()
+    mgr = Manager()
+    shared_event = mgr.Event()
     try:
         start_altcoin_conversion_process(shared_event, None, shared_event)
         while True:
