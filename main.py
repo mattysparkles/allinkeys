@@ -58,8 +58,8 @@ from core.dashboard import (
     init_shared_metrics,
     init_dashboard_manager,
     get_current_metrics,
-    manager as dashboard_manager,
 )
+import core.dashboard as dashboard_core
 from ui.dashboard_gui import start_dashboard
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
@@ -352,8 +352,8 @@ def run_allinkeys(args):
     # Initialize shared metrics manager and create events from it so they can be
     # passed safely to worker processes spawned via ``spawn``.
     shared_metrics = init_dashboard_manager()
-    shutdown_event = dashboard_manager.Event()
-    pause_event = dashboard_manager.Event()
+    shutdown_event = dashboard_core.manager.Event()
+    pause_event = dashboard_core.manager.Event()
     from core.dashboard import register_control_events
     register_control_events(shutdown_event, pause_event)
     try:
