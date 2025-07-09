@@ -171,7 +171,8 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=
                                     new_matches.add(addr)
                                     increment_metric("matched_keys", 1)
                                     increment_metric(f"matches_found_today.{coin}", 1)
-                                    increment_metric(f"matches_found_lifetime.{coin}", 1)
+                                    if filename != "test_alerts.csv":
+                                        increment_metric(f"matches_found_lifetime.{coin}", 1)
                     except Exception as row_err:
                         if safe_mode:
                             log_message(
@@ -196,6 +197,7 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=
         increment_metric("csv_checked_lifetime", 1)
         if recheck:
             increment_metric("csv_rechecked_today", 1)
+            increment_metric("csv_rechecked_lifetime", 1)
         update_dashboard_stat({
             "avg_check_time": avg_time,
             "last_check_duration": f"{duration_sec:.2f}s"
@@ -225,7 +227,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
     try:
         init_shared_metrics(shared_metrics)
         from core.dashboard import register_control_events
-        register_control_events(shutdown_event, pause_event)
+        register_control_events(shutdown_event, pause_event, module="csv_check")
         set_metric("status.csv_check", True)
         set_metric("csv_checked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
@@ -271,7 +273,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
     try:
         init_shared_metrics(shared_metrics)
         from core.dashboard import register_control_events
-        register_control_events(shutdown_event, pause_event)
+        register_control_events(shutdown_event, pause_event, module="csv_recheck")
         set_metric("status.csv_recheck", True)
         set_metric("csv_rechecked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})

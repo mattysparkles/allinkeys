@@ -146,7 +146,7 @@ class DashboardGUI:
                     font=FONT,
                 ).grid(row=i, column=0, sticky="nw", padx=2, pady=2)
 
-                if key not in ("cpu_usage", "ram_usage") and any(x in key for x in ["usage", "percent", "progress", "keys_per_sec"]):
+                if key not in ("cpu_usage", "ram_usage") and any(x in key for x in ["usage", "percent", "progress"]) and key != "keys_per_sec":
                     pb = ttk.Progressbar(frame, length=150, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
@@ -180,12 +180,9 @@ class DashboardGUI:
                     justify="left",
                     font=FONT,
                 ).grid(row=bp_row, column=0, sticky="nw", padx=2, pady=2)
-                pb = ttk.Progressbar(frame, length=150, mode="determinate")
-                pb.grid(row=bp_row, column=1, sticky="w", padx=2, pady=2)
-                self.metrics["backlog_progress"] = pb
-                pct = tk.Label(frame, text="0%", font=FONT)
-                pct.grid(row=bp_row + 1, column=1, sticky="w", padx=2, pady=(0, 2))
-                self.metrics["backlog_percent"] = pct
+                self.backlog_progress_frame = ttk.Frame(frame)
+                self.backlog_progress_frame.grid(row=bp_row, column=0, columnspan=2, sticky="nsew")
+                self.metrics["backlog_progress"] = {}
 
             row += 1
 
@@ -199,7 +196,8 @@ class DashboardGUI:
             for idx, name in enumerate(ALERT_CHECKBOXES):
                 row = idx // third
                 col = (idx % third) * 2
-                var = tk.BooleanVar(value=alerts.ALERT_FLAGS.get(name, False))
+                initial = getattr(settings, name, alerts.ALERT_FLAGS.get(name, False))
+                var = tk.BooleanVar(value=initial)
                 var.trace_add(
                     "write",
                     lambda *_, n=name, v=var: self.update_alert_option(n, v.get())
@@ -271,22 +269,22 @@ class DashboardGUI:
                 )
 
                 if new_state == "stopped":
-                    ev = get_shutdown_event()
+                    ev = get_shutdown_event(mod_key)
                     if ev:
                         ev.set()
                     set_thread_health(mod_key, False)
                     set_metric(f"status.{mod_key}", False)
                 elif new_state == "paused":
-                    pe = get_pause_event()
+                    pe = get_pause_event(mod_key)
                     if pe:
                         pe.set()
                     set_thread_health(mod_key, True)
                     set_metric(f"status.{mod_key}", True)
                 elif new_state == "running":
-                    pe = get_pause_event()
+                    pe = get_pause_event(mod_key)
                     if pe and pe.is_set():
                         pe.clear()
-                    ev = get_shutdown_event()
+                    ev = get_shutdown_event(mod_key)
                     if ev and ev.is_set():
                         ev.clear()
                     set_thread_health(mod_key, True)
@@ -366,16 +364,18 @@ class DashboardGUI:
                     self.module_states[label] = state
                     updater()
             for key, widget in self.metrics.items():
-                # Compute backlog progress locally
                 if key == "backlog_progress":
-                    backlog = stats.get("backlog_files_queued", 0) or 0
-                    completed = stats.get("backlog_files_completed", 0) or 0
-                    total = backlog + completed
-                    progress = (completed / total) * 100 if total > 0 else 100
-                    widget["value"] = progress
-                    pct_lbl = self.metrics.get("backlog_percent")
-                    if pct_lbl:
-                        pct_lbl.config(text=f"{progress:.1f}%")
+                    for child in self.backlog_progress_frame.winfo_children():
+                        child.destroy()
+                    progress_data = stats.get("backlog_progress", {}) or {}
+                    for idx, (fname, pct) in enumerate(progress_data.items()):
+                        ttk.Label(self.backlog_progress_frame, text=fname[:20]).grid(row=idx, column=0, sticky="w")
+                        bar = ttk.Progressbar(self.backlog_progress_frame, length=120, mode="determinate")
+                        bar.grid(row=idx, column=1, padx=2)
+                        try:
+                            bar["value"] = float(pct)
+                        except Exception:
+                            bar["value"] = 0
                     continue
 
                 value = stats.get(key, "N/A")

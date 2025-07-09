@@ -104,6 +104,8 @@ def metrics_updater(shared_metrics=None):
     global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
     while True:
         try:
+            from core.dashboard import reset_daily_metrics_if_needed
+            reset_daily_metrics_if_needed()
             from core.keygen import keygen_progress
             now = time.time()
             disk_free = psutil.disk_usage('/').free
@@ -234,7 +236,7 @@ def should_skip_download_today(download_dir):
     return any(today_str in f for f in os.listdir(download_dir) if f.endswith(".txt"))
 
 
-def run_all_processes(args, shutdown_event, shared_metrics, pause_event):
+def run_all_processes(args, shutdown_event, shared_metrics, pause_events):
     from core.keygen import start_keygen_loop
     from core.backlog import start_backlog_conversion_loop  # Optional non-GPU parser
     from core.dashboard import init_shared_metrics
@@ -263,7 +265,7 @@ def run_all_processes(args, shutdown_event, shared_metrics, pause_event):
 
     if ENABLE_KEYGEN and not args.headless:
         try:
-            p = Process(target=start_keygen_loop, args=(shared_metrics, shutdown_event, pause_event))
+            p = Process(target=start_keygen_loop, args=(shared_metrics, shutdown_event, pause_events.get('keygen')))
             p.daemon = True
             p.start()
             log_message("[Started] Keygen subprocess", "INFO")
@@ -274,7 +276,7 @@ def run_all_processes(args, shutdown_event, shared_metrics, pause_event):
 
     if ENABLE_DAY_ONE_CHECK:
         try:
-            p = Process(target=check_csvs_day_one, args=(shared_metrics, shutdown_event, pause_event))
+            p = Process(target=check_csvs_day_one, args=(shared_metrics, shutdown_event, pause_events.get('csv_check')))
             p.daemon = True
             p.start()
             log_message("[Started] Day One CSV checker", "INFO")
@@ -285,7 +287,7 @@ def run_all_processes(args, shutdown_event, shared_metrics, pause_event):
 
     if ENABLE_UNIQUE_RECHECK:
         try:
-            p = Process(target=check_csvs, args=(shared_metrics, shutdown_event, pause_event))
+            p = Process(target=check_csvs, args=(shared_metrics, shutdown_event, pause_events.get('csv_recheck')))
             p.daemon = True
             p.start()
             log_message("[Started] Unique recheck", "INFO")
@@ -296,7 +298,7 @@ def run_all_processes(args, shutdown_event, shared_metrics, pause_event):
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
         try:
-            p = start_altcoin_conversion_process(shutdown_event, shared_metrics, pause_event)
+            p = start_altcoin_conversion_process(shutdown_event, shared_metrics, pause_events.get('altcoin'))
             log_message("[Started] Altcoin derive subprocess", "INFO")
             processes.append(p)
             named_processes.append(("altcoin", p))
@@ -353,9 +355,16 @@ def run_allinkeys(args):
     # passed safely to worker processes spawned via ``spawn``.
     shared_metrics = init_dashboard_manager()
     shutdown_event = dashboard_core.manager.Event()
-    pause_event = dashboard_core.manager.Event()
+    pause_events = {
+        'keygen': dashboard_core.manager.Event(),
+        'altcoin': dashboard_core.manager.Event(),
+        'csv_check': dashboard_core.manager.Event(),
+        'csv_recheck': dashboard_core.manager.Event(),
+    }
     from core.dashboard import register_control_events
-    register_control_events(shutdown_event, pause_event)
+    register_control_events(shutdown_event, None)  # global events
+    for name, ev in pause_events.items():
+        register_control_events(shutdown_event, ev, module=name)
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -374,7 +383,7 @@ def run_allinkeys(args):
         log_message("🧺 Running simulated match alert...")
         alert_match(test_data, test_mode=True)
 
-    processes, named_processes = run_all_processes(args, shutdown_event, shared_metrics, pause_event)
+    processes, named_processes = run_all_processes(args, shutdown_event, shared_metrics, pause_events)
 
     def monitor():
         from core.dashboard import get_current_metrics

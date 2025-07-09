@@ -51,14 +51,17 @@ def get_file_size_mb(path):
     return os.path.getsize(path) / (1024 * 1024)
 
 
-def open_new_csv_writer(index):
+def open_new_csv_writer(index, base_name=None):
     """
     Opens a new CSV writer in a batch-named subfolder with appropriate headers.
     Returns: (file_handle, csv_writer, full_path)
     """
     # CSVs are now written directly to CSV_DIR to simplify downstream checks
     os.makedirs(CSV_DIR, exist_ok=True)
-    path = os.path.join(CSV_DIR, f"keys_batch_{index:05d}.csv")
+    if base_name:
+        path = os.path.join(CSV_DIR, f"{base_name}_part_{index}.csv")
+    else:
+        path = os.path.join(CSV_DIR, f"keys_batch_{index:05d}.csv")
     f = open(path, "w", newline='', encoding="utf-8", buffering=1)
     writer = csv.DictWriter(f, fieldnames=[
         "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
@@ -337,6 +340,9 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
     try:
         with open(input_txt_path, "rb") as infile_raw:
+            total_lines = sum(1 for _ in infile_raw)
+            infile_raw.seek(0)
+
             def safe_lines(stream):
                 for i, raw in enumerate(stream, 1):
                     try:
@@ -350,10 +356,8 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
             infile = safe_lines(infile_raw)
 
-            csv_index = len([
-                f for _, _, files in os.walk(CSV_DIR) for f in files if f.endswith(".csv")
-            ])
-            f, writer, path = open_new_csv_writer(csv_index)
+            csv_index = 0
+            f, writer, path = open_new_csv_writer(csv_index, base_name)
 
             rows_written = 0
             address_tally = {k: 0 for k in [
@@ -389,6 +393,8 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                     break
 
                 i += 1
+                progress = (i / total_lines) * 100 if total_lines else 100
+                update_dashboard_stat(f"backlog_progress.{base_name}", round(progress, 1))
                 stripped = line.strip()
                 if stripped.startswith("PubAddress:") or stripped.startswith("Pub Addr:"):
                     line_buffer = [stripped]
@@ -462,7 +468,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                 if get_file_size_mb(path) >= MAX_CSV_MB:
                                     f.close()
                                     csv_index += 1
-                                    f, writer, path = open_new_csv_writer(csv_index)
+                                    f, writer, path = open_new_csv_writer(csv_index, base_name)
 
                             hex_batch.clear()
                             pub_map.clear()
@@ -546,6 +552,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                     index += 1
                 f.flush()
             f.close()
+            update_dashboard_stat(f"backlog_progress.{base_name}", 100)
 
             increment_metric("csv_created_today", 1)
             increment_metric("csv_created_lifetime", 1)
@@ -594,6 +601,7 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics):
         if rows:
             increment_metric("derived_addresses_today", rows)
         increment_metric("backlog_files_completed", 1)
+        update_dashboard_stat(f"backlog_progress.{os.path.splitext(txt_file)[0]}", 100)
         duration = time.perf_counter() - start_t
         return txt_file, duration, None
     except Exception as e:
@@ -609,7 +617,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
         set_metric("backlog_files_completed", 0)
         from core.dashboard import set_thread_health
         set_thread_health("altcoin", True)
-        register_control_events(shared_shutdown_event, pause_event)
+        register_control_events(shared_shutdown_event, pause_event, module="altcoin")
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)

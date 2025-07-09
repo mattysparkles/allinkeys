@@ -1,6 +1,8 @@
 import threading
 import time
-from datetime import datetime
+import json
+import os
+from datetime import datetime, timezone, timedelta
 import core.checkpoint as checkpoint
 import traceback
 import multiprocessing
@@ -12,6 +14,8 @@ from config.settings import (
     ENABLE_BACKLOG_CONVERSION,
     ENABLE_ALERTS,
     FILES_PER_BATCH,
+    ENABLE_AUTO_TIMEZONE_SETTING,
+    MANUAL_TIME_ZONE_OVERRIDE,
 )
 
 # Thread health tracking (expanded)
@@ -28,6 +32,20 @@ THREAD_HEALTH = {
 # Control events propagated from the main process
 shutdown_event = None
 pause_event = None
+module_pause_events = {}
+module_shutdown_events = {}
+
+# Lifetime metrics persistence
+METRICS_LIFETIME_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'metrics_lifetime.json'))
+LIFETIME_KEYS = {
+    'keys_generated_lifetime',
+    'csv_checked_lifetime',
+    'csv_rechecked_lifetime',
+    'csv_created_lifetime',
+    'matches_found_lifetime',
+    'addresses_checked_lifetime',
+    'addresses_generated_lifetime',
+}
 
 # Simple helpers for modules to report alive/dead status
 def set_thread_health(name, running: bool):
@@ -35,23 +53,119 @@ def set_thread_health(name, running: bool):
     update_dashboard_stat("thread_health_flags", THREAD_HEALTH.copy())
 
 
-def register_control_events(shutdown, pause):
+def register_control_events(shutdown, pause, module=None):
+    """Register shutdown and pause events for a specific module or globally."""
     global shutdown_event, pause_event
-    shutdown_event = shutdown
-    pause_event = pause
+    if module:
+        module_shutdown_events[module] = shutdown
+        module_pause_events[module] = pause
+    else:
+        shutdown_event = shutdown
+        pause_event = pause
 
 
-def get_shutdown_event():
+def get_shutdown_event(module=None):
+    if module and module in module_shutdown_events:
+        return module_shutdown_events[module]
     return shutdown_event
 
 
-def get_pause_event():
+def get_pause_event(module=None):
+    if module and module in module_pause_events:
+        return module_pause_events[module]
     return pause_event
 
 # Delayed initialization of Manager and Lock to avoid multiprocessing import issues on Windows
 manager = None
 metrics_lock = None
 metrics = None
+
+
+def load_lifetime_metrics():
+    """Load persisted lifetime metrics from disk."""
+    if not os.path.exists(METRICS_LIFETIME_PATH):
+        return {}
+    try:
+        with open(METRICS_LIFETIME_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_lifetime_metrics():
+    """Persist lifetime metrics to disk."""
+    if metrics is None:
+        return
+    data = {}
+    for key in LIFETIME_KEYS:
+        val = metrics.get(key)
+        if isinstance(val, dict):
+            data[key] = dict(val)
+        else:
+            data[key] = val
+    try:
+        with open(METRICS_LIFETIME_PATH, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def maybe_persist_lifetime(key):
+    """Persist metrics if the key belongs to lifetime stats."""
+    base = key.split('.')[0] if isinstance(key, str) else key
+    if base in LIFETIME_KEYS:
+        save_lifetime_metrics()
+
+
+def get_local_timezone():
+    """Return the configured timezone object."""
+    if ENABLE_AUTO_TIMEZONE_SETTING:
+        try:
+            from tzlocal import get_localzone
+            return get_localzone()
+        except Exception:
+            pass
+    # Fallback manual offset like "UTC-5"
+    try:
+        if MANUAL_TIME_ZONE_OVERRIDE.startswith('UTC'):
+            sign = -1 if '-' in MANUAL_TIME_ZONE_OVERRIDE else 1
+            hours = int(MANUAL_TIME_ZONE_OVERRIDE.split('UTC')[1].replace('+','').replace('-',''))
+            return timezone(timedelta(hours=sign * hours))
+    except Exception:
+        pass
+    return timezone.utc
+
+
+TODAY_METRIC_KEYS = [
+    'csv_checked_today',
+    'csv_rechecked_today',
+    'csv_created_today',
+    'keys_generated_today',
+    'derived_addresses_today',
+]
+TODAY_METRIC_KEYS += [f'addresses_checked_today', f'addresses_generated_today', f'matches_found_today']
+
+
+def reset_daily_metrics_if_needed():
+    tz = get_local_timezone()
+    last_str = get_metric('metrics_last_reset')
+    try:
+        last = datetime.fromisoformat(last_str)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        last = last.astimezone(tz)
+    except Exception:
+        last = datetime.now(tz)
+    now = datetime.now(tz)
+    if now.date() != last.date():
+        for key in TODAY_METRIC_KEYS:
+            val = get_metric(key)
+            if isinstance(val, dict):
+                update_dashboard_stat(key, {k: 0 for k in val})
+            else:
+                update_dashboard_stat(key, 0)
+        update_dashboard_stat('metrics_last_reset', now.isoformat())
+        save_lifetime_metrics()
 
 
 def init_dashboard_manager():
@@ -65,9 +179,15 @@ def init_dashboard_manager():
         metrics_lock = manager.Lock()
         default_metrics = _default_metrics()
         metrics = manager.dict()
-        # Wrap nested dictionaries
         metrics.update({k: (manager.dict(v) if isinstance(v, dict) else v)
                         for k, v in default_metrics.items()})
+        # Load persisted lifetime values
+        lifetime = load_lifetime_metrics()
+        for k, v in lifetime.items():
+            if isinstance(v, dict):
+                metrics[k] = manager.dict(v)
+            else:
+                metrics[k] = v
     return metrics
 
 
@@ -96,6 +216,8 @@ def _default_metrics():
         "csv_created_today": 0,
         "csv_created_lifetime": 0,
         "csv_rechecked_today": 0,
+        "csv_rechecked_lifetime": 0,
+        "derived_addresses_today": 0,
         "addresses_checked_today": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
         },
@@ -133,6 +255,7 @@ def _default_metrics():
         "backlog_eta": "N/A",
         "backlog_avg_time": "N/A",
         "backlog_current_file": "",
+        "backlog_progress": {},
         "status": {
             "keygen": ENABLE_KEYGEN,
             "altcoin": ENABLE_ALTCOIN_DERIVATION,
@@ -216,6 +339,7 @@ def _update_stat_internal(key, value=None):
             return
 
     metrics[key] = value
+    maybe_persist_lifetime(key)
 
 def increment_metric(key, amount=1):
     if not metrics_lock:
@@ -227,6 +351,7 @@ def increment_metric(key, amount=1):
                 metrics[top][sub] = metrics[top].get(sub, 0) + amount
         elif isinstance(metrics.get(key), int):
             metrics[key] += amount
+    maybe_persist_lifetime(key)
 
 
 def set_metric(key, value):

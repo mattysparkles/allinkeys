@@ -186,7 +186,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     from core.dashboard import register_control_events
-    register_control_events(shutdown_event, pause_event)
+    register_control_events(shutdown_event, pause_event, module="keygen")
     if not os.path.exists(VANITY_OUTPUT_DIR):
         os.makedirs(VANITY_OUTPUT_DIR)
 

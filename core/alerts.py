@@ -151,9 +151,16 @@ def alert_match(match_data, test_mode=False):
             win = tk.Toplevel(root)
             win.title(alert_type)
             win.configure(bg=ALERT_POPUP_COLOR_1)
-            win.geometry("520x180")
-            lbl = tk.Label(win, text=ALERT_PHRASE, fg="white", bg=ALERT_POPUP_COLOR_1,
-                            font=("Helvetica", 18, "bold"))
+            win.geometry("600x250")
+            lbl = tk.Label(
+                win,
+                text=ALERT_PHRASE,
+                fg="white",
+                bg=ALERT_POPUP_COLOR_1,
+                font=("Helvetica", 16, "bold"),
+                wraplength=560,
+                justify="center",
+            )
             lbl.pack(expand=True, fill="both", padx=10, pady=10)
 
             def flash():
@@ -163,7 +170,6 @@ def alert_match(match_data, test_mode=False):
                 win.after(500, flash)
 
             flash()
-            win.after(8000, root.destroy)
             root.mainloop()
             log_message("✅ Desktop popup displayed.", "INFO")
             increment_metric("alerts_sent_today.popup")
