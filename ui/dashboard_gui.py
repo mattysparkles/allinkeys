@@ -260,6 +260,7 @@ class DashboardGUI:
         }
 
         def set_state(new_state):
+            print(f"[GUI] set_state({label}, {new_state})", flush=True)
             self.module_states[label] = new_state
             try:
                 mod_key = key_map.get(label.lower(), label.lower())
@@ -293,15 +294,21 @@ class DashboardGUI:
 
                 if label.lower() == "vanity" and new_state in ("paused", "running"):
                     set_metric("global_run_state", new_state)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[GUI] set_state error for {label}: {exc}", flush=True)
 
             update_buttons()
 
-        btns["Start"] = ttk.Button(sub_frame, text="Start", width=8, command=lambda: set_state("running"))
-        btns["Stop"] = ttk.Button(sub_frame, text="Stop", width=8, command=lambda: set_state("stopped"))
-        btns["Pause"] = ttk.Button(sub_frame, text="Pause", width=8, command=lambda m=label.lower(): self.handle_pause_resume(m))
-        btns["Resume"] = ttk.Button(sub_frame, text="Resume", width=8, command=lambda m=label.lower(): self.handle_pause_resume(m))
+        mapped = key_map.get(label.lower(), label.lower())
+
+        btns["Start"] = ttk.Button(sub_frame, text="Start", width=8,
+                                   command=lambda: set_state("running"))
+        btns["Stop"] = ttk.Button(sub_frame, text="Stop", width=8,
+                                  command=lambda: set_state("stopped"))
+        btns["Pause"] = ttk.Button(sub_frame, text="Pause", width=8,
+                                   command=lambda m=mapped: self.handle_pause_resume(m))
+        btns["Resume"] = ttk.Button(sub_frame, text="Resume", width=8,
+                                    command=lambda m=mapped: self.handle_pause_resume(m))
 
         btns["Start"].grid(row=0, column=0)
         btns["Stop"].grid(row=0, column=1)
@@ -353,6 +360,7 @@ class DashboardGUI:
         from core.dashboard import module_pause_events, set_thread_health
         ev = module_pause_events.get(module_name)
         if not ev:
+            print(f"[GUI] ⚠️ No pause event for {module_name}", flush=True)
             return
         if ev.is_set():
             print(f"[GUI] ▶️ Resuming module: {module_name}", flush=True)
