@@ -77,7 +77,8 @@ def get_compressed_pubkey(priv_bytes):
     return prefix + x.to_bytes(32, "big")
 
 
-def hash160(data):
+def hash160_cpu(data):
+    """Python implementation of HASH160 for CPU fallback paths."""
     sha = hashlib.sha256(data).digest()
     rip = hashlib.new('ripemd160', sha).digest()
     return rip
@@ -207,7 +208,8 @@ def derive_addresses_gpu(hex_keys):
     pub_u_list = []
     for priv in key_bytes:
         sk = SigningKey.from_string(priv, curve=SECP256k1)
-        vk_bytes = sk.get_verifying_key().to_string()
+        vk = sk.get_verifying_key()
+        vk_bytes = vk.to_string()
         x = vk_bytes[:32]
         y = vk_bytes[32:]
         prefix = b"\x03" if (y[-1] % 2) else b"\x02"
@@ -281,8 +283,8 @@ def derive_addresses_cpu(hex_keys):
             prefix = b"\x03" if (y[-1] % 2) else b"\x02"
             pubkey_compressed = prefix + x
             pubkey_uncompressed = b"\x04" + x + y
-            hash160_c = hash160(pubkey_compressed)
-            hash160_u = hash160(pubkey_uncompressed)
+            hash160_c = hash160_cpu(pubkey_compressed)
+            hash160_u = hash160_cpu(pubkey_uncompressed)
 
             result = {
                 "btc_C": b58(b"\x00", hash160_c),
