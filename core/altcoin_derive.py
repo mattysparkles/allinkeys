@@ -200,6 +200,8 @@ def derive_addresses_gpu(hex_keys):
         log_message(str(build_err), "ERROR")
         raise
 
+    kernel_hash160 = cl.Kernel(program, "hash160")
+
     key_bytes = [bytes.fromhex(k.lstrip("0x").zfill(64)) for k in hex_keys]
     count = len(key_bytes)
 
@@ -227,8 +229,11 @@ def derive_addresses_gpu(hex_keys):
     out_comp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
     out_uncomp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
 
-    program.hash160(queue, (count,), None, comp_buf, out_comp_buf, np.uint32(33))
-    program.hash160(queue, (count,), None, uncomp_buf, out_uncomp_buf, np.uint32(65))
+    kernel_hash160.set_args(comp_buf, out_comp_buf, np.uint32(33))
+    cl.enqueue_nd_range_kernel(queue, kernel_hash160, (count,), None)
+
+    kernel_hash160.set_args(uncomp_buf, out_uncomp_buf, np.uint32(65))
+    cl.enqueue_nd_range_kernel(queue, kernel_hash160, (count,), None)
 
     hash_comp = np.empty((count, 20), dtype=np.uint8)
     hash_uncomp = np.empty((count, 20), dtype=np.uint8)
