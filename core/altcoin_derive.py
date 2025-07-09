@@ -19,8 +19,13 @@ import time
 import threading
 import multiprocessing
 import io
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 _gpu_logged_once = False
+_cpu_logged_once = False
 
 # Prevent writing absurdly large fields to CSV
 MAX_FIELD_SIZE = 10000  # 10KB per field safety cap
@@ -177,7 +182,9 @@ def get_gpu_context_for_altcoin():
         context = cl.Context([device])
 
         if not _gpu_logged_once:
-            log_message(f"🧠 Using GPU for altcoin derive: {platform.name} / {device.name}")
+            log_message(
+                f"🧠 Using GPU for altcoin derive on PID {os.getpid()}: {platform.name} / {device.name}"
+            )
             _gpu_logged_once = True
 
         return context, device
@@ -326,6 +333,10 @@ def derive_addresses_gpu(hex_keys):
 
 def derive_addresses_cpu(hex_keys):
     """Derive addresses purely with Python when no GPU is available."""
+    global _cpu_logged_once
+    if not _cpu_logged_once:
+        log_message(f"🧠 Using CPU for altcoin derive on PID {os.getpid()}", "WARNING")
+        _cpu_logged_once = True
     results = []
     for key in hex_keys:
         priv = bytes.fromhex(key.lstrip("0x").zfill(64))
@@ -380,6 +391,8 @@ def derive_altcoin_addresses_from_hex(hex_key):
 def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_event=None):
     filename = os.path.basename(input_txt_path)
     base_name = os.path.splitext(filename)[0]
+    perf_stats = {"load": 0.0, "derive": 0.0, "write": 0.0}
+    start_total = time.perf_counter()
 
     # If CSVs for this file already exist, assume conversion finished previously
     existing = [f for f in os.listdir(CSV_DIR)
@@ -390,8 +403,14 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
     try:
         with open(input_txt_path, "rb") as infile_raw:
+            t_load = time.perf_counter()
             total_lines = sum(1 for _ in infile_raw)
             infile_raw.seek(0)
+            perf_stats["load"] = time.perf_counter() - t_load
+            log_message(
+                f"[PERF] {filename}: loaded {total_lines} lines in {perf_stats['load']:.2f}s",
+                "DEBUG",
+            )
 
             def safe_lines(stream):
                 for i, raw in enumerate(stream, 1):
@@ -466,7 +485,14 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                         meta_map[priv_hex] = (int_seed, wif, pub)
 
                         if len(hex_batch) >= batch_size:
+                            t_der = time.perf_counter()
                             results = derive_addresses(hex_batch)
+                            d_dur = time.perf_counter() - t_der
+                            perf_stats["derive"] += d_dur
+                            log_message(
+                                f"[PERF] Derived {len(hex_batch)} keys in {d_dur:.2f}s",
+                                "DEBUG",
+                            )
                             for idx, derived in enumerate(results):
                                 priv_hex = hex_batch[idx]
                                 seed, wif, pub = meta_map[priv_hex]
@@ -512,7 +538,9 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                     )
                                     continue
 
+                                t_write = time.perf_counter()
                                 writer.writerow(row)
+                                perf_stats["write"] += time.perf_counter() - t_write
                                 rows_written += 1
                                 index += 1
 
@@ -527,6 +555,11 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                         log_message(
                                             f"ℹ️ Skipping remaining output because {os.path.basename(path)} already exists",
                                             "INFO"
+                                        )
+                                        total_dur = time.perf_counter() - start_total
+                                        log_message(
+                                            f"[PERF] File {filename} aborted early after {total_dur:.2f}s",
+                                            "DEBUG",
                                         )
                                         return rows_written
 
@@ -545,7 +578,11 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
             # Final flush
             if hex_batch:
+                t_der = time.perf_counter()
                 results = derive_addresses(hex_batch)
+                d_dur = time.perf_counter() - t_der
+                perf_stats["derive"] += d_dur
+                log_message(f"[PERF] Derived {len(hex_batch)} keys in {d_dur:.2f}s", "DEBUG")
                 for idx, derived in enumerate(results):
                     if (
                         (pause_event and pause_event.is_set())
@@ -607,7 +644,9 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                         )
                         continue
 
+                    t_write = time.perf_counter()
                     writer.writerow(row)
+                    perf_stats["write"] += time.perf_counter() - t_write
                     rows_written += 1
                     index += 1
                 f.flush()
@@ -640,6 +679,11 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
             for coin, count in per_coin.items():
                 log_message(f"📈 Generated {count} {coin.upper()} addresses", "DEBUG")
 
+            total_dur = time.perf_counter() - start_total
+            log_message(
+                f"[PERF] File {filename} load:{perf_stats['load']:.2f}s derive:{perf_stats['derive']:.2f}s write:{perf_stats['write']:.2f}s total:{total_dur:.2f}s",
+                "DEBUG",
+            )
             return rows_written
 
     except Exception as e:
@@ -655,6 +699,16 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics):
         init_shared_metrics(shared_metrics)
         full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
         batch_id = None
+        try:
+            ctx, dev = get_gpu_context_for_altcoin()
+            try:
+                ctx.release()
+            except Exception:
+                pass
+            device_name = f"GPU {dev.name}"
+        except Exception:
+            device_name = "CPU"
+        log_message(f"[WORKER] PID {os.getpid()} starting {txt_file} on {device_name}", "DEBUG")
         update_dashboard_stat("backlog_current_file", txt_file)
         start_t = time.perf_counter()
         rows = convert_txt_to_csv(full_path, batch_id, pause_event, shutdown_event)
@@ -664,9 +718,9 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics):
         increment_metric("backlog_files_completed", 1)
         update_dashboard_stat(f"backlog_progress.{os.path.splitext(txt_file)[0]}", 100)
         duration = time.perf_counter() - start_t
-        return txt_file, duration, None
+        return txt_file, duration, rows, None
     except Exception as e:
-        return txt_file, 0.0, safe_str(e)
+        return txt_file, 0.0, 0, safe_str(e)
 
 
 def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None):
@@ -717,6 +771,14 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                 ]
 
                 update_dashboard_stat("backlog_files_queued", len(all_txt) + len(queued))
+                log_message(
+                    f"[QUEUE] workers:{len(futures)}/{max_workers} queued:{len(all_txt) + len(queued)}",
+                    "DEBUG",
+                )
+                if psutil:
+                    proc = psutil.Process()
+                    mem_mb = proc.memory_info().rss / (1024 * 1024)
+                    log_message(f"[MEM] RSS {mem_mb:.1f} MB", "DEBUG")
                 if durations:
                     avg = sum(durations) / len(durations)
                     eta_sec = avg * (len(all_txt) + len(queued))
@@ -736,7 +798,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
 
                 done = [fut for fut in futures if fut.done()]
                 for fut in done:
-                    txt_file, dur, err = fut.result()
+                    txt_file, dur, rows, err = fut.result()
                     queued.discard(futures[fut])
                     if err:
                         log_message(f"❌ Failed to convert {txt_file}: {err}", "ERROR")
@@ -744,6 +806,18 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                         with proc_lock:
                             processed.add(txt_file)
                         durations.append(dur)
+                        if dur > 0:
+                            rps = rows / dur
+                            log_message(
+                                f"[STATS] {txt_file} → {rows} rows in {dur:.2f}s ({rps:.1f} rows/s)",
+                                "DEBUG",
+                            )
+                        if len(durations) % 10 == 0:
+                            avg_dur = sum(durations) / len(durations)
+                            log_message(
+                                f"[STATS] Avg time per file: {avg_dur:.2f}s over {len(durations)} files",
+                                "DEBUG",
+                            )
                     del futures[fut]
 
                 update_dashboard_stat("backlog_current_file", list(queued)[0] if queued else "")
