@@ -32,8 +32,17 @@ CHECK_TIME_HISTORY = []
 MAX_HISTORY_SIZE = 10
 
 def normalize_address(addr: str) -> str:
+    """Return a normalized version of ``addr`` for matching.
+
+    Currently this strips the ``bitcoincash:`` prefix used by some BCH
+    addresses and trims surrounding whitespace. Additional normalization
+    rules can be added here as needed.
+    """
+    if not addr:
+        return ""
+    addr = addr.strip()
     if addr.lower().startswith("bitcoincash:"):
-        return addr.split(":", 1)[1]
+        addr = addr.split(":", 1)[1]
     return addr
 
 def update_csv_eta():
@@ -83,8 +92,10 @@ def scan_csv_for_oversized_lines(csv_path, threshold=10_000_000):
         log_message(f"⚠️ Failed scanning {csv_path}: {e}", "WARNING")
 
 def load_funded_addresses(file_path):
+    """Load funded addresses from ``file_path`` applying ``normalize_address``
+    to each line so comparisons are consistent."""
     with open(file_path, "r") as f:
-        return set(line.strip() for line in f.readlines())
+        return set(normalize_address(line.strip()) for line in f.readlines())
 
 def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False):
     new_matches = set()
@@ -193,6 +204,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                         increment_metric(f"matches_found_today.{coin}", 1)
                                         if filename != "test_alerts.csv":
                                             increment_metric(f"matches_found_lifetime.{coin}", 1)
+                                    # continue checking other columns in this row
+                                    continue
                     except Exception as row_err:
                         if safe_mode:
                             log_message(
