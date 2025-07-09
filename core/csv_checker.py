@@ -257,6 +257,9 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
         if filename.endswith(".partial.csv"):
+            final = filename.replace(".partial.csv", ".csv")
+            if os.path.exists(os.path.join(CSV_DIR, final)):
+                log_message(f"ℹ️ Skipping {filename} because final CSV already exists", "INFO")
             continue
         if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
             time.sleep(1)
@@ -305,6 +308,9 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
         if filename.endswith(".partial.csv"):
+            final = filename.replace(".partial.csv", ".csv")
+            if os.path.exists(os.path.join(CSV_DIR, final)):
+                log_message(f"ℹ️ Skipping {filename} because final CSV already exists", "INFO")
             continue
         if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
             time.sleep(1)

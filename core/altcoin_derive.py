@@ -29,8 +29,10 @@ from config.settings import (
     ENABLE_ALTCOIN_DERIVATION,
     ENABLE_SEED_VERIFICATION,
     DOGE, DASH, LTC, BCH, RVN, PEP, ETH,
-    CSV_DIR, VANITY_OUTPUT_DIR, 
+    CSV_DIR, VANITY_OUTPUT_DIR,
     MAX_CSV_MB, BCH_CASHADDR_ENABLED,
+    ALTCOIN_GPUS_INDEX,
+    LOG_LEVEL,
 )
 from core.logger import log_message
 from core.dashboard import update_dashboard_stat, set_metric, get_metric, increment_metric
@@ -82,6 +84,16 @@ def open_new_csv_writer(index, base_name=None):
     f.flush()
     return f, writer, final_path, partial_path
 
+def finalize_csv(partial_path, final_path):
+    try:
+        os.replace(partial_path, final_path)
+    except OSError as e:
+        log_message(
+            f"❌ Failed to finalize {partial_path} → {final_path}: {e}", "ERROR"
+        )
+        return False
+    return True
+
 def get_compressed_pubkey(priv_bytes):
     sk = SigningKey.from_string(priv_bytes, curve=SECP256k1)
     point = sk.get_verifying_key().pubkey.point
@@ -105,50 +117,49 @@ def b58(prefix, payload):
 
 
 def get_gpu_context_for_altcoin():
-    """
-    Returns an OpenCL context and device for the assigned altcoin GPU.
-    Only logs the selected GPU once per session to avoid log spam.
-    """
+    """Return an OpenCL context for the configured altcoin GPU."""
     global _gpu_logged_once
 
-    selected_ids = get_altcoin_gpu_ids()
-    if not selected_ids:
-        from core.gpu_selector import assign_gpu_roles
-        assign_gpu_roles()
-        selected_ids = get_altcoin_gpu_ids()
-        if not selected_ids:
-            raise RuntimeError("❌ No GPU assigned for altcoin derivation.")
+    selected = ALTCOIN_GPUS_INDEX
+    if not selected:
+        selected = get_altcoin_gpu_ids()
+        if not selected:
+            from core.gpu_selector import assign_gpu_roles
+            assign_gpu_roles()
+            selected = get_altcoin_gpu_ids()
+            if not selected:
+                raise RuntimeError("❌ No GPU assigned for altcoin derivation.")
 
-    platforms = cl.get_platforms()
-    all_devices = []
-    device_lookup = {}
+    try:
+        platforms = cl.get_platforms()
+        if LOG_LEVEL == "DEBUG":
+            platform_names = [p.name for p in platforms]
+            print(f"[DEBUG] clGetPlatformIDs -> {platform_names}", flush=True)
 
-    device_counter = 0
-    for platform in platforms:
-        for device in platform.get_devices():
-            all_devices.append(device)
-            device_lookup[device_counter] = device
-            device_counter += 1
+        devices = []
+        for p in platforms:
+            for d in p.get_devices():
+                devices.append((p, d))
 
-    from core.gpu_selector import list_gpus
-    available = list_gpus()
-    altcoin_gpu = next((g for g in available if g["id"] == selected_ids[0]), None)
+        if LOG_LEVEL == "DEBUG":
+            dev_info = [f"{i}: {pl.name} / {dv.name}" for i, (pl, dv) in enumerate(devices)]
+            print(f"[DEBUG] clGetDeviceIDs -> {dev_info}", flush=True)
 
-    if not altcoin_gpu or altcoin_gpu["cl_index"] is None:
-        raise RuntimeError(f"❌ Could not find OpenCL index for GPU ID {selected_ids[0]}.")
+        index = selected[0]
+        if index >= len(devices):
+            raise RuntimeError(f"❌ OpenCL index {index} is out of bounds.")
 
-    cl_index = altcoin_gpu["cl_index"]
-    if cl_index >= len(all_devices):
-        raise RuntimeError(f"❌ OpenCL index {cl_index} is out of bounds.")
+        platform, device = devices[index]
+        context = cl.Context([device])
 
-    device = all_devices[cl_index]
-    context = cl.Context([device])
+        if not _gpu_logged_once:
+            log_message(f"🧠 Using GPU for altcoin derive: {platform.name} / {device.name}")
+            _gpu_logged_once = True
 
-    if not _gpu_logged_once:
-        log_message(f"🧠 Using GPU for altcoin derive: {device.name}", "INFO")
-        _gpu_logged_once = True
-
-    return context, device
+        return context, device
+    except Exception:
+        log_message("⚠️ FALLBACK TO CPU — OpenCL device not available", "WARNING")
+        raise
 
 # CashAddr utility
 CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
@@ -485,7 +496,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                     f.flush()
                                 if get_file_size_mb(partial_path) >= MAX_CSV_MB:
                                     f.close()
-                                    os.replace(partial_path, path)
+                                    finalize_csv(partial_path, path)
                                     csv_index += 1
                                     f, writer, path, partial_path = open_new_csv_writer(csv_index, base_name)
                                     if f is None:
@@ -577,7 +588,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                     index += 1
                 f.flush()
             f.close()
-            os.replace(partial_path, path)
+            finalize_csv(partial_path, path)
             update_dashboard_stat(f"backlog_progress.{base_name}", 100)
 
             increment_metric("csv_created_today", 1)
