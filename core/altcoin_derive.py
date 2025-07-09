@@ -132,22 +132,40 @@ def get_gpu_context_for_altcoin():
 
     try:
         platforms = cl.get_platforms()
+        platform_names = [p.name for p in platforms]
+        print("🌐 Detected OpenCL Platforms:", flush=True)
+        for i, p in enumerate(platforms):
+            print(f"  [{i}] {p.name}", flush=True)
         if LOG_LEVEL == "DEBUG":
-            platform_names = [p.name for p in platforms]
             print(f"[DEBUG] clGetPlatformIDs -> {platform_names}", flush=True)
 
         devices = []
-        for p in platforms:
+        print("🖥️  OpenCL Devices:", flush=True)
+        for p_index, p in enumerate(platforms):
             for d in p.get_devices():
+                idx = len(devices)
                 devices.append((p, d))
-
+                print(f"  [{idx}] {p.name} / {d.name}", flush=True)
         if LOG_LEVEL == "DEBUG":
             dev_info = [f"{i}: {pl.name} / {dv.name}" for i, (pl, dv) in enumerate(devices)]
             print(f"[DEBUG] clGetDeviceIDs -> {dev_info}", flush=True)
 
+        if not devices:
+            raise RuntimeError("❌ No OpenCL devices found")
+
         index = selected[0]
-        if index >= len(devices):
-            raise RuntimeError(f"❌ OpenCL index {index} is out of bounds.")
+        if index < 0 or index >= len(devices):
+            print(f"⚠️ Selected OpenCL index {index} is out of bounds", flush=True)
+            index = None
+            for i, (pl, dv) in enumerate(devices):
+                vendor = getattr(dv, "vendor", "").lower()
+                if "amd" in vendor:
+                    print(f"💡 Defaulting to AMD device at index {i}", flush=True)
+                    index = i
+                    break
+            if index is None:
+                print("⚠️ No AMD device available — falling back to CPU", flush=True)
+                raise RuntimeError("No suitable OpenCL device")
 
         platform, device = devices[index]
         context = cl.Context([device])
