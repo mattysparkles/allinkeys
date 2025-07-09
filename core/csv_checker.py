@@ -139,13 +139,15 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=
                     rows_scanned += 1
                     try:
                         for coin, columns in coin_columns.items():
+                            # Iterate through every address column so multiple
+                            # matches within a single row are all detected.
                             for col in columns:
                                 raw = row.get(col)
                                 addr = raw.strip() if raw else ""
                                 normalized = normalize_address(addr)
                                 if normalized != addr:
                                     print(f"[Checker] Normalized BCH address: {addr} → {normalized}", flush=True)
-                                if addr and normalized in address_set and normalized not in new_matches:
+                                if addr and normalized in address_set:
                                     match_payload = {
                                         "timestamp": datetime.utcnow().isoformat(),
                                         "coin": coin,
@@ -181,11 +183,12 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=
                                         else:
                                             log_message(f"⚠️ Could not fetch balance for {addr}", "WARN")
 
-                                    new_matches.add(normalized)
-                                    increment_metric("matched_keys", 1)
-                                    increment_metric(f"matches_found_today.{coin}", 1)
-                                    if filename != "test_alerts.csv":
-                                        increment_metric(f"matches_found_lifetime.{coin}", 1)
+                                    if normalized not in new_matches:
+                                        new_matches.add(normalized)
+                                        increment_metric("matched_keys", 1)
+                                        increment_metric(f"matches_found_today.{coin}", 1)
+                                        if filename != "test_alerts.csv":
+                                            increment_metric(f"matches_found_lifetime.{coin}", 1)
                     except Exception as row_err:
                         if safe_mode:
                             log_message(
