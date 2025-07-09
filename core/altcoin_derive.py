@@ -787,7 +787,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
         futures = {}
         while not shared_shutdown_event.is_set():
-            if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
+            if get_metric("global_run_state") == "paused" or (get_pause_event("altcoin") and get_pause_event("altcoin").is_set()):
                 time.sleep(1)
                 continue
             try:
