@@ -3,27 +3,27 @@ csv_checker.py – 📁 CSV scanning against complete list of funded address upd
 """
 
 import os
-import sys
 import csv
 import time
-import io
 import json
 from datetime import datetime
 
-# Set high CSV field size limit to avoid errors on large fields
-csv.field_size_limit(2**30)  # 1GB
 from config.settings import (
-    CSV_DIR, UNIQUE_DIR, FULL_DIR, DOWNLOADS_DIR,
-    CHECKED_CSV_LOG, RECHECKED_CSV_LOG,
-    ENABLE_ALERTS, ENABLE_PGP, PGP_PUBLIC_KEY_PATH
+    CSV_DIR,
+    DOWNLOADS_DIR,
+    CHECKED_CSV_LOG,
+    RECHECKED_CSV_LOG,
+    ENABLE_PGP,
+    PGP_PUBLIC_KEY_PATH,
 )
 from utils.file_utils import find_latest_funded_file
-from config.coin_definitions import coin_columns
 from core.alerts import alert_match
+from config.coin_definitions import coin_columns
 from core.logger import log_message
 from utils.pgp_utils import encrypt_with_pgp
 from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics, set_metric, get_metric
 from utils.balance_checker import fetch_live_balance
+csv.field_size_limit(2**30)  # 1GB
 
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
 os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
@@ -86,10 +86,9 @@ def load_funded_addresses(file_path):
     with open(file_path, "r") as f:
         return set(line.strip() for line in f.readlines())
 
-def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=False):
+def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False):
     new_matches = set()
     filename = os.path.basename(csv_file)
-    check_type = "Recheck" if recheck else "First Check"
     rows_scanned = 0
     start_time = time.perf_counter()
 
@@ -147,7 +146,12 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=
                                 normalized = normalize_address(addr)
                                 if normalized != addr:
                                     print(f"[Checker] Normalized BCH address: {addr} → {normalized}", flush=True)
-                                if addr and normalized in address_set:
+                                in_funded = normalized in address_sets.get(coin, set())
+                                log_message(
+                                    f"[Checker] {coin.upper()} column '{col}' -> '{normalized}' : {'MATCH' if in_funded else 'miss'}",
+                                    "DEBUG",
+                                )
+                                if addr and in_funded:
                                     match_payload = {
                                         "timestamp": datetime.utcnow().isoformat(),
                                         "coin": coin,
@@ -263,8 +267,6 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         else:
             log_message(f"⚠️ No funded list found for {coin.upper()} in DOWNLOADS_DIR", "WARN")
 
-    combined_set = set.union(*address_sets.values()) if address_sets else set()
-
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
         if filename.endswith(".partial.csv"):
@@ -278,7 +280,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         if not filename.endswith(".csv") or has_been_checked(filename, CHECKED_CSV_LOG):
             continue
         csv_path = os.path.join(CSV_DIR, filename)
-        check_csv_against_addresses(csv_path, combined_set, safe_mode=safe_mode)
+        check_csv_against_addresses(csv_path, address_sets, safe_mode=safe_mode)
         mark_csv_as_checked(filename, CHECKED_CSV_LOG)
 
     update_csv_eta()
@@ -314,8 +316,6 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         else:
             log_message(f"⚠️ No unique list found for {coin.upper()} in DOWNLOADS_DIR", "WARN")
 
-    combined_set = set.union(*address_sets.values()) if address_sets else set()
-
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
         if filename.endswith(".partial.csv"):
@@ -329,7 +329,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         if not filename.endswith(".csv") or has_been_checked(filename, RECHECKED_CSV_LOG):
             continue
         csv_path = os.path.join(CSV_DIR, filename)
-        check_csv_against_addresses(csv_path, combined_set, recheck=True, safe_mode=safe_mode)
+        check_csv_against_addresses(csv_path, address_sets, recheck=True, safe_mode=safe_mode)
         mark_csv_as_checked(filename, RECHECKED_CSV_LOG)
 
     update_csv_eta()
@@ -347,7 +347,7 @@ def inject_test_match(test_address="1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"):
         writer.writeheader()
         writer.writerow({"btc_U": test_address, "wif": "TESTWIF"})
 
-    matches = check_csv_against_addresses(test_csv, {test_address}, safe_mode=True)
+    matches = check_csv_against_addresses(test_csv, {"btc": {test_address}}, safe_mode=True)
     os.remove(test_csv)
     return bool(matches)
 
