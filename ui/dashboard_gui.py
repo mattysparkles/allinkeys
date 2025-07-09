@@ -50,6 +50,7 @@ class DashboardGUI:
         self.module_states = {}
         self.module_buttons = {}
         self.create_widgets()
+        self.load_settings_into_checkboxes()
         # Allow other modules a moment to update metrics before syncing button states
         self.master.after(2000, self.sync_module_states)
         self.refresh_loop()
@@ -200,7 +201,7 @@ class DashboardGUI:
                 var = tk.BooleanVar(value=initial)
                 var.trace_add(
                     "write",
-                    lambda *_, n=name, v=var: self.update_alert_option(n, v.get())
+                    lambda *_, n=name, v=var: self.on_checkbox_toggle(n, v.get())
                 )
                 self.checkbox_vars[name] = var
                 cb = tk.Checkbutton(alert_frame, text=name, variable=var)
@@ -299,8 +300,8 @@ class DashboardGUI:
 
         btns["Start"] = ttk.Button(sub_frame, text="Start", width=8, command=lambda: set_state("running"))
         btns["Stop"] = ttk.Button(sub_frame, text="Stop", width=8, command=lambda: set_state("stopped"))
-        btns["Pause"] = ttk.Button(sub_frame, text="Pause", width=8, command=lambda: set_state("paused"))
-        btns["Resume"] = ttk.Button(sub_frame, text="Resume", width=8, command=lambda: set_state("running"))
+        btns["Pause"] = ttk.Button(sub_frame, text="Pause", width=8, command=lambda m=label.lower(): self.handle_pause_resume(m))
+        btns["Resume"] = ttk.Button(sub_frame, text="Resume", width=8, command=lambda m=label.lower(): self.handle_pause_resume(m))
 
         btns["Start"].grid(row=0, column=0)
         btns["Stop"].grid(row=0, column=1)
@@ -316,6 +317,58 @@ class DashboardGUI:
             alerts.set_alert_flag(name, value)
         except Exception as e:
             print(f"[GUI] Failed to update alert option: {e}")
+
+    def on_checkbox_toggle(self, name, value):
+        self.update_alert_option(name, value)
+        try:
+            cfg_path = CONFIG_FILE_PATH
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            new_lines = []
+            updated = False
+            for line in lines:
+                if line.lstrip().startswith(f"{name} "):
+                    new_lines.append(f"{name} = {value}\n")
+                    updated = True
+                else:
+                    new_lines.append(line)
+            if updated:
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    f.writelines(new_lines)
+                print(f"[GUI] ✅ Checkbox {name} updated to {value}", flush=True)
+        except Exception as e:
+            print(f"[GUI] Failed to persist {name}: {e}", flush=True)
+
+    def load_settings_into_checkboxes(self):
+        try:
+            import importlib
+            cfg = importlib.import_module('config.settings')
+            importlib.reload(cfg)
+            for name, var in self.checkbox_vars.items():
+                var.set(getattr(cfg, name, var.get()))
+        except Exception as e:
+            print(f"[GUI] Failed to load settings: {e}", flush=True)
+
+    def handle_pause_resume(self, module_name):
+        from core.dashboard import module_pause_events, set_thread_health
+        ev = module_pause_events.get(module_name)
+        if not ev:
+            return
+        if ev.is_set():
+            print(f"[GUI] ▶️ Resuming module: {module_name}", flush=True)
+            ev.clear()
+            self.module_states[module_name.capitalize()] = "running"
+            set_metric(f"status.{module_name}", True)
+        else:
+            print(f"[GUI] ⏸️ Pausing module: {module_name}", flush=True)
+            ev.set()
+            self.module_states[module_name.capitalize()] = "paused"
+            set_metric(f"status.{module_name}", True)
+        updater = self.module_buttons.get(module_name.capitalize())
+        if updater:
+            updater()
+        if module_name == "vanity":
+            set_metric("global_run_state", "paused" if ev.is_set() else "running")
 
     def _flash_widget(self, widget, color="#228B22", duration=500):
         orig = widget.cget("background") if hasattr(widget, "cget") else None
