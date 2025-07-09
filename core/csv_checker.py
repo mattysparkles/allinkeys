@@ -33,7 +33,10 @@ MAX_HISTORY_SIZE = 10
 
 def update_csv_eta():
     try:
-        all_files = [f for f in os.listdir(CSV_DIR) if f.endswith(".csv")]
+        all_files = [
+            f for f in os.listdir(CSV_DIR)
+            if f.endswith(".csv") and not f.endswith(".partial.csv")
+        ]
         remaining_files = [
             f for f in all_files
             if not has_been_checked(f, CHECKED_CSV_LOG) and not has_been_checked(f, RECHECKED_CSV_LOG)
@@ -85,6 +88,8 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=
     rows_scanned = 0
     start_time = time.perf_counter()
 
+    if filename.endswith(".partial.csv"):
+        return []
     if not os.path.exists(csv_file) or os.path.getsize(csv_file) == 0:
         log_message(f"❌ {filename} is empty or missing. Skipping.", "ERROR")
         return []
@@ -251,6 +256,8 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
 
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
+        if filename.endswith(".partial.csv"):
+            continue
         if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
             time.sleep(1)
             continue
@@ -297,6 +304,8 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
 
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
+        if filename.endswith(".partial.csv"):
+            continue
         if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
             time.sleep(1)
             continue

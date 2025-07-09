@@ -52,17 +52,25 @@ def get_file_size_mb(path):
 
 
 def open_new_csv_writer(index, base_name=None):
+    """Create a new CSV writer to a temporary ``.partial.csv`` file.
+
+    Returns a tuple ``(file_handle, csv_writer, final_path, partial_path)``.
+    If the final CSV already exists, ``(None, None, final_path, None)`` is
+    returned so the caller can skip processing.
     """
-    Opens a new CSV writer in a batch-named subfolder with appropriate headers.
-    Returns: (file_handle, csv_writer, full_path)
-    """
-    # CSVs are now written directly to CSV_DIR to simplify downstream checks
     os.makedirs(CSV_DIR, exist_ok=True)
+
     if base_name:
-        path = os.path.join(CSV_DIR, f"{base_name}_part_{index}.csv")
+        final_path = os.path.join(CSV_DIR, f"{base_name}_part_{index}.csv")
     else:
-        path = os.path.join(CSV_DIR, f"keys_batch_{index:05d}.csv")
-    f = open(path, "w", newline='', encoding="utf-8", buffering=1)
+        final_path = os.path.join(CSV_DIR, f"keys_batch_{index:05d}.csv")
+
+    if os.path.exists(final_path):
+        # File already finalized - skip writing a duplicate
+        return None, None, final_path, None
+
+    partial_path = final_path.replace(".csv", ".partial.csv")
+    f = open(partial_path, "w", newline='', encoding="utf-8", buffering=1)
     writer = csv.DictWriter(f, fieldnames=[
         "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
         "doge_C", "doge_U", "bch_C", "bch_U", "eth", "dash_C", "dash_U",
@@ -72,7 +80,7 @@ def open_new_csv_writer(index, base_name=None):
     ])
     writer.writeheader()
     f.flush()
-    return f, writer, path
+    return f, writer, final_path, partial_path
 
 def get_compressed_pubkey(priv_bytes):
     sk = SigningKey.from_string(priv_bytes, curve=SECP256k1)
@@ -338,6 +346,13 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
     filename = os.path.basename(input_txt_path)
     base_name = os.path.splitext(filename)[0]
 
+    # If CSVs for this file already exist, assume conversion finished previously
+    existing = [f for f in os.listdir(CSV_DIR)
+                if f.startswith(base_name) and f.endswith('.csv')]
+    if existing:
+        log_message(f"ℹ️ Skipping {filename} because CSV output already exists", "INFO")
+        return 0
+
     try:
         with open(input_txt_path, "rb") as infile_raw:
             total_lines = sum(1 for _ in infile_raw)
@@ -357,7 +372,10 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
             infile = safe_lines(infile_raw)
 
             csv_index = 0
-            f, writer, path = open_new_csv_writer(csv_index, base_name)
+            f, writer, path, partial_path = open_new_csv_writer(csv_index, base_name)
+            if f is None:
+                log_message(f"ℹ️ Skipping {filename} because {os.path.basename(path)} already exists", "INFO")
+                return 0
 
             rows_written = 0
             address_tally = {k: 0 for k in [
@@ -463,12 +481,19 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                 rows_written += 1
                                 index += 1
 
-                                if rows_written % 100 == 0:
+                                if rows_written % 1000 == 0:
                                     f.flush()
-                                if get_file_size_mb(path) >= MAX_CSV_MB:
+                                if get_file_size_mb(partial_path) >= MAX_CSV_MB:
                                     f.close()
+                                    os.replace(partial_path, path)
                                     csv_index += 1
-                                    f, writer, path = open_new_csv_writer(csv_index, base_name)
+                                    f, writer, path, partial_path = open_new_csv_writer(csv_index, base_name)
+                                    if f is None:
+                                        log_message(
+                                            f"ℹ️ Skipping remaining output because {os.path.basename(path)} already exists",
+                                            "INFO"
+                                        )
+                                        return rows_written
 
                             hex_batch.clear()
                             pub_map.clear()
@@ -552,6 +577,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                     index += 1
                 f.flush()
             f.close()
+            os.replace(partial_path, path)
             update_dashboard_stat(f"backlog_progress.{base_name}", 100)
 
             increment_metric("csv_created_today", 1)
