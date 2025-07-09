@@ -26,6 +26,8 @@ except ImportError:
 
 _gpu_logged_once = False
 _cpu_logged_once = False
+# Flag indicating if the CPU fallback path was taken
+cpu_fallback_active = False
 
 # Prevent writing absurdly large fields to CSV
 MAX_FIELD_SIZE = 10000  # 10KB per field safety cap
@@ -240,7 +242,10 @@ def derive_addresses_gpu(hex_keys):
     """Derive addresses using the GPU if available."""
 
     context, device = get_gpu_context_for_altcoin()
-    queue = cl.CommandQueue(context)
+    # Enable profiling so we can time kernel execution
+    queue = cl.CommandQueue(
+        context, properties=cl.command_queue_properties.PROFILING_ENABLE
+    )
 
     kernel_path = os.path.join(os.path.dirname(__file__), "hash160.cl")
     if not os.path.isfile(kernel_path):
@@ -260,6 +265,7 @@ def derive_addresses_gpu(hex_keys):
 
     key_bytes = [bytes.fromhex(k.lstrip("0x").zfill(64)) for k in hex_keys]
     count = len(key_bytes)
+    log_message(f"[GPU] Deriving {count} keys (work items: {count})", "DEBUG")
 
     # Generate public keys on CPU
     pub_c_list = []
@@ -285,17 +291,26 @@ def derive_addresses_gpu(hex_keys):
     out_comp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
     out_uncomp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
 
+    start_gpu = time.perf_counter()
     kernel_hash160.set_args(comp_buf, out_comp_buf, np.uint32(33))
-    cl.enqueue_nd_range_kernel(queue, kernel_hash160, (count,), None)
+    event_comp = cl.enqueue_nd_range_kernel(queue, kernel_hash160, (count,), None)
 
     kernel_hash160.set_args(uncomp_buf, out_uncomp_buf, np.uint32(65))
-    cl.enqueue_nd_range_kernel(queue, kernel_hash160, (count,), None)
+    event_uncomp = cl.enqueue_nd_range_kernel(queue, kernel_hash160, (count,), None)
 
     hash_comp = np.empty((count, 20), dtype=np.uint8)
     hash_uncomp = np.empty((count, 20), dtype=np.uint8)
     cl.enqueue_copy(queue, hash_comp, out_comp_buf)
     cl.enqueue_copy(queue, hash_uncomp, out_uncomp_buf)
     queue.finish()
+
+    end_gpu = time.perf_counter()
+    comp_ms = (event_comp.profile.end - event_comp.profile.start) / 1e6
+    uncomp_ms = (event_uncomp.profile.end - event_uncomp.profile.start) / 1e6
+    log_message(
+        f"[GPU] Kernel times - compressed:{comp_ms:.3f}ms uncompressed:{uncomp_ms:.3f}ms total:{end_gpu - start_gpu:.3f}s",
+        "DEBUG",
+    )
 
     results = []
     for idx in range(count):
@@ -333,10 +348,13 @@ def derive_addresses_gpu(hex_keys):
 
 def derive_addresses_cpu(hex_keys):
     """Derive addresses purely with Python when no GPU is available."""
-    global _cpu_logged_once
+    global _cpu_logged_once, cpu_fallback_active
     if not _cpu_logged_once:
         log_message(f"🧠 Using CPU for altcoin derive on PID {os.getpid()}", "WARNING")
         _cpu_logged_once = True
+    if not cpu_fallback_active:
+        log_message("❗ CPU fallback path triggered", "WARNING")
+    cpu_fallback_active = True
     results = []
     for key in hex_keys:
         priv = bytes.fromhex(key.lstrip("0x").zfill(64))
@@ -380,6 +398,8 @@ def derive_addresses(hex_keys):
         return derive_addresses_gpu(hex_keys)
     except Exception as e:
         log_message(f"⚠️ GPU derive failed, falling back to CPU: {safe_str(e)}", "WARNING")
+        global cpu_fallback_active
+        cpu_fallback_active = True
         return derive_addresses_cpu(hex_keys)
 
 def derive_altcoin_addresses_from_hex(hex_key):
@@ -748,7 +768,13 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     queued = set()
     proc_lock = threading.Lock()
     durations = []  # track per-file processing times
-    max_workers = 6  # ⚠️ Tune this based on GPU memory and throughput
+    # Allow at most one worker per assigned GPU
+    selected_gpus = ALTCOIN_GPUS_INDEX or get_altcoin_gpu_ids()
+    gpu_workers = len(selected_gpus) if selected_gpus else 1
+    max_workers = gpu_workers
+    log_message(
+        f"[GPU] Using {max_workers} worker(s) for altcoin derive", "DEBUG"
+    )
 
     def graceful_shutdown(sig, frame):
         log_message("🛑 Ctrl+C received in altcoin conversion loop. Shutting down...", "WARNING")
