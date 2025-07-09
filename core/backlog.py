@@ -62,7 +62,7 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
     from core.dashboard import set_metric, init_shared_metrics, register_control_events
     try:
         init_shared_metrics(shared_metrics)
-        register_control_events(shutdown_event, pause_event)
+        register_control_events(shutdown_event, pause_event, module="backlog")
     except Exception:
         pass
     from core.dashboard import set_thread_health

@@ -399,6 +399,10 @@ PEP = ENABLED_COINS["PEP"]
 # ===================== 🕒 TIMESTAMP ==========================
 LAUNCH_TIMESTAMP = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
+# Timezone configuration for daily metric resets
+ENABLE_AUTO_TIMEZONE_SETTING = True
+MANUAL_TIME_ZONE_OVERRIDE = "UTC-5"
+
 # ===================== 📈 STATISTICS TO DISPLAY MAPPING =======================
 STATS_TO_DISPLAY = {
     "keys_per_sec": SHOW_KEYS_PER_SEC,
