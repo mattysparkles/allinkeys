@@ -10,8 +10,8 @@ import io
 import json
 from datetime import datetime
 
-# Increase CSV field size limit to handle large entries (up to 100MB)
-csv.field_size_limit(100 * 1024 * 1024)
+# Set high CSV field size limit to avoid errors on large fields
+csv.field_size_limit(2**30)  # 1GB
 from config.settings import (
     CSV_DIR, UNIQUE_DIR, FULL_DIR, DOWNLOADS_DIR,
     CHECKED_CSV_LOG, RECHECKED_CSV_LOG,
@@ -62,11 +62,23 @@ def has_been_checked(filename, log_file):
     with open(log_file, "r") as f:
         return filename in f.read()
 
+def scan_csv_for_oversized_lines(csv_path, threshold=10_000_000):
+    """Scan a CSV file and report any lines exceeding the threshold size."""
+    try:
+        with open(csv_path, "r", encoding="utf-8", errors="ignore") as f:
+            for i, line in enumerate(f):
+                if len(line) > threshold:
+                    print(
+                        f"\U0001F6A8 Line {i+1} in {csv_path} exceeds {threshold} bytes"
+                    )
+    except Exception as e:
+        log_message(f"⚠️ Failed scanning {csv_path}: {e}", "WARNING")
+
 def load_funded_addresses(file_path):
     with open(file_path, "r") as f:
         return set(line.strip() for line in f.readlines())
 
-def check_csv_against_addresses(csv_file, address_set, recheck=False):
+def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=False):
     new_matches = set()
     filename = os.path.basename(csv_file)
     check_type = "Recheck" if recheck else "First Check"
@@ -161,8 +173,14 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
                                     increment_metric(f"matches_found_today.{coin}", 1)
                                     increment_metric(f"matches_found_lifetime.{coin}", 1)
                     except Exception as row_err:
-                        log_message(f"❌ Skipping malformed row {rows_scanned} in {filename}: {row_err}", "ERROR")
-                        continue
+                        if safe_mode:
+                            log_message(
+                                f"⚠️ Row skipped due to error in {csv_file}: {row_err}",
+                                "WARNING",
+                            )
+                            continue
+                        else:
+                            raise
             except csv.Error as e:
                 log_message(f"❌ CSV parsing error in {filename}: {e}", "ERROR")
 
@@ -203,7 +221,7 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False):
         log_message(f"❌ Error reading {filename}: {str(e)}", "ERROR")
         return []
 
-def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=None):
+def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False):
     try:
         init_shared_metrics(shared_metrics)
         from core.dashboard import register_control_events
@@ -237,7 +255,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         if not filename.endswith(".csv") or has_been_checked(filename, CHECKED_CSV_LOG):
             continue
         csv_path = os.path.join(CSV_DIR, filename)
-        check_csv_against_addresses(csv_path, combined_set)
+        check_csv_against_addresses(csv_path, combined_set, safe_mode=safe_mode)
         mark_csv_as_checked(filename, CHECKED_CSV_LOG)
 
     update_csv_eta()
@@ -249,7 +267,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         pass
 
 
-def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None):
+def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False):
     try:
         init_shared_metrics(shared_metrics)
         from core.dashboard import register_control_events
@@ -283,7 +301,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None):
         if not filename.endswith(".csv") or has_been_checked(filename, RECHECKED_CSV_LOG):
             continue
         csv_path = os.path.join(CSV_DIR, filename)
-        check_csv_against_addresses(csv_path, combined_set, recheck=True)
+        check_csv_against_addresses(csv_path, combined_set, recheck=True, safe_mode=safe_mode)
         mark_csv_as_checked(filename, RECHECKED_CSV_LOG)
 
     update_csv_eta()
@@ -301,7 +319,7 @@ def inject_test_match(test_address="1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"):
         writer.writeheader()
         writer.writerow({"btc_U": test_address, "wif": "TESTWIF"})
 
-    matches = check_csv_against_addresses(test_csv, {test_address})
+    matches = check_csv_against_addresses(test_csv, {test_address}, safe_mode=True)
     os.remove(test_csv)
     return bool(matches)
 
@@ -310,9 +328,14 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Check generated CSVs for funded addresses")
     parser.add_argument("--recheck", action="store_true", help="Run unique recheck mode")
+    parser.add_argument("--safe", action="store_true", help="Enable safe CSV parsing")
+    parser.add_argument("--scan", metavar="CSV", help="Scan specified CSV for oversized lines")
+    parser.add_argument("--threshold", type=int, default=10_000_000, help="Byte threshold for --scan")
     args = parser.parse_args()
 
-    if args.recheck:
-        check_csvs()
+    if args.scan:
+        scan_csv_for_oversized_lines(args.scan, threshold=args.threshold)
+    elif args.recheck:
+        check_csvs(safe_mode=args.safe)
     else:
-        check_csvs_day_one()
+        check_csvs_day_one(safe_mode=args.safe)

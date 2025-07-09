@@ -1,6 +1,7 @@
 import os
 import json
 import csv
+csv.field_size_limit(2**30)  # allow very large CSV fields
 import time
 import smtplib
 import requests

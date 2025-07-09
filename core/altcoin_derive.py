@@ -22,6 +22,9 @@ import io
 
 _gpu_logged_once = False
 
+# Prevent writing absurdly large fields to CSV
+MAX_FIELD_SIZE = 10000  # 10KB per field safety cap
+
 from config.settings import (
     ENABLE_ALTCOIN_DERIVATION,
     ENABLE_SEED_VERIFICATION,
@@ -443,6 +446,13 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                     if row.get(k):
                                         address_tally[k] += 1
 
+                                if any(len(str(v)) > MAX_FIELD_SIZE for v in row.values()):
+                                    log_message(
+                                        f"⚠️ Skipping row due to oversized field: {row}",
+                                        "WARNING",
+                                    )
+                                    continue
+
                                 writer.writerow(row)
                                 rows_written += 1
                                 index += 1
@@ -523,6 +533,13 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                     for k in address_tally:
                         if row.get(k):
                             address_tally[k] += 1
+
+                    if any(len(str(v)) > MAX_FIELD_SIZE for v in row.values()):
+                        log_message(
+                            f"⚠️ Skipping row due to oversized field: {row}",
+                            "WARNING",
+                        )
+                        continue
 
                     writer.writerow(row)
                     rows_written += 1
