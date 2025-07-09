@@ -37,7 +37,7 @@ from config.settings import (
 from core.logger import log_message
 from core.dashboard import update_dashboard_stat, set_metric, get_metric, increment_metric
 import core.checkpoint as checkpoint
-from core.gpu_selector import get_altcoin_gpu_ids
+from core.gpu_selector import get_altcoin_gpu_ids, list_gpus
 
 def safe_str(obj):
     try:
@@ -142,32 +142,38 @@ def get_gpu_context_for_altcoin():
         devices = []
         print("🖥️  OpenCL Devices:", flush=True)
         for p_index, p in enumerate(platforms):
-            for d in p.get_devices():
+            for d_index, d in enumerate(p.get_devices()):
                 idx = len(devices)
-                devices.append((p, d))
+                devices.append((p_index, d_index, p, d))
                 print(f"  [{idx}] {p.name} / {d.name}", flush=True)
         if LOG_LEVEL == "DEBUG":
-            dev_info = [f"{i}: {pl.name} / {dv.name}" for i, (pl, dv) in enumerate(devices)]
+            dev_info = [f"{i}: {pl.name} / {dv.name}" for i, (_, _, pl, dv) in enumerate(devices)]
             print(f"[DEBUG] clGetDeviceIDs -> {dev_info}", flush=True)
 
         if not devices:
             raise RuntimeError("❌ No OpenCL devices found")
 
-        index = selected[0]
-        if index < 0 or index >= len(devices):
-            print(f"⚠️ Selected OpenCL index {index} is out of bounds", flush=True)
-            index = None
-            for i, (pl, dv) in enumerate(devices):
-                vendor = getattr(dv, "vendor", "").lower()
-                if "amd" in vendor:
-                    print(f"💡 Defaulting to AMD device at index {i}", flush=True)
-                    index = i
-                    break
-            if index is None:
-                print("⚠️ No AMD device available — falling back to CPU", flush=True)
-                raise RuntimeError("No suitable OpenCL device")
+        # Map unified GPU index -> OpenCL device index
+        gpu_list = list_gpus()
+        gpu_map = {idx: g.get("cl_index") for idx, g in enumerate(gpu_list)}
 
-        platform, device = devices[index]
+        display_index = selected[0]
+        cl_index = gpu_map.get(display_index)
+        if cl_index is None:
+            print(f"⚠️ OpenCL mapping not found for GPU index {display_index}", flush=True)
+            raise RuntimeError("No suitable OpenCL device")
+
+        if cl_index < 0 or cl_index >= len(devices):
+            print(f"⚠️ FALLBACK TO CPU — OpenCL index {cl_index} is invalid or out of bounds", flush=True)
+            raise RuntimeError("Invalid OpenCL device index")
+
+        p_idx, d_idx, platform, device = devices[cl_index]
+        if LOG_LEVEL == "DEBUG":
+            print(
+                f"Mapped GPU index {display_index} → Platform {p_idx}, Device {d_idx} ({device.name})",
+                flush=True,
+            )
+
         context = cl.Context([device])
 
         if not _gpu_logged_once:
@@ -175,8 +181,8 @@ def get_gpu_context_for_altcoin():
             _gpu_logged_once = True
 
         return context, device
-    except Exception:
-        log_message("⚠️ FALLBACK TO CPU — OpenCL device not available", "WARNING")
+    except Exception as err:
+        log_message(f"⚠️ FALLBACK TO CPU — OpenCL device not available: {safe_str(err)}", "WARNING")
         raise
 
 # CashAddr utility
