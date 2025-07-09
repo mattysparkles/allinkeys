@@ -97,11 +97,13 @@ def load_funded_addresses(file_path):
     with open(file_path, "r") as f:
         return set(normalize_address(line.strip()) for line in f.readlines())
 
-def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False):
+def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False, pause_event=None):
     new_matches = set()
     filename = os.path.basename(csv_file)
     rows_scanned = 0
     start_time = time.perf_counter()
+    set_metric("csv_checker.last_file", filename)
+    set_metric("csv_checker.last_timestamp", datetime.utcnow().isoformat())
 
     if filename.endswith(".partial.csv"):
         return []
@@ -141,12 +143,21 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                     log_message(f"🔎 {coin.upper()} columns scanned: {columns}", "DEBUG")
 
             try:
-                from core.dashboard import get_pause_event
                 for row in reader:
-                    if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
-                        time.sleep(1)
-                        continue
+                    if (
+                        get_metric("global_run_state") == "paused"
+                        or (pause_event and pause_event.is_set())
+                    ):
+                        while (
+                            get_metric("global_run_state") == "paused"
+                            or (pause_event and pause_event.is_set())
+                        ):
+                            time.sleep(0.2)
+                        if pause_event and pause_event.is_set():
+                            continue
                     rows_scanned += 1
+                    increment_metric("csv_checker.rows_checked", 1)
+                    row_matches = []
                     try:
                         for coin, columns in coin_columns.items():
                             # Iterate through every address column so multiple
@@ -204,6 +215,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                         increment_metric(f"matches_found_today.{coin}", 1)
                                         if filename != "test_alerts.csv":
                                             increment_metric(f"matches_found_lifetime.{coin}", 1)
+                                    row_matches.append(addr)
                                     # continue checking other columns in this row
                                     continue
                     except Exception as row_err:
@@ -215,6 +227,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                             continue
                         else:
                             raise
+                    if row_matches:
+                        increment_metric("csv_checker.matches_found", len(row_matches))
             except csv.Error as e:
                 log_message(f"❌ CSV parsing error in {filename}: {e}", "ERROR")
 
@@ -265,6 +279,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         set_metric("csv_checked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
         set_metric("matches_found_today", {c: 0 for c in coin_columns})
+        set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -287,13 +302,13 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
             if os.path.exists(os.path.join(CSV_DIR, final)):
                 log_message(f"ℹ️ Skipping {filename} because final CSV already exists", "INFO")
             continue
-        if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
+        if get_metric("global_run_state") == "paused" or (get_pause_event("csv_check") and get_pause_event("csv_check").is_set()):
             time.sleep(1)
             continue
         if not filename.endswith(".csv") or has_been_checked(filename, CHECKED_CSV_LOG):
             continue
         csv_path = os.path.join(CSV_DIR, filename)
-        check_csv_against_addresses(csv_path, address_sets, safe_mode=safe_mode)
+        check_csv_against_addresses(csv_path, address_sets, safe_mode=safe_mode, pause_event=pause_event)
         mark_csv_as_checked(filename, CHECKED_CSV_LOG)
 
     update_csv_eta()
@@ -314,6 +329,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         set_metric("csv_rechecked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
         set_metric("matches_found_today", {c: 0 for c in coin_columns})
+        set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -336,13 +352,13 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
             if os.path.exists(os.path.join(CSV_DIR, final)):
                 log_message(f"ℹ️ Skipping {filename} because final CSV already exists", "INFO")
             continue
-        if get_metric("global_run_state") == "paused" or (get_pause_event() and get_pause_event().is_set()):
+        if get_metric("global_run_state") == "paused" or (get_pause_event("csv_recheck") and get_pause_event("csv_recheck").is_set()):
             time.sleep(1)
             continue
         if not filename.endswith(".csv") or has_been_checked(filename, RECHECKED_CSV_LOG):
             continue
         csv_path = os.path.join(CSV_DIR, filename)
-        check_csv_against_addresses(csv_path, address_sets, recheck=True, safe_mode=safe_mode)
+        check_csv_against_addresses(csv_path, address_sets, recheck=True, safe_mode=safe_mode, pause_event=pause_event)
         mark_csv_as_checked(filename, RECHECKED_CSV_LOG)
 
     update_csv_eta()

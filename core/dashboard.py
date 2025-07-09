@@ -256,6 +256,12 @@ def _default_metrics():
         "backlog_avg_time": "N/A",
         "backlog_current_file": "",
         "backlog_progress": {},
+        "csv_checker": {
+            "rows_checked": 0,
+            "matches_found": 0,
+            "last_file": "",
+            "last_timestamp": "",
+        },
         "status": {
             "keygen": ENABLE_KEYGEN,
             "altcoin": ENABLE_ALTCOIN_DERIVATION,

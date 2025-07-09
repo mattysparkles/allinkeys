@@ -99,6 +99,7 @@ class DashboardGUI:
             "csv_checked_today", "csv_rechecked_today",
             "addresses_checked_today", "addresses_checked_lifetime",
             "matches_found_lifetime", "csv_created_today", "csv_created_lifetime",
+            "csv_checker",
         }
         backlog_stats = {
             "batches_completed", "avg_keygen_time", "backlog_files_queued",
@@ -151,7 +152,7 @@ class DashboardGUI:
                     pb = ttk.Progressbar(frame, length=150, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
-                elif key in ("gpu_stats", "gpu_assignments", "status", "matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
+                elif key in ("gpu_stats", "gpu_assignments", "status", "matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "csv_checker"):
                     txt = tk.Text(frame, height=5, width=45, wrap="word", font=FONT)
                     txt.grid(row=i, column=1, sticky="nsew", padx=2, pady=2)
                     txt.configure(state="disabled")
@@ -471,7 +472,7 @@ class DashboardGUI:
                             for mod, name in value.items():
                                 title = name_map.get(mod, mod.replace('_', ' ').title())
                                 lines.append(f"{title} → {name}")
-                        elif key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
+                        elif key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "csv_checker"):
                             items = [f"{k.upper()}: {v}" for k, v in value.items()]
                             for i in range(0, len(items), 3):
                                 lines.append("   ".join(items[i:i+3]))
