@@ -31,6 +31,11 @@ os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
 CHECK_TIME_HISTORY = []
 MAX_HISTORY_SIZE = 10
 
+def normalize_address(addr: str) -> str:
+    if addr.lower().startswith("bitcoincash:"):
+        return addr.split(":", 1)[1]
+    return addr
+
 def update_csv_eta():
     try:
         all_files = [
@@ -137,7 +142,10 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=
                             for col in columns:
                                 raw = row.get(col)
                                 addr = raw.strip() if raw else ""
-                                if addr and addr in address_set and addr not in new_matches:
+                                normalized = normalize_address(addr)
+                                if normalized != addr:
+                                    print(f"[Checker] Normalized BCH address: {addr} → {normalized}", flush=True)
+                                if addr and normalized in address_set and normalized not in new_matches:
                                     match_payload = {
                                         "timestamp": datetime.utcnow().isoformat(),
                                         "coin": coin,
@@ -173,7 +181,7 @@ def check_csv_against_addresses(csv_file, address_set, recheck=False, safe_mode=
                                         else:
                                             log_message(f"⚠️ Could not fetch balance for {addr}", "WARN")
 
-                                    new_matches.add(addr)
+                                    new_matches.add(normalized)
                                     increment_metric("matched_keys", 1)
                                     increment_metric(f"matches_found_today.{coin}", 1)
                                     if filename != "test_alerts.csv":
