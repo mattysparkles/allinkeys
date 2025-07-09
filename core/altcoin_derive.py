@@ -185,7 +185,7 @@ def derive_addresses_gpu(hex_keys):
     context, device = get_gpu_context_for_altcoin()
     queue = cl.CommandQueue(context)
 
-    kernel_path = os.path.join(os.path.dirname(__file__), "sha256_kernel.cl")
+    kernel_path = os.path.join(os.path.dirname(__file__), "hash160.cl")
     if not os.path.isfile(kernel_path):
         raise FileNotFoundError(f"❌ Missing kernel file: {kernel_path}")
 
@@ -200,42 +200,47 @@ def derive_addresses_gpu(hex_keys):
         raise
 
     key_bytes = [bytes.fromhex(k.lstrip("0x").zfill(64)) for k in hex_keys]
-    all_keys_flat = b''.join(key_bytes)
     count = len(key_bytes)
 
+    # Generate public keys on CPU
+    pub_c_list = []
+    pub_u_list = []
+    for priv in key_bytes:
+        sk = SigningKey.from_string(priv, curve=SECP256k1)
+        vk_bytes = sk.get_verifying_key().to_string()
+        x = vk_bytes[:32]
+        y = vk_bytes[32:]
+        prefix = b"\x03" if (y[-1] % 2) else b"\x02"
+        pub_c_list.append(prefix + x)
+        pub_u_list.append(b"\x04" + x + y)
+
     mf = cl.mem_flags
-    private_keys_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=all_keys_flat)
-    output_buf = cl.Buffer(context, mf.WRITE_ONLY, 32 * count)
 
-    INPUT_SIZE = 32  # SHA-256 input size in bytes
-    program.derive_addresses(queue, (count,), None, private_keys_buf, output_buf, np.int32(INPUT_SIZE))
+    comp_flat = b"".join(pub_c_list)
+    uncomp_flat = b"".join(pub_u_list)
 
-    # Copy output anyway for consistency / future GPU validation purposes
-    derived_data = np.empty((count, 32), dtype=np.uint8)
-    cl.enqueue_copy(queue, derived_data, output_buf)
+    comp_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=comp_flat)
+    uncomp_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=uncomp_flat)
+
+    out_comp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
+    out_uncomp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
+
+    program.hash160(queue, (count,), None, comp_buf, out_comp_buf, np.uint32(33))
+    program.hash160(queue, (count,), None, uncomp_buf, out_uncomp_buf, np.uint32(65))
+
+    hash_comp = np.empty((count, 20), dtype=np.uint8)
+    hash_uncomp = np.empty((count, 20), dtype=np.uint8)
+    cl.enqueue_copy(queue, hash_comp, out_comp_buf)
+    cl.enqueue_copy(queue, hash_uncomp, out_uncomp_buf)
     queue.finish()
 
     results = []
-    for idx, raw in enumerate(derived_data):
-        priv = key_bytes[idx]
-
+    for idx in range(count):
         try:
-            sk = SigningKey.from_string(priv, curve=SECP256k1)
-            vk_bytes = sk.get_verifying_key().to_string()  # 64 bytes: X (32) + Y (32)
+            pubkey_compressed = pub_c_list[idx]
 
-            x = vk_bytes[:32]
-            y = vk_bytes[32:]
-
-            # Compressed pubkey (33 bytes): 0x02 or 0x03 + x
-            prefix = b'\x03' if (y[-1] % 2) else b'\x02'
-            pubkey_compressed = prefix + x
-
-            # Uncompressed pubkey (65 bytes): 0x04 + x + y
-            pubkey_uncompressed = b'\x04' + x + y
-
-            # Hash160 of pubkeys
-            hash160_c = hash160(pubkey_compressed)
-            hash160_u = hash160(pubkey_uncompressed)
+            hash160_c = bytes(hash_comp[idx])
+            hash160_u = bytes(hash_uncomp[idx])
 
             result = {
                 "btc_C": b58(b'\x00', hash160_c),
