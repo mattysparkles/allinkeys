@@ -5,13 +5,15 @@ import datetime
 import sys
 import logging
 import multiprocessing
+from multiprocessing import queues as mp_queues
 from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
 from config.settings import LOG_DIR, LOG_LEVEL, LOG_TO_CONSOLE, LOG_TO_FILE
 
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
-log_queue: multiprocessing.Queue | None = None
+# Use the actual Queue class for type hints to avoid runtime TypeError
+log_queue: mp_queues.Queue | None = None
 _listener: QueueListener | None = None
 _logger: logging.Logger | None = None
 
