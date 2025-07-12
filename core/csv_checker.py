@@ -288,7 +288,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
 
     address_sets = {}
     for coin, columns in coin_columns.items():
-        full_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR)
+        full_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR, unique=False)
         if full_path:
             log_message(f"🔎 Using funded list {os.path.basename(full_path)} for {coin.upper()}.")
             address_sets[coin] = load_funded_addresses(full_path)
@@ -338,7 +338,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
 
     address_sets = {}
     for coin, columns in coin_columns.items():
-        unique_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR)
+        unique_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR, unique=True)
         if unique_path:
             log_message(f"🔎 Using unique list {os.path.basename(unique_path)} for {coin.upper()}.")
             address_sets[coin] = load_funded_addresses(unique_path)
