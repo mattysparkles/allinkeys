@@ -167,7 +167,10 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                 addr = raw.strip() if raw else ""
                                 normalized = normalize_address(addr)
                                 if normalized != addr:
-                                    print(f"[Checker] Normalized BCH address: {addr} → {normalized}", flush=True)
+                                    log_message(
+                                        f"[Checker] Normalized BCH address: {addr} → {normalized}",
+                                        "DEBUG",
+                                    )
                                 in_funded = normalized in address_sets.get(coin, set())
                                 log_message(
                                     f"[Checker] {coin.upper()} column '{col}' -> '{normalized}' : {'MATCH' if in_funded else 'miss'}",
