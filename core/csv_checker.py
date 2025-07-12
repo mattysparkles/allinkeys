@@ -105,6 +105,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
     start_time = time.perf_counter()
     set_metric("csv_checker.last_file", filename)
     set_metric("csv_checker.last_timestamp", datetime.utcnow().isoformat())
+    set_metric("csv_checker.rows_checked", 0)
+    set_metric("csv_checker.matches_found", 0)
 
     if filename.endswith(".partial.csv"):
         return []
@@ -152,6 +154,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                             continue
                     rows_scanned += 1
                     increment_metric("csv_checker.rows_checked", 1)
+                    set_metric("csv_checker.rows_checked", rows_scanned)
                     row_matches = []
                     try:
                         for coin, columns in coin_columns.items():
@@ -227,6 +230,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                             raise
                     if row_matches:
                         increment_metric("csv_checker.matches_found", len(row_matches))
+                        set_metric("csv_checker.matches_found", get_metric("csv_checker.matches_found"))
             except csv.Error as e:
                 log_message(f"❌ CSV parsing error in {filename}: {e}", "ERROR")
 
@@ -276,7 +280,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         init_shared_metrics(shared_metrics)
         from core.dashboard import register_control_events
         register_control_events(shutdown_event, pause_event, module="csv_check")
-        set_metric("status.csv_check", True)
+        set_metric("status.csv_check", "Running")
         set_metric("csv_checked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
         set_metric("matches_found_today", {c: 0 for c in coin_columns})
@@ -314,7 +318,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         mark_csv_as_checked(filename, CHECKED_CSV_LOG)
 
     update_csv_eta()
-    set_metric("status.csv_check", False)
+    set_metric("status.csv_check", "Stopped")
     try:
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", False)
@@ -328,7 +332,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         init_shared_metrics(shared_metrics)
         from core.dashboard import register_control_events
         register_control_events(shutdown_event, pause_event, module="csv_recheck")
-        set_metric("status.csv_recheck", True)
+        set_metric("status.csv_recheck", "Running")
         set_metric("csv_rechecked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
         set_metric("matches_found_today", {c: 0 for c in coin_columns})
@@ -366,7 +370,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         mark_csv_as_checked(filename, RECHECKED_CSV_LOG)
 
     update_csv_eta()
-    set_metric("status.csv_recheck", False)
+    set_metric("status.csv_recheck", "Stopped")
     try:
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", False)

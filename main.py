@@ -58,6 +58,7 @@ from core.dashboard import (
     init_shared_metrics,
     init_dashboard_manager,
     get_current_metrics,
+    get_metric,
 )
 import core.dashboard as dashboard_core
 from ui.dashboard_gui import start_dashboard
@@ -102,6 +103,8 @@ def metrics_updater(shared_metrics=None):
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
+    prev_keys = get_metric('keys_generated_lifetime', 0)
+    prev_time = time.time()
     while True:
         try:
             from core.dashboard import reset_daily_metrics_if_needed
@@ -212,8 +215,13 @@ def metrics_updater(shared_metrics=None):
                 stats['backlog_eta'] = 'N/A'
 
             prog = keygen_progress()
-            stats['keys_generated_lifetime'] = prog['total_keys_generated']
-            stats['keys_per_sec'] = prog.get('keys_per_sec', 0)
+            curr_keys = get_metric('keys_generated_lifetime', 0)
+            elapsed = now - prev_time
+            keys_per_sec = (curr_keys - prev_keys) / elapsed if elapsed > 0 else 0
+            prev_keys = curr_keys
+            prev_time = now
+            stats['keys_generated_lifetime'] = curr_keys
+            stats['keys_per_sec'] = round(keys_per_sec, 2)
             stats['uptime'] = prog['elapsed_time']
             stats['last_updated'] = datetime.utcnow().strftime('%H:%M:%S')
             try:

@@ -320,14 +320,14 @@ def trigger_startup_alerts(shared_metrics=None):
         log_message("🚫 Alerts are disabled in config.", "INFO")
         return
 
-    set_metric("status.alerts", True)
+    set_metric("status.alerts", "Running")
     try:
         log_message("📣 Triggering startup alerts...", "INFO")
         # Extend to alert channels if needed
     except Exception as e:
         log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
     finally:
-        set_metric("status.alerts", False)
+        set_metric("status.alerts", "Stopped")
 
 
 def run_test_alerts_from_csv(csv_path=None):

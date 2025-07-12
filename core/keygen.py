@@ -206,7 +206,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
 
     try:
-        set_metric("status.keygen", True)
+        set_metric("status.keygen", "Running")
         from core.dashboard import (
             set_thread_health,
             get_shutdown_event,
@@ -273,7 +273,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     except Exception as e:
         logger.error(f"❌ Unexpected error: {e}")
     finally:
-        set_metric("status.keygen", False)
+        set_metric("status.keygen", "Stopped")
         try:
             from core.dashboard import set_thread_health
             set_thread_health("keygen", False)
