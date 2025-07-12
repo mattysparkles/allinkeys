@@ -15,6 +15,7 @@ from config.settings import (
     RECHECKED_CSV_LOG,
     ENABLE_PGP,
     PGP_PUBLIC_KEY_PATH,
+    LOG_LEVEL,
 )
 from utils.file_utils import find_latest_funded_file
 from core.alerts import alert_match
@@ -144,16 +145,10 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
 
             try:
                 for row in reader:
-                    if (
-                        get_metric("global_run_state") == "paused"
-                        or (pause_event and pause_event.is_set())
-                    ):
-                        while (
-                            get_metric("global_run_state") == "paused"
-                            or (pause_event and pause_event.is_set())
-                        ):
+                    if pause_event and pause_event.is_set():
+                        while pause_event and pause_event.is_set():
                             time.sleep(0.2)
-                        if pause_event and pause_event.is_set():
+                        if pause_event.is_set():
                             continue
                     rows_scanned += 1
                     increment_metric("csv_checker.rows_checked", 1)
@@ -166,7 +161,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                 raw = row.get(col)
                                 addr = raw.strip() if raw else ""
                                 normalized = normalize_address(addr)
-                                if normalized != addr:
+                                if normalized != addr and LOG_LEVEL == "DEBUG":
                                     log_message(
                                         f"[Checker] Normalized BCH address: {addr} → {normalized}",
                                         "DEBUG",
@@ -306,7 +301,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
             if os.path.exists(os.path.join(CSV_DIR, final)):
                 log_message(f"ℹ️ Skipping {filename} because final CSV already exists", "INFO")
             continue
-        if get_metric("global_run_state") == "paused" or (get_pause_event("csv_check") and get_pause_event("csv_check").is_set()):
+        if get_pause_event("csv_check") and get_pause_event("csv_check").is_set():
             time.sleep(1)
             continue
         if not filename.endswith(".csv") or has_been_checked(filename, CHECKED_CSV_LOG):
@@ -357,7 +352,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
             if os.path.exists(os.path.join(CSV_DIR, final)):
                 log_message(f"ℹ️ Skipping {filename} because final CSV already exists", "INFO")
             continue
-        if get_metric("global_run_state") == "paused" or (get_pause_event("csv_recheck") and get_pause_event("csv_recheck").is_set()):
+        if get_pause_event("csv_recheck") and get_pause_event("csv_recheck").is_set():
             time.sleep(1)
             continue
         if not filename.endswith(".csv") or has_been_checked(filename, RECHECKED_CSV_LOG):

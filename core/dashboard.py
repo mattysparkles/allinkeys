@@ -142,6 +142,8 @@ TODAY_METRIC_KEYS = [
     'csv_created_today',
     'keys_generated_today',
     'derived_addresses_today',
+    'altcoin_files_converted',
+    'alerts_sent_today',
 ]
 TODAY_METRIC_KEYS += [f'addresses_checked_today', f'addresses_generated_today', f'matches_found_today']
 
@@ -218,6 +220,8 @@ def _default_metrics():
         "csv_rechecked_today": 0,
         "csv_rechecked_lifetime": 0,
         "derived_addresses_today": 0,
+        "altcoin_files_converted": 0,
+        "alerts_sent_today": {},
         "addresses_checked_today": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
         },
@@ -348,15 +352,22 @@ def _update_stat_internal(key, value=None):
     maybe_persist_lifetime(key)
 
 def increment_metric(key, amount=1):
-    if not metrics_lock:
-        return
-    with metrics_lock:
+    """Increase a metric value in a process-safe manner."""
+    if metrics_lock:
+        with metrics_lock:
+            if "." in key:
+                top, sub = key.split(".", 1)
+                if isinstance(metrics.get(top), dict):
+                    metrics[top][sub] = metrics[top].get(sub, 0) + amount
+            elif isinstance(metrics.get(key), int):
+                metrics[key] += amount
+    else:
         if "." in key:
             top, sub = key.split(".", 1)
             if isinstance(metrics.get(top), dict):
                 metrics[top][sub] = metrics[top].get(sub, 0) + amount
         elif isinstance(metrics.get(key), int):
-            metrics[key] += amount
+            metrics[key] = metrics.get(key, 0) + amount
     maybe_persist_lifetime(key)
 
 
