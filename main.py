@@ -236,7 +236,7 @@ def should_skip_download_today(download_dir):
     return any(today_str in f for f in os.listdir(download_dir) if f.endswith(".txt"))
 
 
-def run_all_processes(args, shutdown_event, shared_metrics, pause_events):
+def run_all_processes(args, shutdown_event, shared_metrics, pause_events, log_q):
     from core.keygen import start_keygen_loop
     from core.backlog import start_backlog_conversion_loop  # Optional non-GPU parser
     from core.dashboard import init_shared_metrics
@@ -276,7 +276,7 @@ def run_all_processes(args, shutdown_event, shared_metrics, pause_events):
 
     if ENABLE_DAY_ONE_CHECK:
         try:
-            p = Process(target=check_csvs_day_one, args=(shared_metrics, shutdown_event, pause_events.get('csv_check')))
+            p = Process(target=check_csvs_day_one, args=(shared_metrics, shutdown_event, pause_events.get('csv_check'), False, log_q))
             p.daemon = True
             p.start()
             log_message("[Started] Day One CSV checker", "INFO")
@@ -287,7 +287,7 @@ def run_all_processes(args, shutdown_event, shared_metrics, pause_events):
 
     if ENABLE_UNIQUE_RECHECK:
         try:
-            p = Process(target=check_csvs, args=(shared_metrics, shutdown_event, pause_events.get('csv_recheck')))
+            p = Process(target=check_csvs, args=(shared_metrics, shutdown_event, pause_events.get('csv_recheck'), False, log_q))
             p.daemon = True
             p.start()
             log_message("[Started] Unique recheck", "INFO")
@@ -298,7 +298,7 @@ def run_all_processes(args, shutdown_event, shared_metrics, pause_events):
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
         try:
-            p = start_altcoin_conversion_process(shutdown_event, shared_metrics, pause_events.get('altcoin'))
+            p = start_altcoin_conversion_process(shutdown_event, shared_metrics, pause_events.get('altcoin'), log_q)
             log_message("[Started] Altcoin derive subprocess", "INFO")
             processes.append(p)
             named_processes.append(("altcoin", p))
@@ -384,7 +384,8 @@ def run_allinkeys(args):
         log_message("🧺 Running simulated match alert...")
         alert_match(test_data, test_mode=True)
 
-    processes, named_processes = run_all_processes(args, shutdown_event, shared_metrics, pause_events)
+    from core.logger import log_queue
+    processes, named_processes = run_all_processes(args, shutdown_event, shared_metrics, pause_events, log_queue)
 
     def monitor():
         from core.dashboard import get_current_metrics

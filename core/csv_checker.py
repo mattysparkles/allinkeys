@@ -268,7 +268,10 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
         log_message(f"❌ Error reading {filename}: {str(e)}", "ERROR")
         return []
 
-def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False):
+from core.logger import initialize_logging
+
+def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False, log_q=None):
+    initialize_logging(log_q)
     try:
         init_shared_metrics(shared_metrics)
         from core.dashboard import register_control_events
@@ -319,7 +322,8 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         pass
 
 
-def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False):
+def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False, log_q=None):
+    initialize_logging(log_q)
     try:
         init_shared_metrics(shared_metrics)
         from core.dashboard import register_control_events
@@ -390,9 +394,11 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=int, default=10_000_000, help="Byte threshold for --scan")
     args = parser.parse_args()
 
+    from core.logger import start_listener, log_queue
+    start_listener()
     if args.scan:
         scan_csv_for_oversized_lines(args.scan, threshold=args.threshold)
     elif args.recheck:
-        check_csvs(safe_mode=args.safe)
+        check_csvs(safe_mode=args.safe, log_q=log_queue)
     else:
-        check_csvs_day_one(safe_mode=args.safe)
+        check_csvs_day_one(safe_mode=args.safe, log_q=log_queue)
