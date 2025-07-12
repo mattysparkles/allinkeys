@@ -238,10 +238,13 @@ def cashaddr_encode(prefix, payload):
     return prefix + ':' + ''.join([CHARSET[d] for d in data])
 
 
-def derive_addresses_gpu(hex_keys):
+def derive_addresses_gpu(hex_keys, context=None):
     """Derive addresses using the GPU if available."""
 
-    context, device = get_gpu_context_for_altcoin()
+    if context is None:
+        context, device = get_gpu_context_for_altcoin()
+    else:
+        device = context.devices[0]
     # Enable profiling so we can time kernel execution
     queue = cl.CommandQueue(
         context, properties=cl.command_queue_properties.PROFILING_ENABLE
@@ -392,23 +395,23 @@ def derive_addresses_cpu(hex_keys):
     return results
 
 
-def derive_addresses(hex_keys):
+def derive_addresses(hex_keys, context=None):
     """Try GPU derivation then fall back to CPU on failure."""
     try:
-        return derive_addresses_gpu(hex_keys)
+        return derive_addresses_gpu(hex_keys, context)
     except Exception as e:
         log_message(f"⚠️ GPU derive failed, falling back to CPU: {safe_str(e)}", "WARNING")
         global cpu_fallback_active
         cpu_fallback_active = True
         return derive_addresses_cpu(hex_keys)
 
-def derive_altcoin_addresses_from_hex(hex_key):
+def derive_altcoin_addresses_from_hex(hex_key, context=None):
     sanitized = hex_key.lower().replace("0x", "").zfill(64)
-    results = derive_addresses([sanitized])
+    results = derive_addresses([sanitized], context)
     return results[0] if results else {}
 
 
-def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_event=None):
+def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_event=None, context=None):
     filename = os.path.basename(input_txt_path)
     base_name = os.path.splitext(filename)[0]
     perf_stats = {"load": 0.0, "derive": 0.0, "write": 0.0}
@@ -506,7 +509,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
                         if len(hex_batch) >= batch_size:
                             t_der = time.perf_counter()
-                            results = derive_addresses(hex_batch)
+                            results = derive_addresses(hex_batch, context)
                             d_dur = time.perf_counter() - t_der
                             perf_stats["derive"] += d_dur
                             log_message(
@@ -599,7 +602,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
             # Final flush
             if hex_batch:
                 t_der = time.perf_counter()
-                results = derive_addresses(hex_batch)
+                results = derive_addresses(hex_batch, context)
                 d_dur = time.perf_counter() - t_der
                 perf_stats["derive"] += d_dur
                 log_message(f"[PERF] Derived {len(hex_batch)} keys in {d_dur:.2f}s", "DEBUG")
@@ -713,25 +716,29 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 from core.dashboard import init_shared_metrics, register_control_events
 
 
-def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics):
+def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, gpu_id):
     """Helper for ProcessPoolExecutor to convert a single file."""
     try:
         init_shared_metrics(shared_metrics)
         full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
         batch_id = None
-        try:
-            ctx, dev = get_gpu_context_for_altcoin()
+        context = None
+        device_name = "CPU"
+        if gpu_id is not None:
             try:
-                ctx.release()
-            except Exception:
-                pass
-            device_name = f"GPU {dev.name}"
-        except Exception:
-            device_name = "CPU"
+                platforms = cl.get_platforms()
+                devices = [d for p in platforms for d in p.get_devices()]
+                if gpu_id >= len(devices):
+                    raise RuntimeError(f"Invalid GPU ID {gpu_id} — only {len(devices)} available")
+                device = devices[gpu_id]
+                context = cl.Context([device])
+                device_name = f"GPU {device.name}"
+            except Exception as err:
+                log_message(f"⚠️ FALLBACK TO CPU — OpenCL device not available: {safe_str(err)}", "WARNING")
         log_message(f"[WORKER] PID {os.getpid()} starting {txt_file} on {device_name}", "DEBUG")
         update_dashboard_stat("backlog_current_file", txt_file)
         start_t = time.perf_counter()
-        rows = convert_txt_to_csv(full_path, batch_id, pause_event, shutdown_event)
+        rows = convert_txt_to_csv(full_path, batch_id, pause_event, shutdown_event, context)
         increment_metric("altcoin_files_converted", 1)
         if rows:
             increment_metric("derived_addresses_today", rows)
@@ -818,7 +825,17 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
 
                 while all_txt and len(futures) < max_workers:
                     txt = all_txt.pop(0)
-                    future = executor.submit(_convert_file_worker, txt, pause_event, shared_shutdown_event, shared_metrics)
+                    assigned_gpu = None
+                    if selected_gpus:
+                        assigned_gpu = selected_gpus[len(futures) % len(selected_gpus)]
+                    future = executor.submit(
+                        _convert_file_worker,
+                        txt,
+                        pause_event,
+                        shared_shutdown_event,
+                        shared_metrics,
+                        assigned_gpu,
+                    )
                     futures[future] = txt
                     queued.add(txt)
 
