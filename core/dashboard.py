@@ -266,13 +266,15 @@ def _default_metrics():
             "last_file": "",
             "last_timestamp": "",
         },
+        # Human readable module state. Thread health flags expose booleans for
+        # programmatic checks so this can safely store strings for the GUI.
         "status": {
-            "keygen": ENABLE_KEYGEN,
-            "altcoin": ENABLE_ALTCOIN_DERIVATION,
-            "csv_check": ENABLE_DAY_ONE_CHECK,
-            "csv_recheck": ENABLE_UNIQUE_RECHECK,
-            "backlog": ENABLE_BACKLOG_CONVERSION,
-            "alerts": ENABLE_ALERTS,
+            "keygen": "Running" if ENABLE_KEYGEN else "Stopped",
+            "altcoin": "Running" if ENABLE_ALTCOIN_DERIVATION else "Stopped",
+            "csv_check": "Running" if ENABLE_DAY_ONE_CHECK else "Stopped",
+            "csv_recheck": "Running" if ENABLE_UNIQUE_RECHECK else "Stopped",
+            "backlog": "Running" if ENABLE_BACKLOG_CONVERSION else "Stopped",
+            "alerts": "Running" if ENABLE_ALERTS else "Stopped",
         },
         "global_run_state": "running",
         "auto_resume_enabled": True,

@@ -66,7 +66,7 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
     except Exception:
         pass
     from core.dashboard import set_thread_health
-    set_metric("status.backlog", True)
+    set_metric("status.backlog", "Running")
     set_metric("backlog_files_queued", 0)
     set_metric("backlog_files_completed", 0)
     set_thread_health("backlog", True)
@@ -133,7 +133,7 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
                 continue
             time.sleep(10)
     finally:
-        set_metric("status.backlog", False)
+        set_metric("status.backlog", "Stopped")
         try:
             set_thread_health("backlog", False)
         except Exception:

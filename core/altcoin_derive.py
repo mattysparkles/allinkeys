@@ -756,7 +756,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     initialize_logging(log_q)
     try:
         init_shared_metrics(shared_metrics)
-        set_metric("status.altcoin", True)
+        set_metric("status.altcoin", "Running")
         set_metric("altcoin_files_converted", 0)
         set_metric("derived_addresses_today", 0)
         set_metric("backlog_files_completed", 0)
@@ -873,7 +873,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                 log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
 
     log_message("✅ Altcoin derive loop exited cleanly.", "INFO")
-    set_metric("status.altcoin", False)
+    set_metric("status.altcoin", "Stopped")
     try:
         from core.dashboard import set_thread_health
         set_thread_health("altcoin", False)
