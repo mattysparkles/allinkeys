@@ -47,7 +47,7 @@ from config.settings import (
     CSV_DIR, VANITYSEARCH_PATH, DOWNLOAD_DIR
 )
 
-from core.logger import log_message
+from core.logger import log_message, start_listener, stop_listener
 from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint
 from core.downloader import download_and_compare_address_lists, generate_test_csv
 from core.csv_checker import check_csvs_day_one, check_csvs
@@ -343,6 +343,7 @@ def run_all_processes(args, shutdown_event, shared_metrics, pause_events):
 def run_allinkeys(args):
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(CSV_DIR, exist_ok=True)
+    start_listener()
     os.environ.setdefault("PYOPENCL_COMPILER_OUTPUT", "1")
     display_logo()
 
@@ -402,6 +403,7 @@ def run_allinkeys(args):
                 p.terminate()
         for p in processes:
             p.join()
+        stop_listener()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown_handler)
