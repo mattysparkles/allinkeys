@@ -750,7 +750,10 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, 
         return txt_file, 0.0, 0, safe_str(e)
 
 
-def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None):
+from core.logger import initialize_logging
+
+def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None):
+    initialize_logging(log_q)
     try:
         init_shared_metrics(shared_metrics)
         set_metric("status.altcoin", True)
@@ -877,7 +880,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     except Exception:
         pass
 
-def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None, pause_event=None):
+def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None):
     """
     Starts a subprocess that monitors VANITY_OUTPUT_DIR for .txt files and converts them to multi-coin CSVs.
     Gracefully shuts down on Ctrl+C or when shutdown_event is triggered.
@@ -885,7 +888,7 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
     """
     process = multiprocessing.Process(
         target=convert_txt_to_csv_loop,
-        args=(shared_shutdown_event, shared_metrics, pause_event),
+        args=(shared_shutdown_event, shared_metrics, pause_event, log_q),
         name="AltcoinConverter"
     )
     # This process launches a ``ProcessPoolExecutor`` for parallel conversions
@@ -902,8 +905,10 @@ if __name__ == "__main__":
     print("🧪 Running one-shot altcoin conversion test (dev mode)...", flush=True)
     mgr = Manager()
     shared_event = mgr.Event()
+    from core.logger import start_listener, log_queue
+    start_listener()
     try:
-        start_altcoin_conversion_process(shared_event, None, shared_event)
+        start_altcoin_conversion_process(shared_event, None, shared_event, log_queue)
         while True:
             time.sleep(10)
     except KeyboardInterrupt:

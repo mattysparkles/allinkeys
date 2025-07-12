@@ -23,6 +23,16 @@ def _ensure_queue():
         log_queue = multiprocessing.Queue(-1)
     return log_queue
 
+def initialize_logging(queue: mp_queues.Queue | None = None) -> mp_queues.Queue:
+    """Initialize logging for a subprocess using the shared queue."""
+    global log_queue, _logger
+    if queue is not None:
+        log_queue = queue
+    elif log_queue is None:
+        log_queue = multiprocessing.Queue(-1)
+    _logger = None
+    return log_queue
+
 def start_listener():
     """Start the multiprocessing log listener."""
     global _listener

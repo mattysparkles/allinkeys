@@ -140,6 +140,7 @@ def alert_match(match_data, test_mode=False):
     alert_type = "TEST MATCH" if test_mode else "MATCH FOUND"
 
     match_text = f"[{timestamp}] {alert_type}!\nCoin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey}"
+    log_message(f"🎯 Match found: {json.dumps(match_data)}", "INFO")
     log_message(f"🚨 {alert_type}: {address} (File: {csv_file})")
 
     # 🖥️ Desktop Window Alert
