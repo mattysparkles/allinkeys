@@ -283,6 +283,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
+        log_message("🟢 CSV day-one checker started", "DEBUG")
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 
@@ -333,6 +334,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
+        log_message("🟢 CSV recheck checker started", "DEBUG")
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 

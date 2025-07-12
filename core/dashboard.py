@@ -385,6 +385,23 @@ def get_metric(key, default=None):
         return metrics.get(key, default)
 
 
+def _to_plain(obj):
+    """Recursively convert Manager proxy objects to built-in types."""
+    try:
+        from multiprocessing.managers import BaseProxy
+    except Exception:  # pragma: no cover - platform dependent
+        BaseProxy = object
+    if isinstance(obj, BaseProxy):
+        try:
+            obj = obj._getvalue()  # type: ignore[attr-defined]
+        except Exception:
+            obj = dict(obj) if hasattr(obj, "items") else list(obj)
+    if isinstance(obj, dict):
+        return {k: _to_plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return type(obj)(_to_plain(v) for v in obj)
+    return obj
+
 def get_current_metrics():
     """Return a snapshot of the shared metrics dict.
 
@@ -401,10 +418,11 @@ def get_current_metrics():
     if metrics_lock:
         with metrics_lock:
             metrics["thread_health_flags"] = THREAD_HEALTH.copy()
-            return dict(metrics)
+            snapshot = dict(metrics)
     else:
         metrics["thread_health_flags"] = THREAD_HEALTH.copy()
-        return dict(metrics)
+        snapshot = dict(metrics)
+    return _to_plain(snapshot)
 
 
 def load_checkpoint_file(filepath=None):

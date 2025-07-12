@@ -425,89 +425,91 @@ class DashboardGUI:
                 if self.module_states.get(label) != state:
                     self.module_states[label] = state
                     updater()
-            for key, widget in self.metrics.items():
-                if key == "backlog_progress":
-                    for child in self.backlog_progress_frame.winfo_children():
-                        child.destroy()
-                    progress_data = stats.get("backlog_progress", {}) or {}
-                    for idx, (fname, pct) in enumerate(progress_data.items()):
-                        ttk.Label(self.backlog_progress_frame, text=fname[:20]).grid(row=idx, column=0, sticky="w")
-                        bar = ttk.Progressbar(self.backlog_progress_frame, length=120, mode="determinate")
-                        bar.grid(row=idx, column=1, padx=2)
-                        try:
-                            bar["value"] = float(pct)
-                        except Exception:
-                            bar["value"] = 0
-                    continue
-
-                value = stats.get(key, "N/A")
-                if isinstance(widget, ttk.Progressbar):
-                    try:
-                        widget["value"] = float(value.strip('%')) if isinstance(value, str) else float(value)
-                    except:
-                        widget["value"] = 0
-                elif isinstance(widget, tk.Text):
-                    lines = []
-                    if isinstance(value, dict):
-                        if key == "status":
-                            name_map = {
-                                "keygen": "Keygen",
-                                "csv_check": "CSV Checker",
-                                "csv_recheck": "CSV Recheck",
-                                "altcoin": "Altcoin",
-                                "alerts": "Alerts",
-                                "checkpoint": "Checkpoint",
-                                "metrics": "Metrics",
-                            }
-                            for mod, running in value.items():
-                                title = name_map.get(mod, mod.title())
-                                icon = "✅" if running else "❌"
-                                state = "Running" if running else "Stopped"
-                                lines.append(f"{title}: {state} {icon}")
-                        elif key == "gpu_assignments":
-                            name_map = {
-                                "vanitysearch": "VanitySearch",
-                                "altcoin_derive": "Altcoin Derive",
-                            }
-                            for mod, name in value.items():
-                                title = name_map.get(mod, mod.replace('_', ' ').title())
-                                lines.append(f"{title} → {name}")
-                        elif key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "csv_checker"):
-                            items = [f"{k.upper()}: {v}" for k, v in value.items()]
-                            for i in range(0, len(items), 3):
-                                lines.append("   ".join(items[i:i+3]))
-                        else:
-                            for gid, info in value.items():
-                                name = info.get('name', '')
-                                usage = info.get('usage', 'N/A')
-                                vram = info.get('vram', 'N/A')
-                                temp = info.get('temp', 'N/A')
-                                lines.append(f"{gid}: {name}")
-                                detail = f"  Usage: {usage}  VRAM: {vram}"
-                                if temp and temp != 'N/A':
-                                    detail += f"  Temp: {temp}"
-                                lines.append(detail)
-                    else:
-                        lines.append(str(value))
-                    widget.config(state="normal")
-                    widget.delete("1.0", "end")
-                    widget.insert("end", "\n".join(lines) or "N/A")
-                    widget.config(state="disabled")
-                else:
-                    if isinstance(value, dict):
-                        lines = [f"{k.upper()}: {v}" for k, v in value.items()]
-                        disp = "\n".join(lines)
-                    else:
-                        disp = str(value)
-                        if len(disp) > 40:
-                            disp = disp[:37] + "..."
-                    if self.prev_values.get(key) != disp:
-                        self._flash_widget(widget)
-                    self.prev_values[key] = disp
-                    widget.config(text=disp)
+            self.update_metrics_display(stats)
         except Exception as e:
             print(f"[Dashboard Error] {e}")
         self.master.after(int(DASHBOARD_REFRESH_INTERVAL * 1000), self.refresh_loop)
+
+    def update_metrics_display(self, stats):
+        for key, widget in self.metrics.items():
+            if key == "backlog_progress":
+                for child in self.backlog_progress_frame.winfo_children():
+                    child.destroy()
+                progress_data = stats.get("backlog_progress", {}) or {}
+                for idx, (fname, pct) in enumerate(progress_data.items()):
+                    ttk.Label(self.backlog_progress_frame, text=fname[:20]).grid(row=idx, column=0, sticky="w")
+                    bar = ttk.Progressbar(self.backlog_progress_frame, length=120, mode="determinate")
+                    bar.grid(row=idx, column=1, padx=2)
+                    try:
+                        bar["value"] = float(pct)
+                    except Exception:
+                        bar["value"] = 0
+                continue
+
+            value = stats.get(key, "N/A")
+            if isinstance(widget, ttk.Progressbar):
+                try:
+                    widget["value"] = float(value.strip('%')) if isinstance(value, str) else float(value)
+                except Exception:
+                    widget["value"] = 0
+            elif isinstance(widget, tk.Text):
+                lines = []
+                if isinstance(value, dict):
+                    if key == "status":
+                        name_map = {
+                            "keygen": "Keygen",
+                            "csv_check": "CSV Checker",
+                            "csv_recheck": "CSV Recheck",
+                            "altcoin": "Altcoin",
+                            "alerts": "Alerts",
+                            "checkpoint": "Checkpoint",
+                            "metrics": "Metrics",
+                        }
+                        for mod, running in value.items():
+                            title = name_map.get(mod, mod.title())
+                            icon = "✅" if running else "❌"
+                            state = "Running" if running else "Stopped"
+                            lines.append(f"{title}: {state} {icon}")
+                    elif key == "gpu_assignments":
+                        name_map = {
+                            "vanitysearch": "VanitySearch",
+                            "altcoin_derive": "Altcoin Derive",
+                        }
+                        for mod, name in value.items():
+                            title = name_map.get(mod, mod.replace('_', ' ').title())
+                            lines.append(f"{title} → {name}")
+                    elif key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "csv_checker"):
+                        for coin, amt in value.items():
+                            lines.append(f"{coin.upper()}: {amt}")
+                    else:
+                        for gid, info in value.items():
+                            name = info.get('name', '')
+                            usage = info.get('usage', 'N/A')
+                            vram = info.get('vram', 'N/A')
+                            temp = info.get('temp', 'N/A')
+                            lines.append(f"{gid}: {name}")
+                            detail = f"  Usage: {usage}  VRAM: {vram}"
+                            if temp and temp != 'N/A':
+                                detail += f"  Temp: {temp}"
+                            lines.append(detail)
+                else:
+                    lines.append(str(value))
+                widget.config(state="normal")
+                widget.delete("1.0", "end")
+                widget.insert("end", "\n".join(lines) or "N/A")
+                widget.config(state="disabled")
+            else:
+                if isinstance(value, dict):
+                    lines = [f"{k.upper()}: {v}" for k, v in value.items()]
+                    disp = "\n".join(lines)
+                else:
+                    disp = str(value)
+                    if len(disp) > 40:
+                        disp = disp[:37] + "..."
+                if self.prev_values.get(key) != disp:
+                    self._flash_widget(widget)
+                self.prev_values[key] = disp
+                widget.config(text=disp)
 
     def open_config_file(self):
         if not os.path.exists(CONFIG_FILE_PATH):
