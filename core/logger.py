@@ -5,12 +5,30 @@ import io
 import datetime
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 from config.settings import LOG_DIR, LOG_LEVEL, LOG_TO_CONSOLE, LOG_TO_FILE
 
 # stdout is configured in main
 
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+_debug_logger = None
+
+def _get_debug_logger():
+    global _debug_logger
+    if _debug_logger is None:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        logger = logging.getLogger("allinkeys.debug")
+        logger.setLevel(logging.DEBUG)
+        handler = RotatingFileHandler(
+            LOG_FILE_PATHS["DEBUG"], maxBytes=250_000_000, backupCount=2, encoding="utf-8"
+        )
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logger.addHandler(handler)
+        logger.propagate = False
+        _debug_logger = logger
+    return _debug_logger
 
 # Define separate log files by level
 LOG_FILE_PATHS = {
@@ -60,11 +78,15 @@ def log_message(message, level="INFO"):
             fallback = timestamped.encode("ascii", errors="replace").decode()
             print(fallback, flush=True)
 
-    # Write to file (UTF-8 with emoji-safe fallback)
+    # Write to file using a rotating handler for DEBUG, simple append otherwise
     if LOG_TO_FILE and level in LOG_FILE_PATHS:
         try:
-            with open(LOG_FILE_PATHS[level], "a", encoding="utf-8", errors="replace") as f:
-                f.write(timestamped + "\n")
+            if level == "DEBUG":
+                logger = _get_debug_logger()
+                logger.debug(timestamped)
+            else:
+                with open(LOG_FILE_PATHS[level], "a", encoding="utf-8", errors="replace") as f:
+                    f.write(timestamped + "\n")
         except Exception as e:
             try:
                 print(f"[ERROR] Failed to write log: {e}", flush=True)
