@@ -104,6 +104,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
     rows_scanned = 0
     start_time = time.perf_counter()
     set_metric("csv_checker.last_file", filename)
+    set_metric("last_csv_checked_filename", filename)
     set_metric("csv_checker.last_timestamp", datetime.utcnow().isoformat())
     set_metric("csv_checker.rows_checked", 0)
     set_metric("csv_checker.matches_found", 0)
@@ -175,50 +176,55 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                     "DEBUG",
                                 )
                                 if addr and in_funded:
-                                    match_payload = {
-                                        "timestamp": datetime.utcnow().isoformat(),
-                                        "coin": coin,
-                                        "address": addr,
-                                        "csv_file": filename,
-                                        "privkey": row.get("wif") or row.get("private_key") or row.get("priv_hex") or "unknown",
-                                        "batch_id": row.get("batch_id", "n/a"),
-                                        "index": row.get("index", "n/a"),
-                                        "row_number": rows_scanned
-                                    }
+                                    try:
+                                        match_payload = {
+                                            "timestamp": datetime.utcnow().isoformat(),
+                                            "coin": coin,
+                                            "address": addr,
+                                            "csv_file": filename,
+                                            "privkey": row.get("wif") or row.get("private_key") or row.get("priv_hex") or "unknown",
+                                            "batch_id": row.get("batch_id", "n/a"),
+                                            "index": row.get("index", "n/a"),
+                                            "row_number": rows_scanned
+                                        }
 
-                                    log_message(f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}", "ALERT")
+                                        log_message(f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}", "ALERT")
 
-                                    if ENABLE_PGP:
-                                        try:
-                                            encrypted = encrypt_with_pgp(json.dumps(match_payload), PGP_PUBLIC_KEY_PATH)
-                                            alert_match(match_payload)
-                                            alert_match({"encrypted": encrypted})
-                                        except Exception as pgp_err:
-                                            log_message(f"⚠️ PGP failed for {addr}: {pgp_err}", "WARN")
-                                            alert_match(match_payload)
-                                    else:
-                                        alert_match(match_payload)
-
-                                    if filename != "test_alerts.csv":
-                                        bal = fetch_live_balance(addr, coin)
-                                        if bal is not None:
-                                            ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-                                            log_message(
-                                                f"🎯 Matched {coin.upper()} address {addr} – Current balance: {bal} {coin.upper()} (fetched at {ts})",
-                                                "ALERT",
-                                            )
+                                        if ENABLE_PGP:
+                                            try:
+                                                encrypted = encrypt_with_pgp(json.dumps(match_payload), PGP_PUBLIC_KEY_PATH)
+                                                alert_match(match_payload)
+                                                alert_match({"encrypted": encrypted})
+                                            except Exception as pgp_err:
+                                                log_message(f"⚠️ PGP failed for {addr}: {pgp_err}", "WARN")
+                                                alert_match(match_payload)
                                         else:
-                                            log_message(f"⚠️ Could not fetch balance for {addr}", "WARN")
+                                            alert_match(match_payload)
 
-                                    if normalized not in new_matches:
-                                        new_matches.add(normalized)
-                                        increment_metric("matched_keys", 1)
-                                        increment_metric(f"matches_found_today.{coin}", 1)
                                         if filename != "test_alerts.csv":
-                                            increment_metric(f"matches_found_lifetime.{coin}", 1)
-                                    row_matches.append(addr)
-                                    # continue checking other columns in this row
-                                    continue
+                                            bal = fetch_live_balance(addr, coin)
+                                            if bal is not None:
+                                                ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+                                                log_message(
+                                                    f"🎯 Matched {coin.upper()} address {addr} – Current balance: {bal} {coin.upper()} (fetched at {ts})",
+                                                    "ALERT",
+                                                )
+                                            else:
+                                                log_message(f"⚠️ Could not fetch balance for {addr}", "WARN")
+
+                                        if normalized not in new_matches:
+                                            new_matches.add(normalized)
+                                            increment_metric("matched_keys", 1)
+                                            increment_metric(f"matches_found_today.{coin}", 1)
+                                            if filename != "test_alerts.csv":
+                                                increment_metric(f"matches_found_lifetime.{coin}", 1)
+                                            update_dashboard_stat("matches_found_today", get_metric("matches_found_today"))
+                                            update_dashboard_stat("matches_found_lifetime", get_metric("matches_found_lifetime"))
+                                        row_matches.append(addr)
+                                        continue
+                                    except Exception as match_err:
+                                        log_message(f"⚠️ Match processing error for {addr}: {match_err}", "WARN")
+                                        continue
                     except Exception as row_err:
                         if safe_mode:
                             log_message(
@@ -244,6 +250,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
 
         increment_metric("csv_checked_today", 1)
         increment_metric("csv_checked_lifetime", 1)
+        update_dashboard_stat("csv_checked_today", get_metric("csv_checked_today"))
+        update_dashboard_stat("csv_checked_lifetime", get_metric("csv_checked_lifetime"))
         if recheck:
             increment_metric("csv_rechecked_today", 1)
             increment_metric("csv_rechecked_lifetime", 1)
@@ -254,6 +262,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
         for coin in coin_columns:
             increment_metric(f"addresses_checked_today.{coin}", rows_scanned)
             increment_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
+        update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
+        update_dashboard_stat("addresses_checked_lifetime", get_metric("addresses_checked_lifetime"))
 
         log_message(f"✅ {'Recheck' if recheck else 'Check'} complete: {len(new_matches)} matches found", "INFO")
         log_message(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s", "INFO")

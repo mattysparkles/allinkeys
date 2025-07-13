@@ -40,6 +40,7 @@ from config.settings import (
     MAX_CSV_MB, BCH_CASHADDR_ENABLED,
     ALTCOIN_GPUS_INDEX,
     LOG_LEVEL,
+    EXCLUDE_ETH_FROM_DERIVE,
 )
 from core.logger import log_message
 from core.dashboard import update_dashboard_stat, set_metric, get_metric, increment_metric
@@ -338,8 +339,9 @@ def derive_addresses_gpu(hex_keys, context=None):
                 "rvn_U": b58(b'\x3c', hash160_u),
                 "pep_C": b58(b'\x37', hash160_c),
                 "pep_U": b58(b'\x37', hash160_u),
-                "eth": "0x" + keccak(pubkey_compressed[1:])[-20:].hex()
             }
+            if not EXCLUDE_ETH_FROM_DERIVE:
+                result["eth"] = "0x" + keccak(pubkey_compressed[1:])[-20:].hex()
 
             results.append(result)
 
@@ -387,8 +389,9 @@ def derive_addresses_cpu(hex_keys):
                 "rvn_U": b58(b"\x3c", hash160_u),
                 "pep_C": b58(b"\x37", hash160_c),
                 "pep_U": b58(b"\x37", hash160_u),
-                "eth": "0x" + keccak(pubkey_compressed[1:])[-20:].hex(),
             }
+            if not EXCLUDE_ETH_FROM_DERIVE:
+                result["eth"] = "0x" + keccak(pubkey_compressed[1:])[-20:].hex()
             results.append(result)
         except Exception as e:
             results.append({"error": str(e)})
@@ -455,10 +458,14 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                 return 0
 
             rows_written = 0
-            address_tally = {k: 0 for k in [
+            tally_keys = [
                 "btc_C", "btc_U", "ltc_C", "ltc_U", "doge_C", "doge_U",
-                "bch_C", "bch_U", "eth", "dash_C", "dash_U", "rvn_C", "rvn_U", "pep_C", "pep_U"
-            ]}
+                "bch_C", "bch_U", "dash_C", "dash_U", "rvn_C", "rvn_U",
+                "pep_C", "pep_U"
+            ]
+            if not EXCLUDE_ETH_FROM_DERIVE:
+                tally_keys.insert(8, "eth")
+            address_tally = {k: 0 for k in tally_keys}
 
             line_buffer = []
             hex_batch = []
@@ -470,14 +477,8 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
             batch_size = 16384
 
             for line in infile:
-                if (
-                    (pause_event and pause_event.is_set())
-                    or get_metric("global_run_state") == "paused"
-                ):
-                    while (
-                        (pause_event and pause_event.is_set())
-                        or get_metric("global_run_state") == "paused"
-                    ):
+                if pause_event and pause_event.is_set():
+                    while pause_event and pause_event.is_set():
                         if shutdown_event and shutdown_event.is_set():
                             break
                         time.sleep(1)
@@ -537,7 +538,6 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                     "doge_U": derived.get("doge_U", ""),
                                     "bch_C": derived.get("bch_C", ""),
                                     "bch_U": derived.get("bch_U", ""),
-                                    "eth": derived.get("eth", ""),
                                     "dash_C": derived.get("dash_C", ""),
                                     "dash_U": derived.get("dash_U", ""),
                                     "rvn_C": derived.get("rvn_C", ""),
@@ -550,6 +550,8 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                     "batch_id": batch_id,
                                     "index": index
                                 }
+                                if not EXCLUDE_ETH_FROM_DERIVE:
+                                    row["eth"] = derived.get("eth", "")
                                 for k in address_tally:
                                     if row.get(k):
                                         address_tally[k] += 1
@@ -607,14 +609,8 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                 perf_stats["derive"] += d_dur
                 log_message(f"[PERF] Derived {len(hex_batch)} keys in {d_dur:.2f}s", "DEBUG")
                 for idx, derived in enumerate(results):
-                    if (
-                        (pause_event and pause_event.is_set())
-                        or get_metric("global_run_state") == "paused"
-                    ):
-                        while (
-                            (pause_event and pause_event.is_set())
-                            or get_metric("global_run_state") == "paused"
-                        ):
+                    if pause_event and pause_event.is_set():
+                        while pause_event and pause_event.is_set():
                             if shutdown_event and shutdown_event.is_set():
                                 break
                             time.sleep(1)
@@ -643,7 +639,6 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                         "doge_U": derived.get("doge_U", ""),
                         "bch_C": derived.get("bch_C", ""),
                         "bch_U": derived.get("bch_U", ""),
-                        "eth": derived.get("eth", ""),
                         "dash_C": derived.get("dash_C", ""),
                         "dash_U": derived.get("dash_U", ""),
                         "rvn_C": derived.get("rvn_C", ""),
@@ -656,6 +651,8 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                         "batch_id": batch_id,
                         "index": index
                     }
+                    if not EXCLUDE_ETH_FROM_DERIVE:
+                        row["eth"] = derived.get("eth", "")
                     for k in address_tally:
                         if row.get(k):
                             address_tally[k] += 1
@@ -686,8 +683,10 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                 "btc_U": "btc", "btc_C": "btc", "ltc_U": "ltc", "ltc_C": "ltc",
                 "doge_U": "doge", "doge_C": "doge", "bch_U": "bch", "bch_C": "bch",
                 "dash_U": "dash", "dash_C": "dash", "rvn_U": "rvn", "rvn_C": "rvn",
-                "pep_U": "pep", "pep_C": "pep", "eth": "eth"
+                "pep_U": "pep", "pep_C": "pep"
             }
+            if not EXCLUDE_ETH_FROM_DERIVE:
+                coin_map["eth"] = "eth"
             per_coin = {c: 0 for c in coin_map.values()}
             for key, count in address_tally.items():
                 coin = coin_map.get(key)
@@ -732,7 +731,7 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, 
                     raise RuntimeError(f"Invalid GPU ID {gpu_id} — only {len(devices)} available")
                 device = devices[gpu_id]
                 context = cl.Context([device])
-                device_name = f"GPU {device.name}"
+                device_name = f"GPU{gpu_id} {device.name}"
             except Exception as err:
                 log_message(f"⚠️ FALLBACK TO CPU — OpenCL device not available: {safe_str(err)}", "WARNING")
         log_message(f"[WORKER] PID {os.getpid()} starting {txt_file} on {device_name}", "DEBUG")
@@ -797,7 +796,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
         futures = {}
         while not shared_shutdown_event.is_set():
-            if get_metric("global_run_state") == "paused" or (get_pause_event("altcoin") and get_pause_event("altcoin").is_set()):
+            if get_pause_event("altcoin") and get_pause_event("altcoin").is_set():
                 time.sleep(1)
                 continue
             try:
@@ -831,6 +830,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                     assigned_gpu = None
                     if selected_gpus:
                         assigned_gpu = selected_gpus[len(futures) % len(selected_gpus)]
+                    log_message(f"[QUEUE] Submitting {txt} to GPU {assigned_gpu if assigned_gpu is not None else 'CPU'}", "DEBUG")
                     future = executor.submit(
                         _convert_file_worker,
                         txt,

@@ -154,7 +154,7 @@ class DashboardGUI:
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
                 elif key in ("gpu_stats", "gpu_assignments", "status", "matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "csv_checker", "alerts_sent_today"):
-                    txt = tk.Text(frame, height=5, width=45, wrap="word", font=FONT)
+                    txt = tk.Text(frame, height=8, width=45, wrap="word", font=FONT)
                     txt.grid(row=i, column=1, sticky="nsew", padx=2, pady=2)
                     txt.configure(state="disabled")
                     self.metrics[key] = txt

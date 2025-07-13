@@ -204,7 +204,7 @@ def alert_match(match_data, test_mode=False):
             log_message("📧 Email alert sent.", "INFO")
             increment_metric("alerts_sent_today.email")
         except Exception as e:
-            log_message(f"❌ Email alert error: {e}", "ERROR")
+            log_message(f"❌ Email alert error: {e}", "WARNING")
 
     # 📲 Telegram Alert
     if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT"):
@@ -217,7 +217,7 @@ def alert_match(match_data, test_mode=False):
             else:
                 log_message(f"❌ Telegram alert failed: {resp.text}", "ERROR")
         except Exception as e:
-            log_message(f"❌ Telegram alert error: {e}", "ERROR")
+            log_message(f"❌ Telegram alert error: {e}", "WARNING")
 
     # 📱 SMS via Twilio
     if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client:
@@ -229,7 +229,7 @@ def alert_match(match_data, test_mode=False):
             log_message("📲 SMS alert sent.", "INFO")
             increment_metric("alerts_sent_today.sms")
         except Exception as e:
-            log_message(f"❌ SMS alert error: {e}", "ERROR")
+            log_message(f"❌ SMS alert error: {e}", "WARNING")
 
     # 📞 Phone Call Alert
     if ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT") and Client:
@@ -245,7 +245,7 @@ def alert_match(match_data, test_mode=False):
             log_message("📞 Phone call alert triggered.", "INFO")
             increment_metric("alerts_sent_today.phone")
         except Exception as e:
-            log_message(f"❌ Phone call error: {e}", "ERROR")
+            log_message(f"❌ Phone call error: {e}", "WARNING")
 
     # 💬 Discord Alert
     if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):

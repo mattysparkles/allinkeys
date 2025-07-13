@@ -166,6 +166,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 from core.dashboard import update_dashboard_stat, get_metric
                 update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
                 update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
+                kps = total_keys_generated / max(1, time.time() - keygen_start_time)
+                set_metric("keys_per_sec", round(kps, 2))
                 logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
         except Exception as e:
             logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
@@ -228,10 +230,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
             while index < FILES_PER_BATCH:
                 if shutdown_evt and shutdown_evt.is_set():
                     break
-                if (
-                    get_metric("global_run_state") == "paused"
-                    or (pause_evt and pause_evt.is_set())
-                ):
+                if pause_evt and pause_evt.is_set():
                     time.sleep(1)
                     continue
 
