@@ -27,6 +27,7 @@ from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
 from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 
+
 # Runtime trackers
 total_keys_generated = 0
 keygen_start_time = time.time()
@@ -52,7 +53,13 @@ if LOGGING_ENABLED:
 def keygen_progress():
     elapsed_seconds = max(1, int(time.time() - keygen_start_time))
     elapsed_time_str = str(datetime.utcfromtimestamp(elapsed_seconds).strftime('%H:%M:%S'))
-    keys_per_sec = total_keys_generated / elapsed_seconds
+    lifetime_start = get_metric('lifetime_start_timestamp')
+    try:
+        ts_start = datetime.fromisoformat(lifetime_start).timestamp() if lifetime_start else keygen_start_time
+    except Exception:
+        ts_start = keygen_start_time
+    elapsed_total = max(1, time.time() - ts_start)
+    keys_per_sec = total_keys_generated / elapsed_total
     return {
         "total_keys_generated": total_keys_generated,
         "current_batch_id": KEYGEN_STATE["batch_id"],
@@ -166,7 +173,12 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 from core.dashboard import update_dashboard_stat, get_metric
                 update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
                 update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
-                kps = total_keys_generated / max(1, time.time() - keygen_start_time)
+                lifetime_start = get_metric('lifetime_start_timestamp')
+                try:
+                    ts_start = datetime.fromisoformat(lifetime_start).timestamp() if lifetime_start else keygen_start_time
+                except Exception:
+                    ts_start = keygen_start_time
+                kps = total_keys_generated / max(1, time.time() - ts_start)
                 set_metric("keys_per_sec", round(kps, 2))
                 logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
         except Exception as e:
