@@ -277,13 +277,13 @@ class DashboardGUI:
                     if ev:
                         ev.set()
                     set_thread_health(mod_key, False)
-                    set_metric(f"status.{mod_key}", False)
+                    set_metric(f"status.{mod_key}", "Stopped")
                 elif new_state == "paused":
                     pe = get_pause_event(mod_key)
                     if pe:
                         pe.set()
                     set_thread_health(mod_key, True)
-                    set_metric(f"status.{mod_key}", True)
+                    set_metric(f"status.{mod_key}", "Paused")
                 elif new_state == "running":
                     pe = get_pause_event(mod_key)
                     if pe and pe.is_set():
@@ -292,7 +292,7 @@ class DashboardGUI:
                     if ev and ev.is_set():
                         ev.clear()
                     set_thread_health(mod_key, True)
-                    set_metric(f"status.{mod_key}", True)
+                    set_metric(f"status.{mod_key}", "Running")
 
                 if label.lower() == "vanity" and new_state in ("paused", "running"):
                     set_metric("global_run_state", new_state)
@@ -368,12 +368,12 @@ class DashboardGUI:
             print(f"[GUI] ▶️ Resuming module: {module_name}", flush=True)
             ev.clear()
             self.module_states[module_name.capitalize()] = "running"
-            set_metric(f"status.{module_name}", True)
+            set_metric(f"status.{module_name}", "Running")
         else:
             print(f"[GUI] ⏸️ Pausing module: {module_name}", flush=True)
             ev.set()
             self.module_states[module_name.capitalize()] = "paused"
-            set_metric(f"status.{module_name}", True)
+            set_metric(f"status.{module_name}", "Paused")
         updater = self.module_buttons.get(module_name.capitalize())
         if updater:
             updater()

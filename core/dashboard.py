@@ -45,6 +45,7 @@ LIFETIME_KEYS = {
     'matches_found_lifetime',
     'addresses_checked_lifetime',
     'addresses_generated_lifetime',
+    'lifetime_start_timestamp',
 }
 
 # Simple helpers for modules to report alive/dead status
@@ -87,7 +88,10 @@ def load_lifetime_metrics():
         return {}
     try:
         with open(METRICS_LIFETIME_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+            if 'lifetime_start_timestamp' not in data:
+                data['lifetime_start_timestamp'] = datetime.utcnow().isoformat()
+            return data
     except Exception:
         return {}
 
@@ -234,6 +238,7 @@ def _default_metrics():
         "matches_found_lifetime": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
         },
+        "lifetime_start_timestamp": datetime.utcnow().isoformat(),
         "avg_keygen_time": 0,
         "avg_check_time": 0,
         "disk_free_gb": 0,
@@ -458,3 +463,9 @@ def reset_all_metrics():
         metrics["state"] = "Reset"
         metrics["uptime"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         metrics["metrics_last_reset"] = datetime.now().isoformat()
+        metrics["lifetime_start_timestamp"] = datetime.utcnow().isoformat()
+    if os.path.exists(METRICS_LIFETIME_PATH):
+        try:
+            os.remove(METRICS_LIFETIME_PATH)
+        except Exception:
+            pass
