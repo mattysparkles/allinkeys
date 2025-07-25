@@ -5,6 +5,7 @@ Converts VanitySearch .txt files to multi-coin .csv files.
 Uses GPU (OpenCL) to derive addresses for: BTC, DOGE, LTC, DASH, BCH, RVN, PEP, ETH.
 Preserves all columns and GPU pipeline. Flushes rows as it writes.
 """
+
 import signal
 import sys
 import os
@@ -19,6 +20,7 @@ import time
 import threading
 import multiprocessing
 import io
+
 try:
     import psutil
 except ImportError:
@@ -35,9 +37,17 @@ MAX_FIELD_SIZE = 10000  # 10KB per field safety cap
 from config.settings import (
     ENABLE_ALTCOIN_DERIVATION,
     ENABLE_SEED_VERIFICATION,
-    DOGE, DASH, LTC, BCH, RVN, PEP, ETH,
-    CSV_DIR, VANITY_OUTPUT_DIR,
-    MAX_CSV_MB, BCH_CASHADDR_ENABLED,
+    DOGE,
+    DASH,
+    LTC,
+    BCH,
+    RVN,
+    PEP,
+    ETH,
+    CSV_DIR,
+    VANITY_OUTPUT_DIR,
+    MAX_CSV_MB,
+    BCH_CASHADDR_ENABLED,
     ALTCOIN_GPUS_INDEX,
     LOG_LEVEL,
     EXCLUDE_ETH_FROM_DERIVE,
@@ -47,6 +57,7 @@ from core.dashboard import update_dashboard_stat, set_metric, get_metric, increm
 import core.checkpoint as checkpoint
 from core.gpu_selector import get_altcoin_gpu_ids, list_gpus
 
+
 def safe_str(obj):
     try:
         return str(obj)
@@ -55,7 +66,8 @@ def safe_str(obj):
             return repr(obj)
         except Exception:
             return "<unprintable exception>"
-                     
+
+
 def get_file_size_mb(path):
     """Returns the file size in megabytes."""
     return os.path.getsize(path) / (1024 * 1024)
@@ -80,27 +92,47 @@ def open_new_csv_writer(index, base_name=None):
         return None, None, final_path, None
 
     partial_path = final_path.replace(".csv", ".partial.csv")
-    f = open(partial_path, "w", newline='', encoding="utf-8", buffering=1)
-    writer = csv.DictWriter(f, fieldnames=[
-        "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
-        "doge_C", "doge_U", "bch_C", "bch_U", "eth", "dash_C", "dash_U",
-        "rvn_C", "rvn_U", "pep_C", "pep_U",
-        "private_key", "compressed_address", "uncompressed_address",
-        "batch_id", "index"
-    ])
+    f = open(partial_path, "w", newline="", encoding="utf-8", buffering=1)
+    writer = csv.DictWriter(
+        f,
+        fieldnames=[
+            "original_seed",
+            "hex_key",
+            "btc_C",
+            "btc_U",
+            "ltc_C",
+            "ltc_U",
+            "doge_C",
+            "doge_U",
+            "bch_C",
+            "bch_U",
+            "eth",
+            "dash_C",
+            "dash_U",
+            "rvn_C",
+            "rvn_U",
+            "pep_C",
+            "pep_U",
+            "private_key",
+            "compressed_address",
+            "uncompressed_address",
+            "batch_id",
+            "index",
+        ],
+    )
     writer.writeheader()
     f.flush()
     return f, writer, final_path, partial_path
+
 
 def finalize_csv(partial_path, final_path):
     try:
         os.replace(partial_path, final_path)
     except OSError as e:
-        log_message(
-            f"❌ Failed to finalize {partial_path} → {final_path}: {e}", "ERROR"
-        )
+        log_message(f"❌ Failed to finalize {partial_path} → {final_path}: {e}", "ERROR")
         return False
     return True
+
 
 def get_compressed_pubkey(priv_bytes):
     sk = SigningKey.from_string(priv_bytes, curve=SECP256k1)
@@ -114,7 +146,7 @@ def get_compressed_pubkey(priv_bytes):
 def hash160_cpu(data):
     """Python implementation of HASH160 for CPU fallback paths."""
     sha = hashlib.sha256(data).digest()
-    rip = hashlib.new('ripemd160', sha).digest()
+    rip = hashlib.new("ripemd160", sha).digest()
     return rip
 
 
@@ -133,6 +165,7 @@ def get_gpu_context_for_altcoin():
         selected = get_altcoin_gpu_ids()
         if not selected:
             from core.gpu_selector import assign_gpu_roles
+
             assign_gpu_roles()
             selected = get_altcoin_gpu_ids()
             if not selected:
@@ -185,9 +218,7 @@ def get_gpu_context_for_altcoin():
         context = cl.Context([device])
 
         if not _gpu_logged_once:
-            log_message(
-                f"🧠 Using GPU for altcoin derive on PID {os.getpid()}: {platform.name} / {device.name}"
-            )
+            log_message(f"🧠 Using GPU for altcoin derive on PID {os.getpid()}: {platform.name} / {device.name}")
             _gpu_logged_once = True
 
         return context, device
@@ -195,23 +226,26 @@ def get_gpu_context_for_altcoin():
         log_message(f"⚠️ FALLBACK TO CPU — OpenCL device not available: {safe_str(err)}", "WARNING")
         raise
 
+
 # CashAddr utility
 CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
-GENERATOR = [0x98f2bc8e61, 0x79b76d99e2, 0xf33e5fb3c4,
-             0xae2eabe2a8, 0x1e4f43e470]
+GENERATOR = [0x98F2BC8E61, 0x79B76D99E2, 0xF33E5FB3C4, 0xAE2EABE2A8, 0x1E4F43E470]
+
 
 def polymod(values):
     c = 1
     for d in values:
         c0 = c >> 35
-        c = ((c & 0x07ffffffff) << 5) ^ d
+        c = ((c & 0x07FFFFFFFF) << 5) ^ d
         for i in range(5):
-            if ((c0 >> i) & 1):
+            if (c0 >> i) & 1:
                 c ^= GENERATOR[i]
     return c ^ 1
 
+
 def prefix_expand(prefix):
-    return [ord(x) & 0x1f for x in prefix] + [0]
+    return [ord(x) & 0x1F for x in prefix] + [0]
+
 
 def convertbits(data, frombits, tobits, pad=True):
     acc = 0
@@ -231,12 +265,13 @@ def convertbits(data, frombits, tobits, pad=True):
         return None
     return ret
 
+
 def cashaddr_encode(prefix, payload):
     data = convertbits(payload, 8, 5)
-    checksum = polymod(prefix_expand(prefix) + data + [0]*8)
+    checksum = polymod(prefix_expand(prefix) + data + [0] * 8)
     for i in range(8):
-        data.append((checksum >> 5*(7-i)) & 0x1f)
-    return prefix + ':' + ''.join([CHARSET[d] for d in data])
+        data.append((checksum >> 5 * (7 - i)) & 0x1F)
+    return prefix + ":" + "".join([CHARSET[d] for d in data])
 
 
 def derive_addresses_gpu(hex_keys, context=None):
@@ -247,9 +282,7 @@ def derive_addresses_gpu(hex_keys, context=None):
     else:
         device = context.devices[0]
     # Enable profiling so we can time kernel execution
-    queue = cl.CommandQueue(
-        context, properties=cl.command_queue_properties.PROFILING_ENABLE
-    )
+    queue = cl.CommandQueue(context, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
     kernel_path = os.path.join(os.path.dirname(__file__), "hash160.cl")
     if not os.path.isfile(kernel_path):
@@ -325,20 +358,20 @@ def derive_addresses_gpu(hex_keys, context=None):
             hash160_u = bytes(hash_uncomp[idx])
 
             result = {
-                "btc_C": b58(b'\x00', hash160_c),
-                "btc_U": b58(b'\x00', hash160_u),
-                "ltc_C": b58(b'\x30', hash160_c),
-                "ltc_U": b58(b'\x30', hash160_u),
-                "doge_C": b58(b'\x1e', hash160_c),
-                "doge_U": b58(b'\x1e', hash160_u),
-                "dash_C": b58(b'\x4c', hash160_c),
-                "dash_U": b58(b'\x4c', hash160_u),
-                "bch_C": cashaddr_encode("bitcoincash", hash160_c) if BCH_CASHADDR_ENABLED else b58(b'\x00', hash160_c),
-                "bch_U": cashaddr_encode("bitcoincash", hash160_u) if BCH_CASHADDR_ENABLED else b58(b'\x00', hash160_u),
-                "rvn_C": b58(b'\x3c', hash160_c),
-                "rvn_U": b58(b'\x3c', hash160_u),
-                "pep_C": b58(b'\x37', hash160_c),
-                "pep_U": b58(b'\x37', hash160_u),
+                "btc_C": b58(b"\x00", hash160_c),
+                "btc_U": b58(b"\x00", hash160_u),
+                "ltc_C": b58(b"\x30", hash160_c),
+                "ltc_U": b58(b"\x30", hash160_u),
+                "doge_C": b58(b"\x1e", hash160_c),
+                "doge_U": b58(b"\x1e", hash160_u),
+                "dash_C": b58(b"\x4c", hash160_c),
+                "dash_U": b58(b"\x4c", hash160_u),
+                "bch_C": cashaddr_encode("bitcoincash", hash160_c) if BCH_CASHADDR_ENABLED else b58(b"\x00", hash160_c),
+                "bch_U": cashaddr_encode("bitcoincash", hash160_u) if BCH_CASHADDR_ENABLED else b58(b"\x00", hash160_u),
+                "rvn_C": b58(b"\x3c", hash160_c),
+                "rvn_U": b58(b"\x3c", hash160_u),
+                "pep_C": b58(b"\x37", hash160_c),
+                "pep_U": b58(b"\x37", hash160_u),
             }
             if not EXCLUDE_ETH_FROM_DERIVE:
                 result["eth"] = "0x" + keccak(pubkey_compressed[1:])[-20:].hex()
@@ -408,6 +441,7 @@ def derive_addresses(hex_keys, context=None):
         cpu_fallback_active = True
         return derive_addresses_cpu(hex_keys)
 
+
 def derive_altcoin_addresses_from_hex(hex_key, context=None):
     sanitized = hex_key.lower().replace("0x", "").zfill(64)
     results = derive_addresses([sanitized], context)
@@ -421,8 +455,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
     start_total = time.perf_counter()
 
     # If CSVs for this file already exist, assume conversion finished previously
-    existing = [f for f in os.listdir(CSV_DIR)
-                if f.startswith(base_name) and f.endswith('.csv')]
+    existing = [f for f in os.listdir(CSV_DIR) if f.startswith(base_name) and f.endswith(".csv")]
     if existing:
         log_message(f"ℹ️ Skipping {filename} because CSV output already exists", "INFO")
         return 0
@@ -441,8 +474,8 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
             def safe_lines(stream):
                 for i, raw in enumerate(stream, 1):
                     try:
-                        line = raw.decode("utf-8", errors="replace").replace('\ufffd', '?')
-                        if '�' in line:
+                        line = raw.decode("utf-8", errors="replace").replace("\ufffd", "?")
+                        if "�" in line:
                             log_message(f"⚠️ Replaced invalid UTF-8 characters in line {i}", "WARNING")
                         yield line
                     except Exception as decode_err:
@@ -459,9 +492,20 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
             rows_written = 0
             tally_keys = [
-                "btc_C", "btc_U", "ltc_C", "ltc_U", "doge_C", "doge_U",
-                "bch_C", "bch_U", "dash_C", "dash_U", "rvn_C", "rvn_U",
-                "pep_C", "pep_U"
+                "btc_C",
+                "btc_U",
+                "ltc_C",
+                "ltc_U",
+                "doge_C",
+                "doge_U",
+                "bch_C",
+                "bch_U",
+                "dash_C",
+                "dash_U",
+                "rvn_C",
+                "rvn_U",
+                "pep_C",
+                "pep_U",
             ]
             if not EXCLUDE_ETH_FROM_DERIVE:
                 tally_keys.insert(8, "eth")
@@ -548,7 +592,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                     "compressed_address": "",  # leave blank
                                     "uncompressed_address": pub,  # from VanitySearch
                                     "batch_id": batch_id,
-                                    "index": index
+                                    "index": index,
                                 }
                                 if not EXCLUDE_ETH_FROM_DERIVE:
                                     row["eth"] = derived.get("eth", "")
@@ -579,7 +623,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                                     if f is None:
                                         log_message(
                                             f"ℹ️ Skipping remaining output because {os.path.basename(path)} already exists",
-                                            "INFO"
+                                            "INFO",
                                         )
                                         total_dur = time.perf_counter() - start_total
                                         log_message(
@@ -649,7 +693,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                         "compressed_address": "",  # leave blank
                         "uncompressed_address": pub,  # from VanitySearch
                         "batch_id": batch_id,
-                        "index": index
+                        "index": index,
                     }
                     if not EXCLUDE_ETH_FROM_DERIVE:
                         row["eth"] = derived.get("eth", "")
@@ -680,10 +724,20 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
             update_dashboard_stat("csv_created_lifetime", get_metric("csv_created_lifetime"))
             log_message(f"✅ {os.path.basename(path)} written ({rows_written} rows)", "INFO")
             coin_map = {
-                "btc_U": "btc", "btc_C": "btc", "ltc_U": "ltc", "ltc_C": "ltc",
-                "doge_U": "doge", "doge_C": "doge", "bch_U": "bch", "bch_C": "bch",
-                "dash_U": "dash", "dash_C": "dash", "rvn_U": "rvn", "rvn_C": "rvn",
-                "pep_U": "pep", "pep_C": "pep"
+                "btc_U": "btc",
+                "btc_C": "btc",
+                "ltc_U": "ltc",
+                "ltc_C": "ltc",
+                "doge_U": "doge",
+                "doge_C": "doge",
+                "bch_U": "bch",
+                "bch_C": "bch",
+                "dash_U": "dash",
+                "dash_C": "dash",
+                "rvn_U": "rvn",
+                "rvn_C": "rvn",
+                "pep_U": "pep",
+                "pep_C": "pep",
             }
             if not EXCLUDE_ETH_FROM_DERIVE:
                 coin_map["eth"] = "eth"
@@ -712,6 +766,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
         log_message(f"❌ Fatal error in convert_txt_to_csv: {safe_str(e)}", "ERROR")
         return 0
 
+
 from core.dashboard import init_shared_metrics, register_control_events
 
 
@@ -725,15 +780,21 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, 
         device_name = "CPU"
         if gpu_id is not None:
             try:
+                gpu_list = list_gpus()
+                gpu_map = {g["id"]: g.get("cl_index") for g in gpu_list}
+                cl_index = gpu_map.get(gpu_id)
                 platforms = cl.get_platforms()
                 devices = [d for p in platforms for d in p.get_devices()]
-                if gpu_id >= len(devices):
-                    raise RuntimeError(f"Invalid GPU ID {gpu_id} — only {len(devices)} available")
-                device = devices[gpu_id]
+                if cl_index is None or cl_index >= len(devices):
+                    raise RuntimeError(f"Invalid GPU ID {gpu_id} — OpenCL index {cl_index} not available")
+                device = devices[cl_index]
                 context = cl.Context([device])
                 device_name = f"GPU{gpu_id} {device.name}"
             except Exception as err:
-                log_message(f"⚠️ FALLBACK TO CPU — OpenCL device not available: {safe_str(err)}", "WARNING")
+                log_message(
+                    f"⚠️ FALLBACK TO CPU — OpenCL device not available: {safe_str(err)}",
+                    "WARNING",
+                )
         log_message(f"[WORKER] PID {os.getpid()} starting {txt_file} on {device_name}", "DEBUG")
         update_dashboard_stat("backlog_current_file", txt_file)
         start_t = time.perf_counter()
@@ -751,6 +812,7 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, 
 
 from core.logger import initialize_logging
 
+
 def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None):
     initialize_logging(log_q)
     try:
@@ -760,6 +822,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
         set_metric("derived_addresses_today", 0)
         set_metric("backlog_files_completed", 0)
         from core.dashboard import set_thread_health
+
         set_thread_health("altcoin", True)
         register_control_events(shared_shutdown_event, pause_event, module="altcoin")
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -771,6 +834,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     Terminates cleanly on shared shutdown event (e.g. Ctrl+C).
     """
     from concurrent.futures import ProcessPoolExecutor, as_completed
+
     log_message("📦 Altcoin conversion loop (multi-process) started...", "INFO")
 
     processed = set()
@@ -781,9 +845,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     selected_gpus = ALTCOIN_GPUS_INDEX or get_altcoin_gpu_ids()
     gpu_workers = len(selected_gpus) if selected_gpus else 1
     max_workers = gpu_workers
-    log_message(
-        f"[GPU] Using {max_workers} worker(s) for altcoin derive", "DEBUG"
-    )
+    log_message(f"[GPU] Using {max_workers} worker(s) for altcoin derive", "DEBUG")
 
     def graceful_shutdown(sig, frame):
         log_message("🛑 Ctrl+C received in altcoin conversion loop. Shutting down...", "WARNING")
@@ -792,6 +854,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     signal.signal(signal.SIGINT, graceful_shutdown)
 
     from core.dashboard import get_pause_event
+
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
         futures = {}
@@ -801,7 +864,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                 continue
             try:
                 all_txt = [
-                    f for f in os.listdir(VANITY_OUTPUT_DIR)
+                    f
+                    for f in os.listdir(VANITY_OUTPUT_DIR)
                     if f.endswith(".txt") and f not in processed and f not in queued
                 ]
 
@@ -820,17 +884,22 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                     hrs = int(eta_sec // 3600)
                     mins = int((eta_sec % 3600) // 60)
                     secs = int(eta_sec % 60)
-                    update_dashboard_stat({
-                        "backlog_avg_time": f"{avg:.2f}s",
-                        "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
-                    })
+                    update_dashboard_stat(
+                        {
+                            "backlog_avg_time": f"{avg:.2f}s",
+                            "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
+                        }
+                    )
 
                 while all_txt and len(futures) < max_workers:
                     txt = all_txt.pop(0)
                     assigned_gpu = None
                     if selected_gpus:
                         assigned_gpu = selected_gpus[len(futures) % len(selected_gpus)]
-                    log_message(f"[QUEUE] Submitting {txt} to GPU {assigned_gpu if assigned_gpu is not None else 'CPU'}", "DEBUG")
+                    log_message(
+                        f"[QUEUE] Submitting {txt} to GPU {assigned_gpu if assigned_gpu is not None else 'CPU'}",
+                        "DEBUG",
+                    )
                     future = executor.submit(
                         _convert_file_worker,
                         txt,
@@ -876,9 +945,11 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     set_metric("status.altcoin", "Stopped")
     try:
         from core.dashboard import set_thread_health
+
         set_thread_health("altcoin", False)
     except Exception:
         pass
+
 
 def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None):
     """
@@ -889,7 +960,7 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
     process = multiprocessing.Process(
         target=convert_txt_to_csv_loop,
         args=(shared_shutdown_event, shared_metrics, pause_event, log_q),
-        name="AltcoinConverter"
+        name="AltcoinConverter",
     )
     # This process launches a ``ProcessPoolExecutor`` for parallel conversions
     # and therefore cannot be a daemon.  Marking it as non-daemonic avoids
@@ -898,14 +969,17 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
     process.start()
     log_message("🚀 Altcoin derive subprocess started...", "INFO")
     return process
-    
+
+
 if __name__ == "__main__":
     from multiprocessing import freeze_support, Manager
+
     freeze_support()
     print("🧪 Running one-shot altcoin conversion test (dev mode)...", flush=True)
     mgr = Manager()
     shared_event = mgr.Event()
     from core.logger import start_listener, log_queue
+
     start_listener()
     try:
         start_altcoin_conversion_process(shared_event, None, shared_event, log_queue)
