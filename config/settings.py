@@ -31,6 +31,8 @@ CHECKPOINT_PATH = os.path.join(LOG_DIR, "restore_checkpoint.json")
 # Track which CSVs have been processed
 CHECKED_CSV_LOG = os.path.join(LOG_DIR, "checked_csvs.txt")
 RECHECKED_CSV_LOG = os.path.join(LOG_DIR, "rechecked_csvs.txt")
+# Track per-file progress for the CSV checker
+CSV_CHECKPOINT_STATE = os.path.join(LOG_DIR, "csv_checker_state.json")
 # Alias for backward compatibility
 DOWNLOAD_DIR = DOWNLOADS_DIR
 CHECKPOINT_FILE = os.path.join(BASE_DIR, "checkpoint.json")
