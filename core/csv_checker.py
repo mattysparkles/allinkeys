@@ -13,6 +13,7 @@ from config.settings import (
     DOWNLOADS_DIR,
     CHECKED_CSV_LOG,
     RECHECKED_CSV_LOG,
+    CSV_CHECKPOINT_STATE,
     ENABLE_PGP,
     PGP_PUBLIC_KEY_PATH,
     LOG_LEVEL,
@@ -31,6 +32,29 @@ os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
 
 CHECK_TIME_HISTORY = []
 MAX_HISTORY_SIZE = 10
+
+def load_csv_state():
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    if not os.path.exists(CSV_CHECKPOINT_STATE):
+        return {"date": today, "files": {}}
+    try:
+        with open(CSV_CHECKPOINT_STATE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("date") != today:
+            return {"date": today, "files": {}}
+        if "files" not in data:
+            data["files"] = {}
+        return data
+    except Exception:
+        return {"date": today, "files": {}}
+
+
+def save_csv_state(state):
+    try:
+        with open(CSV_CHECKPOINT_STATE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        log_message(f"⚠️ Failed to save CSV state: {e}", "WARN")
 
 def normalize_address(addr: str) -> str:
     """Return a normalized version of ``addr`` for matching.
@@ -98,7 +122,7 @@ def load_funded_addresses(file_path):
     with open(file_path, "r") as f:
         return set(normalize_address(line.strip()) for line in f.readlines())
 
-def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False, pause_event=None):
+def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False, pause_event=None, start_row=0, state=None):
     new_matches = set()
     filename = os.path.basename(csv_file)
     rows_scanned = 0
@@ -115,7 +139,10 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
         log_message(f"❌ {filename} is empty or missing. Skipping.", "ERROR")
         return []
 
-    log_message(f"🔎 Checking {filename}...")
+    if start_row:
+        log_message(f"🔎 Resuming {filename} from row {start_row}...")
+    else:
+        log_message(f"🔎 Checking {filename}...")
 
     try:
         with open(csv_file, newline="", encoding="utf-8", errors="replace") as f:
@@ -147,15 +174,22 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                     log_message(f"🔎 {coin.upper()} columns scanned: {columns}", "DEBUG")
 
             try:
-                for row in reader:
+                for row_num, row in enumerate(reader, start=1):
+                    if row_num <= start_row:
+                        continue
                     if pause_event and pause_event.is_set():
                         while pause_event and pause_event.is_set():
                             time.sleep(0.2)
                         if pause_event.is_set():
                             continue
-                    rows_scanned += 1
+                    rows_scanned = row_num
                     increment_metric("csv_checker.rows_checked", 1)
                     set_metric("csv_checker.rows_checked", rows_scanned)
+                    if state and row_num % 1000 == 0:
+                        state.setdefault("files", {})[filename] = row_num
+                        save_csv_state(state)
+                    if rows_scanned % 10000 == 0:
+                        log_message(f"[Progress] {filename}: {rows_scanned} rows scanned", "DEBUG")
                     row_matches = []
                     try:
                         for coin, columns in coin_columns.items():
@@ -268,6 +302,10 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
         log_message(f"✅ {'Recheck' if recheck else 'Check'} complete: {len(new_matches)} matches found", "INFO")
         log_message(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s", "INFO")
 
+        if state and filename in state.get("files", {}):
+            state["files"].pop(filename, None)
+            save_csv_state(state)
+
         if new_matches:
             dest_path = os.path.join(MATCHED_CSV_DIR, filename)
             try:
@@ -303,6 +341,8 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 
     address_sets = {}
+    state = load_csv_state()
+    state = load_csv_state()
     for coin, columns in coin_columns.items():
         full_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR, unique=False)
         if full_path:
@@ -324,7 +364,15 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         if not filename.endswith(".csv") or has_been_checked(filename, CHECKED_CSV_LOG):
             continue
         csv_path = os.path.join(CSV_DIR, filename)
-        check_csv_against_addresses(csv_path, address_sets, safe_mode=safe_mode, pause_event=pause_event)
+        start_row = state.get("files", {}).get(filename, 0)
+        check_csv_against_addresses(
+            csv_path,
+            address_sets,
+            safe_mode=safe_mode,
+            pause_event=pause_event,
+            start_row=start_row,
+            state=state,
+        )
         mark_csv_as_checked(filename, CHECKED_CSV_LOG)
 
     update_csv_eta()
@@ -355,6 +403,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 
     address_sets = {}
+    state = load_csv_state()
     for coin, columns in coin_columns.items():
         unique_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR, unique=True)
         if unique_path:
@@ -376,7 +425,16 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         if not filename.endswith(".csv") or has_been_checked(filename, RECHECKED_CSV_LOG):
             continue
         csv_path = os.path.join(CSV_DIR, filename)
-        check_csv_against_addresses(csv_path, address_sets, recheck=True, safe_mode=safe_mode, pause_event=pause_event)
+        start_row = state.get("files", {}).get(filename, 0)
+        check_csv_against_addresses(
+            csv_path,
+            address_sets,
+            recheck=True,
+            safe_mode=safe_mode,
+            pause_event=pause_event,
+            start_row=start_row,
+            state=state,
+        )
         mark_csv_as_checked(filename, RECHECKED_CSV_LOG)
 
     update_csv_eta()
