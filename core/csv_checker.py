@@ -122,7 +122,7 @@ def load_funded_addresses(file_path):
     with open(file_path, "r") as f:
         return set(normalize_address(line.strip()) for line in f.readlines())
 
-def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False, pause_event=None, start_row=0, state=None):
+def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False, pause_event=None, shutdown_event=None, start_row=0, state=None):
     new_matches = set()
     all_matches = []
     filename = os.path.basename(csv_file)
@@ -176,6 +176,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
 
             try:
                 for row_num, row in enumerate(reader, start=1):
+                    if shutdown_event and shutdown_event.is_set():
+                        break
                     if row_num <= start_row:
                         continue
                     if pause_event and pause_event.is_set():
@@ -355,6 +357,8 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
 
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
+        if shutdown_event and shutdown_event.is_set():
+            break
         if filename.endswith(".partial.csv"):
             final = filename.replace(".partial.csv", ".csv")
             if os.path.exists(os.path.join(CSV_DIR, final)):
@@ -372,6 +376,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
             address_sets,
             safe_mode=safe_mode,
             pause_event=pause_event,
+            shutdown_event=shutdown_event,
             start_row=start_row,
             state=state,
         )
@@ -416,6 +421,8 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
 
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
+        if shutdown_event and shutdown_event.is_set():
+            break
         if filename.endswith(".partial.csv"):
             final = filename.replace(".partial.csv", ".csv")
             if os.path.exists(os.path.join(CSV_DIR, final)):
@@ -434,6 +441,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
             recheck=True,
             safe_mode=safe_mode,
             pause_event=pause_event,
+            shutdown_event=shutdown_event,
             start_row=start_row,
             state=state,
         )

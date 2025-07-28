@@ -35,6 +35,20 @@ pause_event = None
 module_pause_events = {}
 module_shutdown_events = {}
 
+# Alert channels mirrored from core.alerts to avoid circular import
+ALERT_CHANNELS = [
+    "email",
+    "telegram",
+    "popup",
+    "sms",
+    "file",
+    "cloud",
+    "phone",
+    "discord",
+    "webhook",
+    "home_assistant",
+]
+
 # Lifetime metrics persistence
 METRICS_LIFETIME_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'metrics_lifetime.json'))
 LIFETIME_KEYS = {
@@ -45,6 +59,7 @@ LIFETIME_KEYS = {
     'matches_found_lifetime',
     'addresses_checked_lifetime',
     'addresses_generated_lifetime',
+    'alerts_sent_lifetime',
     'lifetime_start_timestamp',
 }
 
@@ -225,7 +240,8 @@ def _default_metrics():
         "csv_rechecked_lifetime": 0,
         "derived_addresses_today": 0,
         "altcoin_files_converted": 0,
-        "alerts_sent_today": {},
+        "alerts_sent_today": {c: 0 for c in ALERT_CHANNELS},
+        "alerts_sent_lifetime": {c: 0 for c in ALERT_CHANNELS},
         "addresses_checked_today": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
         },
