@@ -37,7 +37,12 @@ from config.settings import (
     OPEN_CONFIG_FILE_FROM_DASHBOARD,   
 )
 
-from core.dashboard import get_current_metrics, reset_all_metrics, set_metric
+from core.dashboard import (
+    get_current_metrics,
+    reset_all_metrics,
+    reset_lifetime_metrics,
+    set_metric,
+)
 
 
 class DashboardGUI:
@@ -228,6 +233,7 @@ class DashboardGUI:
         if OPEN_CONFIG_FILE_FROM_DASHBOARD:
             ttk.Button(bottom_frame, text="Open Config File", command=self.open_config_file).pack(side="left", padx=5)
         ttk.Button(bottom_frame, text="Reset Metrics", command=self.reset_metrics_prompt).pack(side="left", padx=5)
+        ttk.Button(bottom_frame, text="Reset Lifetime", command=self.reset_lifetime_prompt).pack(side="left", padx=5)
         ttk.Button(bottom_frame, text="Test Alerts", command=self.test_alerts).pack(side="left", padx=5)
         if SHOW_DELETE_DASHBOARD_DATA_BUTTON:
             ttk.Button(bottom_frame, text="Delete All Data", command=self.delete_data_prompt).pack(side="left", padx=5)
@@ -247,14 +253,23 @@ class DashboardGUI:
         def update_buttons():
             state = self.module_states[label]
             for bname, btn in btns.items():
-                if state == "running" and bname == "Start":
-                    btn.config(text="RUNNING", bootstyle="success")
-                elif state == "stopped" and bname == "Stop":
-                    btn.config(text="STOPPED", bootstyle="danger")
-                elif state == "paused" and bname == "Pause":
-                    btn.config(text="PAUSED", bootstyle="warning")
-                else:
-                    btn.config(text=bname, bootstyle="secondary")
+                btn.config(text=bname, bootstyle="secondary", state=tk.NORMAL)
+
+            if state == "running":
+                btns["Start"].config(text="RUNNING", bootstyle="success", state=tk.DISABLED)
+                btns["Resume"].config(state=tk.DISABLED)
+                btns["Pause"].config(state=tk.NORMAL)
+                btns["Stop"].config(state=tk.NORMAL)
+            elif state == "paused":
+                btns["Pause"].config(text="PAUSED", bootstyle="warning", state=tk.DISABLED)
+                btns["Resume"].config(state=tk.NORMAL)
+                btns["Start"].config(state=tk.DISABLED)
+                btns["Stop"].config(state=tk.NORMAL)
+            elif state == "stopped":
+                btns["Stop"].config(text="STOPPED", bootstyle="danger", state=tk.DISABLED)
+                btns["Start"].config(state=tk.NORMAL)
+                btns["Pause"].config(state=tk.DISABLED)
+                btns["Resume"].config(state=tk.DISABLED)
 
         # Map display labels to metric keys
         key_map = {
@@ -479,17 +494,22 @@ class DashboardGUI:
                         for mod, name in value.items():
                             title = name_map.get(mod, mod.replace('_', ' ').title())
                             lines.append(f"{title} → {name}")
-                    elif key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "csv_checker", "alerts_sent_today"):
+                    elif key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "alerts_sent_today", "alerts_sent_lifetime"):
                         if key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
                             today_dict = stats.get(key.replace("lifetime", "today"), {}) if "lifetime" in key else stats.get(key.replace("today", "lifetime"), {})
                             lifetime_dict = stats.get(key.replace("today", "lifetime"), {}) if "today" in key else value
-                            for coin in lifetime_dict:
-                                t = today_dict.get(coin, 0)
-                                l = lifetime_dict.get(coin, 0)
-                                lines.append(f"{coin.upper()}: {t} / {l}")
+                        elif key.startswith("alerts_sent"):
+                            today_dict = stats.get("alerts_sent_today", {})
+                            lifetime_dict = stats.get("alerts_sent_lifetime", {})
                         else:
-                            for coin, amt in value.items():
-                                lines.append(f"{coin.upper()}: {amt}")
+                            lifetime_dict = value
+                            today_dict = {}
+                        cols = []
+                        for coin in lifetime_dict:
+                            t = today_dict.get(coin, 0)
+                            l = lifetime_dict.get(coin, 0)
+                            cols.append(f"{coin.upper()}: {t} / {l}")
+                        lines.append("   ".join(cols))
                     else:
                         for gid, info in value.items():
                             name = info.get('name', '')
@@ -552,6 +572,14 @@ class DashboardGUI:
                 messagebox.showerror("Invalid Password", "Reset canceled.")
         else:
             reset_all_metrics()
+
+    def reset_lifetime_prompt(self):
+        if messagebox.askyesno("Reset Lifetime", "Clear all lifetime metrics?"):
+            pw = self.prompt_password()
+            if pw == DASHBOARD_PASSWORD:
+                reset_lifetime_metrics()
+            else:
+                messagebox.showerror("Invalid Password", "Reset canceled.")
 
     def delete_data_prompt(self):
         if messagebox.askyesno("Confirm Delete", "Permanently delete all key/data files?"):

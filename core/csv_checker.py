@@ -123,11 +123,17 @@ def load_funded_addresses(file_path):
         return set(normalize_address(line.strip()) for line in f.readlines())
 
 def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False, pause_event=None, shutdown_event=None, start_row=0, state=None):
+    """Scan ``csv_file`` for funded address matches.
+
+    Returns a tuple ``(matches, completed)`` where ``completed`` indicates
+    whether the file was fully processed without an interrupt/shutdown.
+    """
     new_matches = set()
     all_matches = []
     filename = os.path.basename(csv_file)
     rows_scanned = 0
     start_time = time.perf_counter()
+    completed = True  # [FIX PHASE 2] track if file processed fully
     set_metric("csv_checker.last_file", filename)
     set_metric("last_csv_checked_filename", filename)
     set_metric("csv_checker.last_timestamp", datetime.utcnow().isoformat())
@@ -135,10 +141,10 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
     set_metric("csv_checker.matches_found", 0)
 
     if filename.endswith(".partial.csv"):
-        return []
+        return [], True
     if not os.path.exists(csv_file) or os.path.getsize(csv_file) == 0:
         log_message(f"❌ {filename} is empty or missing. Skipping.", "ERROR")
-        return []
+        return [], True
 
     if start_row:
         log_message(f"🔎 Resuming {filename} from row {start_row}...")
@@ -177,6 +183,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
             try:
                 for row_num, row in enumerate(reader, start=1):
                     if shutdown_event and shutdown_event.is_set():
+                        completed = False
                         break
                     if row_num <= start_row:
                         continue
@@ -189,6 +196,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                     increment_metric("csv_checker.rows_checked", 1)
                     set_metric("csv_checker.rows_checked", rows_scanned)
                     if state and row_num % 1000 == 0:
+                        # [FIX PHASE 2] persist progress periodically for crash resume
                         state.setdefault("files", {})[filename] = row_num
                         save_csv_state(state)
                     if rows_scanned % 10000 == 0:
@@ -264,14 +272,12 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                         log_message(f"⚠️ Match processing error for {addr}: {match_err}", "WARN")
                                         continue
                     except Exception as row_err:
-                        if safe_mode:
-                            log_message(
-                                f"⚠️ Row skipped due to error in {csv_file}: {row_err}",
-                                "WARNING",
-                            )
-                            continue
-                        else:
-                            raise
+                        # [FIX PHASE 2] one bad row should not abort entire scan
+                        log_message(
+                            f"⚠️ Row skipped due to error in {csv_file}: {row_err}",
+                            "WARNING",
+                        )
+                        continue
                     if row_matches:
                         increment_metric("csv_checker.matches_found", len(row_matches))
                         set_metric("csv_checker.matches_found", get_metric("csv_checker.matches_found"))
@@ -306,7 +312,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
         log_message(f"✅ {'Recheck' if recheck else 'Check'} complete: {len(new_matches)} matches found", "INFO")
         log_message(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s", "INFO")
 
-        if state and filename in state.get("files", {}):
+        if state and completed and filename in state.get("files", {}):
+            # [FIX PHASE 2] clear resume state only when file fully processed
             state["files"].pop(filename, None)
             save_csv_state(state)
 
@@ -318,11 +325,11 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
             except Exception as e:
                 log_message(f"⚠️ Failed to move {filename} to matched_csv/: {e}", "WARNING")
 
-        return all_matches
+        return all_matches, completed
 
     except Exception as e:
         log_message(f"❌ Error reading {filename}: {str(e)}", "ERROR")
-        return []
+        return [], False
 
 from core.logger import initialize_logging
 
@@ -371,7 +378,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
             continue
         csv_path = os.path.join(CSV_DIR, filename)
         start_row = state.get("files", {}).get(filename, 0)
-        check_csv_against_addresses(
+        matches, completed = check_csv_against_addresses(
             csv_path,
             address_sets,
             safe_mode=safe_mode,
@@ -380,7 +387,11 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
             start_row=start_row,
             state=state,
         )
-        mark_csv_as_checked(filename, CHECKED_CSV_LOG)
+        # [FIX PHASE 2] only mark file when fully processed
+        if completed and not (shutdown_event and shutdown_event.is_set()):
+            mark_csv_as_checked(filename, CHECKED_CSV_LOG)
+        if shutdown_event and shutdown_event.is_set():
+            break
 
     update_csv_eta()
     set_metric("status.csv_check", "Stopped")
@@ -435,7 +446,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
             continue
         csv_path = os.path.join(CSV_DIR, filename)
         start_row = state.get("files", {}).get(filename, 0)
-        check_csv_against_addresses(
+        matches, completed = check_csv_against_addresses(
             csv_path,
             address_sets,
             recheck=True,
@@ -445,7 +456,11 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
             start_row=start_row,
             state=state,
         )
-        mark_csv_as_checked(filename, RECHECKED_CSV_LOG)
+        # [FIX PHASE 2] only mark file when fully processed
+        if completed and not (shutdown_event and shutdown_event.is_set()):
+            mark_csv_as_checked(filename, RECHECKED_CSV_LOG)
+        if shutdown_event and shutdown_event.is_set():
+            break
 
     update_csv_eta()
     set_metric("status.csv_recheck", "Stopped")
@@ -462,7 +477,7 @@ def inject_test_match(test_address="1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"):
         writer.writeheader()
         writer.writerow({"btc_U": test_address, "wif": "TESTWIF"})
 
-    matches = check_csv_against_addresses(test_csv, {"btc": {test_address}}, safe_mode=True)
+    matches, _ = check_csv_against_addresses(test_csv, {"btc": {test_address}}, safe_mode=True)
     os.remove(test_csv)
     return bool(matches)
 
