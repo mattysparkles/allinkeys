@@ -124,6 +124,7 @@ def load_funded_addresses(file_path):
 
 def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False, pause_event=None, start_row=0, state=None):
     new_matches = set()
+    all_matches = []
     filename = os.path.basename(csv_file)
     rows_scanned = 0
     start_time = time.perf_counter()
@@ -255,7 +256,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                             update_dashboard_stat("matches_found_today", get_metric("matches_found_today"))
                                             update_dashboard_stat("matches_found_lifetime", get_metric("matches_found_lifetime"))
                                         row_matches.append(addr)
-                                        continue
+                                        all_matches.append(match_payload)
+                                        # Continue scanning the row for additional matches
                                     except Exception as match_err:
                                         log_message(f"⚠️ Match processing error for {addr}: {match_err}", "WARN")
                                         continue
@@ -314,7 +316,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
             except Exception as e:
                 log_message(f"⚠️ Failed to move {filename} to matched_csv/: {e}", "WARNING")
 
-        return list(new_matches)
+        return all_matches
 
     except Exception as e:
         log_message(f"❌ Error reading {filename}: {str(e)}", "ERROR")
