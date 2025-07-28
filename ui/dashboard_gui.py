@@ -480,8 +480,16 @@ class DashboardGUI:
                             title = name_map.get(mod, mod.replace('_', ' ').title())
                             lines.append(f"{title} → {name}")
                     elif key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "csv_checker", "alerts_sent_today"):
-                        for coin, amt in value.items():
-                            lines.append(f"{coin.upper()}: {amt}")
+                        if key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
+                            today_dict = stats.get(key.replace("lifetime", "today"), {}) if "lifetime" in key else stats.get(key.replace("today", "lifetime"), {})
+                            lifetime_dict = stats.get(key.replace("today", "lifetime"), {}) if "today" in key else value
+                            for coin in lifetime_dict:
+                                t = today_dict.get(coin, 0)
+                                l = lifetime_dict.get(coin, 0)
+                                lines.append(f"{coin.upper()}: {t} / {l}")
+                        else:
+                            for coin, amt in value.items():
+                                lines.append(f"{coin.upper()}: {amt}")
                     else:
                         for gid, info in value.items():
                             name = info.get('name', '')

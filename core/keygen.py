@@ -228,7 +228,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         )
         set_thread_health("keygen", True)
 
-        shutdown_evt = get_shutdown_event()
+        shutdown_evt = get_shutdown_event("keygen")
         pause_evt = get_pause_event("keygen")
 
         batches_completed = 0

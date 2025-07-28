@@ -174,6 +174,7 @@ def alert_match(match_data, test_mode=False):
             root.mainloop()
             log_message("✅ Desktop popup displayed.", "INFO")
             increment_metric("alerts_sent_today.popup")
+            increment_metric("alerts_sent_lifetime.popup")
         except Exception as e:
             log_message(f"❌ Desktop alert error: {e}", "ERROR")
 
@@ -184,6 +185,7 @@ def alert_match(match_data, test_mode=False):
             _start_audio_worker()
             audio_queue.put(ALERT_SOUND_FILE)
             increment_metric("alerts_sent_today.popup")
+            increment_metric("alerts_sent_lifetime.popup")
         else:
             log_message(f"❌ Sound file not found: {ALERT_SOUND_FILE}", "ERROR")
 
@@ -203,6 +205,7 @@ def alert_match(match_data, test_mode=False):
             server.quit()
             log_message("📧 Email alert sent.", "INFO")
             increment_metric("alerts_sent_today.email")
+            increment_metric("alerts_sent_lifetime.email")
         except Exception as e:
             log_message(f"❌ Email alert error: {e}", "WARNING")
 
@@ -214,6 +217,7 @@ def alert_match(match_data, test_mode=False):
             if resp.ok and resp.json().get("ok"):
                 log_message("📨 Telegram alert sent.", "INFO")
                 increment_metric("alerts_sent_today.telegram")
+                increment_metric("alerts_sent_lifetime.telegram")
             else:
                 log_message(f"❌ Telegram alert failed: {resp.text}", "ERROR")
         except Exception as e:
@@ -228,6 +232,7 @@ def alert_match(match_data, test_mode=False):
             client.messages.create(body=match_text, from_=TWILIO_FROM, to=TWILIO_TO_SMS)
             log_message("📲 SMS alert sent.", "INFO")
             increment_metric("alerts_sent_today.sms")
+            increment_metric("alerts_sent_lifetime.sms")
         except Exception as e:
             log_message(f"❌ SMS alert error: {e}", "WARNING")
 
@@ -244,6 +249,7 @@ def alert_match(match_data, test_mode=False):
             )
             log_message("📞 Phone call alert triggered.", "INFO")
             increment_metric("alerts_sent_today.phone")
+            increment_metric("alerts_sent_lifetime.phone")
         except Exception as e:
             log_message(f"❌ Phone call error: {e}", "WARNING")
 
@@ -255,6 +261,7 @@ def alert_match(match_data, test_mode=False):
             if resp.ok:
                 log_message("💬 Discord alert sent.", "INFO")
                 increment_metric("alerts_sent_today.discord")
+                increment_metric("alerts_sent_lifetime.discord")
             else:
                 log_message(f"❌ Discord alert failed: {resp.text}", "ERROR")
         except Exception as e:
@@ -272,6 +279,7 @@ def alert_match(match_data, test_mode=False):
             if resp.ok:
                 log_message("🏠 Home Assistant alert sent.", "INFO")
                 increment_metric("alerts_sent_today.home_assistant")
+                increment_metric("alerts_sent_lifetime.home_assistant")
             else:
                 log_message(f"❌ Home Assistant alert failed: {resp.text}", "ERROR")
         except Exception as e:
@@ -291,6 +299,7 @@ def alert_match(match_data, test_mode=False):
                 f.write(b64_encrypted)
             log_message("☁ Encrypted match uploaded locally.", "INFO")
             increment_metric("alerts_sent_today.cloud")
+            increment_metric("alerts_sent_lifetime.cloud")
         except Exception as e:
             log_message(f"❌ PGP/cloud upload error: {e}", "ERROR")
 
@@ -303,6 +312,7 @@ def alert_match(match_data, test_mode=False):
             f.write(json.dumps(match_data) + "\n")
         log_message("📝 Match written to local log.", "INFO")
         increment_metric("alerts_sent_today.file")
+        increment_metric("alerts_sent_lifetime.file")
     except Exception as e:
         log_message(f"❌ Local match logging error: {e}", "ERROR")
 
