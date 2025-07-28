@@ -416,7 +416,11 @@ class DashboardGUI:
         """Synchronize button states with current metrics on startup."""
         try:
             stats = get_current_metrics()
-            status_dict = stats.get("thread_health_flags", stats.get("status", {}))
+            status_dict = stats.get("thread_health_flags")
+            if not isinstance(status_dict, dict):
+                status_dict = stats.get("status", {})
+                if not isinstance(status_dict, dict):
+                    status_dict = {}
             key_map = {"vanity": "keygen"}
             for label, updater in self.module_buttons.items():
                 metric_key = key_map.get(label.lower(), label.lower())
@@ -439,7 +443,11 @@ class DashboardGUI:
                 if var.get() != live:
                     var.set(live)
             # Update module button states based on metrics
-            status_dict = stats.get("thread_health_flags", stats.get("status", {}))
+            status_dict = stats.get("thread_health_flags")
+            if not isinstance(status_dict, dict):
+                status_dict = stats.get("status", {})
+                if not isinstance(status_dict, dict):
+                    status_dict = {}
             key_map = {"vanity": "keygen"}
             for label, updater in self.module_buttons.items():
                 metric_key = key_map.get(label.lower(), label.lower())
