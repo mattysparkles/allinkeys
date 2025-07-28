@@ -159,7 +159,7 @@ class DashboardGUI:
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
                 elif key in ("gpu_stats", "gpu_assignments", "status", "matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "csv_checker", "alerts_sent_today"):
-                    txt = tk.Text(frame, height=8, width=45, wrap="word", font=FONT)
+                    txt = tk.Text(frame, height=8, width=45, wrap="none", font=FONT)
                     txt.grid(row=i, column=1, sticky="nsew", padx=2, pady=2)
                     txt.configure(state="disabled")
                     self.metrics[key] = txt
@@ -507,21 +507,13 @@ class DashboardGUI:
                         "addresses_generated_lifetime",
                         "addresses_checked_lifetime",
                         "matches_found_lifetime",
+                        "addresses_checked_today",
+                        "matches_found_today",
+                        "addresses_generated_today",
+                        "alerts_sent_today",
+                        "alerts_sent_lifetime",
                     ):
                         lines.extend(self._format_coin_dict(value).splitlines())
-                    elif key in ("addresses_checked_today", "alerts_sent_today", "alerts_sent_lifetime"):
-                        if key.startswith("alerts_sent"):
-                            today_dict = stats.get("alerts_sent_today", {})
-                            lifetime_dict = stats.get("alerts_sent_lifetime", {})
-                        else:  # addresses_checked_today
-                            today_dict = value
-                            lifetime_dict = stats.get("addresses_checked_lifetime", {})
-                        cols = []
-                        for coin in lifetime_dict:
-                            t = today_dict.get(coin, 0)
-                            l = lifetime_dict.get(coin, 0)
-                            cols.append(f"{coin.upper()}: {t} / {l}")
-                        lines.append("   ".join(cols))
                     else:
                         for gid, info in value.items():
                             name = info.get('name', '')
@@ -541,8 +533,20 @@ class DashboardGUI:
                 widget.config(state="disabled")
             else:
                 if isinstance(value, dict):
-                    lines = [f"{k.upper()}: {v}" for k, v in value.items()]
-                    disp = "\n".join(lines)
+                    if key in (
+                        "addresses_generated_today",
+                        "addresses_generated_lifetime",
+                        "matches_found_today",
+                        "matches_found_lifetime",
+                        "addresses_checked_today",
+                        "addresses_checked_lifetime",
+                        "alerts_sent_today",
+                        "alerts_sent_lifetime",
+                    ):
+                        disp = self._format_coin_dict(value)
+                    else:
+                        lines = [f"{k.upper()}: {v}" for k, v in value.items()]
+                        disp = "\n".join(lines)
                 else:
                     disp = str(value)
                     if len(disp) > 40:

@@ -401,6 +401,21 @@ def increment_metric(key, amount=1):
 
 def set_metric(key, value):
     """Convenience wrapper for updating a single metric key."""
+    dict_expected = {
+        "addresses_generated_lifetime",
+        "addresses_checked_lifetime",
+        "matches_found_lifetime",
+        "addresses_generated_today",
+        "addresses_checked_today",
+        "matches_found_today",
+    }
+    base = key.split(".", 1)[0] if isinstance(key, str) else key
+    if base in dict_expected and not isinstance(value, dict):
+        print(
+            f"[dashboard] Warning: expected dict for {base}, got {type(value).__name__}",
+            flush=True,
+        )
+        return
     update_dashboard_stat(key, value)
 
 
