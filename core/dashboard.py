@@ -123,8 +123,13 @@ def save_lifetime_metrics():
         else:
             data[key] = val
     try:
-        with open(METRICS_LIFETIME_PATH, 'w', encoding='utf-8') as f:
+        # [FIX PHASE 2] atomic write to survive crashes/power loss
+        tmp_path = METRICS_LIFETIME_PATH + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, METRICS_LIFETIME_PATH)
     except Exception:
         pass
 
@@ -479,6 +484,24 @@ def reset_all_metrics():
         metrics["state"] = "Reset"
         metrics["uptime"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         metrics["metrics_last_reset"] = datetime.now().isoformat()
+        metrics["lifetime_start_timestamp"] = datetime.utcnow().isoformat()
+    if os.path.exists(METRICS_LIFETIME_PATH):
+        try:
+            os.remove(METRICS_LIFETIME_PATH)
+        except Exception:
+            pass
+
+# [FIX PHASE 2] allow clearing only lifetime stats without touching daily data
+def reset_lifetime_metrics():
+    if not metrics_lock:
+        return
+    with metrics_lock:
+        for key in LIFETIME_KEYS:
+            val = metrics.get(key)
+            if isinstance(val, dict):
+                metrics[key] = {k: 0 for k in val}
+            elif isinstance(val, (int, float)):
+                metrics[key] = 0
         metrics["lifetime_start_timestamp"] = datetime.utcnow().isoformat()
     if os.path.exists(METRICS_LIFETIME_PATH):
         try:
