@@ -403,6 +403,15 @@ class DashboardGUI:
         except Exception:
             pass
 
+    def _format_coin_dict(self, data, per_row=2):
+        """Return multiline string with coin values in aligned columns."""
+        items = list(data.items())
+        lines = []
+        for i in range(0, len(items), per_row):
+            row_parts = [f"{c.upper():<5}: {v:<8}" for c, v in items[i:i+per_row]]
+            lines.append("   ".join(row_parts))
+        return "\n".join(lines)
+
     def sync_module_states(self):
         """Synchronize button states with current metrics on startup."""
         try:
@@ -494,16 +503,19 @@ class DashboardGUI:
                         for mod, name in value.items():
                             title = name_map.get(mod, mod.replace('_', ' ').title())
                             lines.append(f"{title} → {name}")
-                    elif key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "alerts_sent_today", "alerts_sent_lifetime"):
-                        if key in ("matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today"):
-                            today_dict = stats.get(key.replace("lifetime", "today"), {}) if "lifetime" in key else stats.get(key.replace("today", "lifetime"), {})
-                            lifetime_dict = stats.get(key.replace("today", "lifetime"), {}) if "today" in key else value
-                        elif key.startswith("alerts_sent"):
+                    elif key in (
+                        "addresses_generated_lifetime",
+                        "addresses_checked_lifetime",
+                        "matches_found_lifetime",
+                    ):
+                        lines.extend(self._format_coin_dict(value).splitlines())
+                    elif key in ("addresses_checked_today", "alerts_sent_today", "alerts_sent_lifetime"):
+                        if key.startswith("alerts_sent"):
                             today_dict = stats.get("alerts_sent_today", {})
                             lifetime_dict = stats.get("alerts_sent_lifetime", {})
-                        else:
-                            lifetime_dict = value
-                            today_dict = {}
+                        else:  # addresses_checked_today
+                            today_dict = value
+                            lifetime_dict = stats.get("addresses_checked_lifetime", {})
                         cols = []
                         for coin in lifetime_dict:
                             t = today_dict.get(coin, 0)
