@@ -405,6 +405,8 @@ class DashboardGUI:
 
     def _format_coin_dict(self, data, per_row=2):
         """Return multiline string with coin values in aligned columns."""
+        if not isinstance(data, dict):
+            return str(data)
         items = list(data.items())
         lines = []
         for i in range(0, len(items), per_row):
@@ -521,18 +523,24 @@ class DashboardGUI:
                         "alerts_sent_today",
                         "alerts_sent_lifetime",
                     ):
-                        lines.extend(self._format_coin_dict(value).splitlines())
+                        if isinstance(value, dict):
+                            lines.extend(self._format_coin_dict(value).splitlines())
+                        else:
+                            lines.append(f"{key}: {value}")
                     else:
                         for gid, info in value.items():
-                            name = info.get('name', '')
-                            usage = info.get('usage', 'N/A')
-                            vram = info.get('vram', 'N/A')
-                            temp = info.get('temp', 'N/A')
-                            lines.append(f"{gid}: {name}")
-                            detail = f"  Usage: {usage}  VRAM: {vram}"
-                            if temp and temp != 'N/A':
-                                detail += f"  Temp: {temp}"
-                            lines.append(detail)
+                            if isinstance(info, dict):
+                                name = info.get('name', '')
+                                usage = info.get('usage', 'N/A')
+                                vram = info.get('vram', 'N/A')
+                                temp = info.get('temp', 'N/A')
+                                lines.append(f"{gid}: {name}")
+                                detail = f"  Usage: {usage}  VRAM: {vram}"
+                                if temp and temp != 'N/A':
+                                    detail += f"  Temp: {temp}"
+                                lines.append(detail)
+                            else:
+                                lines.append(f"{gid}: {info}")
                 else:
                     lines.append(str(value))
                 widget.config(state="normal")
@@ -540,21 +548,20 @@ class DashboardGUI:
                 widget.insert("end", "\n".join(lines) or "N/A")
                 widget.config(state="disabled")
             else:
-                if isinstance(value, dict):
-                    if key in (
-                        "addresses_generated_today",
-                        "addresses_generated_lifetime",
-                        "matches_found_today",
-                        "matches_found_lifetime",
-                        "addresses_checked_today",
-                        "addresses_checked_lifetime",
-                        "alerts_sent_today",
-                        "alerts_sent_lifetime",
-                    ):
-                        disp = self._format_coin_dict(value)
-                    else:
-                        lines = [f"{k.upper()}: {v}" for k, v in value.items()]
-                        disp = "\n".join(lines)
+                if key in (
+                    "addresses_generated_today",
+                    "addresses_generated_lifetime",
+                    "matches_found_today",
+                    "matches_found_lifetime",
+                    "addresses_checked_today",
+                    "addresses_checked_lifetime",
+                    "alerts_sent_today",
+                    "alerts_sent_lifetime",
+                ):
+                    disp = self._format_coin_dict(value) if isinstance(value, dict) else str(value)
+                elif isinstance(value, dict):
+                    lines = [f"{k.upper()}: {v}" for k, v in value.items()]
+                    disp = "\n".join(lines)
                 else:
                     disp = str(value)
                     if len(disp) > 40:
