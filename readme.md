@@ -2,6 +2,10 @@
 
 AllInKeys is a high-performance Python-based tool designed for Bitcoin and altcoin key discovery, address monitoring, and wallet analysis. It supports GPU-accelerated key generation, altcoin derivation, vanity address searches, PGP-encrypted alerts, daily balance list scanning, and a live system dashboard.
 
+## 🚧 Project Status
+
+This repository was recently opened to the public and is still a work in progress. Several modules are being refactored and may not behave perfectly yet. I wanted to share the code early for fun and to get feedback while the remaining pieces are fixed up.
+
 > 🔐 Whether you're a security researcher, digital archaeologist, or white-hat crypto enthusiast, AllInKeys is a fully modular suite for probing and understanding blockchain address keyspace.
 
 ---
