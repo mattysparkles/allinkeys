@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 import core.checkpoint as checkpoint
 import traceback
 import multiprocessing
+from core.logger import log_message
 from config.settings import (
     ENABLE_KEYGEN,
     ENABLE_DAY_ONE_CHECK,
@@ -106,6 +107,14 @@ def load_lifetime_metrics():
             data = json.load(f)
             if 'lifetime_start_timestamp' not in data:
                 data['lifetime_start_timestamp'] = datetime.utcnow().isoformat()
+            defaults = _default_metrics()
+            for key in (
+                "addresses_generated_lifetime",
+                "addresses_checked_lifetime",
+                "matches_found_lifetime",
+            ):
+                if not isinstance(data.get(key), dict):
+                    data[key] = {c: 0 for c in defaults[key]}
             return data
     except Exception:
         return {}
@@ -401,6 +410,17 @@ def increment_metric(key, amount=1):
 
 def set_metric(key, value):
     """Convenience wrapper for updating a single metric key."""
+    if key in {
+        "addresses_generated_lifetime",
+        "addresses_checked_lifetime",
+        "matches_found_lifetime",
+    }:
+        if not isinstance(value, dict):
+            log_message(
+                f"❌ Refusing to overwrite {key} with {type(value).__name__}",
+                "ERROR",
+            )
+            return
     dict_expected = {
         "addresses_generated_lifetime",
         "addresses_checked_lifetime",
