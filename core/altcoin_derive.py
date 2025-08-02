@@ -68,6 +68,47 @@ def safe_str(obj):
             return "<unprintable exception>"
 
 
+# ---------------------------------------------------------------------------
+# Safe helpers for multiprocessing primitives and Manager-proxy calls.
+# These wrappers guard against ``KeyError`` or disconnection issues that can
+# happen when Manager-backed objects are accessed after a worker exits.  This
+# allows GPU workers to fail gracefully without crashing the parent process.
+# ---------------------------------------------------------------------------
+
+
+def safe_event_is_set(ev):
+    """Return ``ev.is_set()`` but swallow proxy-related errors."""
+    if ev is None:
+        return False
+    try:
+        return ev.is_set()
+    except (OSError, EOFError, KeyError):
+        log_message("⚠️ Lost access to control event; assuming not set", "WARNING")
+        return False
+
+
+def safe_update_dashboard_stat(key, value=None):
+    try:
+        update_dashboard_stat(key, value)
+    except (KeyError, EOFError):
+        log_message(f"⚠️ Dashboard update failed for {key}", "WARNING")
+
+
+def safe_increment_metric(key, amount=1):
+    try:
+        increment_metric(key, amount)
+    except (KeyError, EOFError):
+        log_message(f"⚠️ Metric update failed for {key}", "WARNING")
+
+
+def safe_get_metric(key, default=0):
+    try:
+        return get_metric(key)
+    except (KeyError, EOFError):
+        log_message(f"⚠️ Metric read failed for {key}", "WARNING")
+        return default
+
+
 def get_file_size_mb(path):
     """Returns the file size in megabytes."""
     return os.path.getsize(path) / (1024 * 1024)
@@ -523,20 +564,20 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
             batch_size = 16384
 
             for line in infile:
-                if pause_event and pause_event.is_set():
-                    while pause_event and pause_event.is_set():
-                        if shutdown_event and shutdown_event.is_set():
+                if safe_event_is_set(pause_event):
+                    while safe_event_is_set(pause_event):
+                        if safe_event_is_set(shutdown_event):
                             break
                         time.sleep(1)
-                    if shutdown_event and shutdown_event.is_set():
+                    if safe_event_is_set(shutdown_event):
                         break
 
-                if shutdown_event and shutdown_event.is_set():
+                if safe_event_is_set(shutdown_event):
                     break
 
                 i += 1
                 progress = (i / total_lines) * 100 if total_lines else 100
-                update_dashboard_stat(f"backlog_progress.{base_name}", round(progress, 1))
+                safe_update_dashboard_stat(f"backlog_progress.{base_name}", round(progress, 1))
                 stripped = line.strip()
                 if stripped.startswith("PubAddress:") or stripped.startswith("Pub Addr:"):
                     line_buffer = [stripped]
@@ -661,15 +702,15 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                 perf_stats["derive"] += d_dur
                 log_message(f"[PERF] Derived {len(hex_batch)} keys in {d_dur:.2f}s", "DEBUG")
                 for idx, derived in enumerate(results):
-                    if pause_event and pause_event.is_set():
-                        while pause_event and pause_event.is_set():
-                            if shutdown_event and shutdown_event.is_set():
+                    if safe_event_is_set(pause_event):
+                        while safe_event_is_set(pause_event):
+                            if safe_event_is_set(shutdown_event):
                                 break
                             time.sleep(1)
-                        if shutdown_event and shutdown_event.is_set():
+                        if safe_event_is_set(shutdown_event):
                             break
 
-                    if shutdown_event and shutdown_event.is_set():
+                    if safe_event_is_set(shutdown_event):
                         break
                     priv_hex = hex_batch[idx]
                     seed, wif, pub = meta_map[priv_hex]
@@ -724,12 +765,12 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                 f.flush()
             f.close()
             finalize_csv(partial_path, path)
-            update_dashboard_stat(f"backlog_progress.{base_name}", 100)
+            safe_update_dashboard_stat(f"backlog_progress.{base_name}", 100)
 
-            increment_metric("csv_created_today", 1)
-            increment_metric("csv_created_lifetime", 1)
-            update_dashboard_stat("csv_created_today", get_metric("csv_created_today"))
-            update_dashboard_stat("csv_created_lifetime", get_metric("csv_created_lifetime"))
+            safe_increment_metric("csv_created_today", 1)
+            safe_increment_metric("csv_created_lifetime", 1)
+            safe_update_dashboard_stat("csv_created_today", safe_get_metric("csv_created_today"))
+            safe_update_dashboard_stat("csv_created_lifetime", safe_get_metric("csv_created_lifetime"))
             log_message(f"✅ {os.path.basename(path)} written ({rows_written} rows)", "INFO")
             coin_map = {
                 "btc_U": "btc",
@@ -757,8 +798,8 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                 log_message(f"🔢 {key.upper()}: {count}", "DEBUG")
 
             for coin, count in per_coin.items():
-                increment_metric(f"addresses_generated_today.{coin}", count)
-                increment_metric(f"addresses_generated_lifetime.{coin}", count)
+                safe_increment_metric(f"addresses_generated_today.{coin}", count)
+                safe_increment_metric(f"addresses_generated_lifetime.{coin}", count)
 
             for coin, count in per_coin.items():
                 log_message(f"📈 Generated {count} {coin.upper()} addresses", "DEBUG")
@@ -778,10 +819,14 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 from core.dashboard import init_shared_metrics, register_control_events
 
 
-def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, gpu_id):
-    """Helper for ProcessPoolExecutor to convert a single file."""
+def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id):
+    """Helper for ProcessPoolExecutor to convert a single file.
+
+    The worker intentionally avoids touching shared ``Manager`` state. Metrics and
+    dashboard updates are handled in the parent process to prevent proxy
+    invalidation when workers exit.
+    """
     try:
-        init_shared_metrics(shared_metrics)
         full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
         lock_path = full_path + ".lock"
         if os.path.exists(lock_path):
@@ -811,14 +856,8 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, 
             f"[Altcoin Derive - GPU {gpu_id if gpu_id is not None else 'CPU'}] 🚀 Starting CSV derivation on {txt_file}...",
             "INFO",
         )
-        update_dashboard_stat("backlog_current_file", txt_file)
         start_t = time.perf_counter()
         rows = convert_txt_to_csv(full_path, batch_id, pause_event, shutdown_event, context, gpu_id)
-        increment_metric("altcoin_files_converted", 1)
-        if rows:
-            increment_metric("derived_addresses_today", rows)
-        increment_metric("backlog_files_completed", 1)
-        update_dashboard_stat(f"backlog_progress.{os.path.splitext(txt_file)[0]}", 100)
         duration = time.perf_counter() - start_t
         return txt_file, duration, rows, None
     except Exception as e:
@@ -879,8 +918,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
         futures = {}
-        while not shared_shutdown_event.is_set():
-            if get_pause_event("altcoin") and get_pause_event("altcoin").is_set():
+        while not safe_event_is_set(shared_shutdown_event):
+            if safe_event_is_set(get_pause_event("altcoin")):
                 time.sleep(1)
                 continue
             try:
@@ -890,7 +929,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                     if f.endswith(".txt") and f not in processed and f not in queued
                 ]
 
-                update_dashboard_stat("backlog_files_queued", len(all_txt) + len(queued))
+                safe_update_dashboard_stat("backlog_files_queued", len(all_txt) + len(queued))
                 log_message(
                     f"[QUEUE] workers:{len(futures)}/{max_workers} queued:{len(all_txt) + len(queued)}",
                     "DEBUG",
@@ -905,7 +944,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                     hrs = int(eta_sec // 3600)
                     mins = int((eta_sec % 3600) // 60)
                     secs = int(eta_sec % 60)
-                    update_dashboard_stat(
+                    safe_update_dashboard_stat(
                         {
                             "backlog_avg_time": f"{avg:.2f}s",
                             "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
@@ -928,7 +967,6 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                         txt,
                         pause_event,
                         shared_shutdown_event,
-                        shared_metrics,
                         assigned_gpu,
                     )
                     futures[future] = txt
@@ -944,6 +982,13 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                         with proc_lock:
                             processed.add(txt_file)
                         durations.append(dur)
+                        safe_increment_metric("altcoin_files_converted", 1)
+                        if rows:
+                            safe_increment_metric("derived_addresses_today", rows)
+                        safe_increment_metric("backlog_files_completed", 1)
+                        safe_update_dashboard_stat(
+                            f"backlog_progress.{os.path.splitext(txt_file)[0]}", 100
+                        )
                         if dur > 0:
                             rps = rows / dur
                             log_message(
@@ -958,7 +1003,9 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                             )
                     del futures[fut]
 
-                update_dashboard_stat("backlog_current_file", list(queued)[0] if queued else "")
+                safe_update_dashboard_stat(
+                    "backlog_current_file", list(queued)[0] if queued else ""
+                )
                 if not futures and not all_txt:
                     time.sleep(3)
             except Exception as e:
