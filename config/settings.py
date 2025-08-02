@@ -5,6 +5,9 @@ Auto-merged to restore full functionality.
 
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 # --- Paths ---
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
@@ -267,8 +270,8 @@ LOGGING_ENABLED = True  # or False if you want to disable it
 
 
 # ===================== 🔒 SECURITY ==========================
-DASHBOARD_RESET_PASSWORD = "Mandarin66!"
-DELETE_CONFIRMATION_PASSWORD = "Mandarin66!"
+DASHBOARD_RESET_PASSWORD = os.getenv("DASHBOARD_RESET_PASSWORD", "")
+DELETE_CONFIRMATION_PASSWORD = os.getenv("DELETE_CONFIRMATION_PASSWORD", "")
 DASHBOARD_PASSWORD = DASHBOARD_RESET_PASSWORD  # Alias for UI compatibility
 
 # ===================== ❤️ DONATION INFO ==========================
@@ -311,75 +314,75 @@ PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "Sparkles-allinkeys_0x3A94D30E_publ
 
 # === EMAIL ALERT CONFIGURATION ===
 ALERT_EMAIL_ENABLED = True
-ALERT_EMAIL_SENDER = "emailsenderbtc@gmail.com"
-ALERT_EMAIL_PASSWORD = "Mandarin66!"
-ALERT_EMAIL_RECIPIENTS = ["onqdirector@gmail.com", "reesecobalt@gmail.com"]
-EMAIL_SMTP_SERVER = "smtp.gmail.com"
-EMAIL_SMTP_PORT = 587
+ALERT_EMAIL_SENDER = os.getenv("ALERT_EMAIL_SENDER", "emailsenderbtc@gmail.com")
+ALERT_EMAIL_PASSWORD = os.getenv("ALERT_EMAIL_PASSWORD", "")
+ALERT_EMAIL_RECIPIENTS = os.getenv("ALERT_EMAIL_RECIPIENTS", "").split(",") if os.getenv("ALERT_EMAIL_RECIPIENTS") else []
+EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER", "smtp.gmail.com")
+EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", 587))
 INCLUDE_MATCH_INFO = True
 ENCRYPTED_MESSAGE = True
 # SMTP Credentials (required if ALERT_EMAIL_ENABLED is True)
-SMTP_SERVER = "smtp.gmail.com"           # Or use your provider's SMTP host
-SMTP_PORT = 587                          # TLS port (use 465 for SSL)
-SMTP_USERNAME = "emailsenderbtc@gmail.com"        # Replace with your actual sending email
-SMTP_PASSWORD = "btcsender"    # App password if using Gmail 2FA
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")           # Or use your provider's SMTP host
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))                          # TLS port (use 465 for SSL)
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "emailsenderbtc@gmail.com")        # Replace with your actual sending email
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")    # App password if using Gmail 2FA
 ALERT_EMAIL_FROM = SMTP_USERNAME  # or hardcode like "you@example.com"
-ALERT_EMAIL_TO = ALERT_EMAIL_RECIPIENTS  # DONT CHANGE HERE CHANGE ALERT_EMAIL_RECIPIENTS OPTION ABOVE 
+ALERT_EMAIL_TO = ALERT_EMAIL_RECIPIENTS  # DONT CHANGE HERE CHANGE ALERT_EMAIL_RECIPIENTS OPTION ABOVE
 
 
 # === TELEGRAM BOT ALERT CONFIGURATION ===
 ALERT_TELEGRAM_ENABLED = True
 ENABLE_TELEGRAM_ALERT = ALERT_TELEGRAM_ENABLED # alias for backward compatibility dont modify
-TELEGRAM_BOT_TOKEN = "6882165186:AAHvqWPCooG5ElvjHWSXZJJFA-ZCbFYD5Ys"
-TELEGRAM_CHAT_ID = "t.me/sparklespuzzlebot"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # === SMS VIA TWILIO ===
 ALERT_SMS_ENABLED = True
 ENABLE_SMS_ALERT = ALERT_SMS_ENABLED # alias for backward compatibility dont modify
-TWILIO_SID = "AC9fab6c5e3a541ada1cf4c6b3956bc615"
-TWILIO_AUTH_TOKEN = "4aa3b017524e75237752997e658ab16f"
-TWILIO_FROM_NUMBER = "+16696666608"
-TWILIO_TO_NUMBER = "+16318792320"
+TWILIO_SID = os.getenv("TWILIO_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+TWILIO_TO_NUMBER = os.getenv("TWILIO_TO_NUMBER", "")
 TWILIO_TO = TWILIO_TO_NUMBER # Alias do not change
 TWILIO_TO_SMS = TWILIO_TO_NUMBER  # alias for backward compatibility
 TWILIO_FROM = TWILIO_FROM_NUMBER  # alias for backward compatibility
 ENABLE_PHONE_CALL_ALERT = True
-TWILIO_CALL_TO_NUMBER = "+16318792320"
+TWILIO_CALL_TO_NUMBER = os.getenv("TWILIO_CALL_TO_NUMBER", "")
 TWILIO_TOKEN = TWILIO_AUTH_TOKEN  # Alias do not change
 TWILIO_TO_CALL = TWILIO_CALL_TO_NUMBER # Alias do not change
 
 # === DISCORD WEBHOOK ALERTS ===
 ALERT_DISCORD_ENABLED = False
 ENABLE_DISCORD_ALERT = ALERT_DISCORD_ENABLED # Alias do not change
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/..."
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
 # === HOME ASSISTANT / IoT WEBHOOK ===
 ALERT_HOME_ASSISTANT_ENABLED = False
 ENABLE_HOME_ASSISTANT_ALERT = ALERT_HOME_ASSISTANT_ENABLED # Alias do not change
-HOME_ASSISTANT_WEBHOOK = "https://your-home-assistant-url/api/webhook/..."
+HOME_ASSISTANT_WEBHOOK = os.getenv("HOME_ASSISTANT_WEBHOOK", "")
 HOME_ASSISTANT_URL = HOME_ASSISTANT_WEBHOOK # Alias do not change
-HOME_ASSISTANT_TOKEN = "your home assistant api token here"
+HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN", "")
 
 # === CLOUD STORAGE MATCH BACKUPS ===
 
 # iCloud
 ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE = False
-ICLOUD_LOGIN = "you@icloud.com"
-ICLOUD_PASSWORD = "yourpassword"
-ICLOUD_DRIVE_PATH = "/path/on/icloud"
+ICLOUD_LOGIN = os.getenv("ICLOUD_LOGIN", "you@icloud.com")
+ICLOUD_PASSWORD = os.getenv("ICLOUD_PASSWORD", "")
+ICLOUD_DRIVE_PATH = os.getenv("ICLOUD_DRIVE_PATH", "/path/on/icloud")
 ENABLE_CLOUD_UPLOAD = ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE # Alias do not change
 
 # Google Drive
 ALERT_SAVE_MATCHES_TO_GOOGLE_DRIVE = False
-GOOGLE_DRIVE_LOGIN = "you@gmail.com"
-GOOGLE_DRIVE_PASSWORD = "yourpassword"
-GOOGLE_DRIVE_FILE_PATH = "/path/on/gdrive"
+GOOGLE_DRIVE_LOGIN = os.getenv("GOOGLE_DRIVE_LOGIN", "you@gmail.com")
+GOOGLE_DRIVE_PASSWORD = os.getenv("GOOGLE_DRIVE_PASSWORD", "")
+GOOGLE_DRIVE_FILE_PATH = os.getenv("GOOGLE_DRIVE_FILE_PATH", "/path/on/gdrive")
 
 # Dropbox
 ALERT_SAVE_MATCHES_TO_DROPBOX = False
-DROPBOX_LOGIN = "you@protonmail.com"
-DROPBOX_PASSWORD = "yourpassword"
-DROPBOX_FILE_PATH = "/dropbox/folder"
+DROPBOX_LOGIN = os.getenv("DROPBOX_LOGIN", "you@protonmail.com")
+DROPBOX_PASSWORD = os.getenv("DROPBOX_PASSWORD", "")
+DROPBOX_FILE_PATH = os.getenv("DROPBOX_FILE_PATH", "/dropbox/folder")
 
 # === LOCAL MATCH FILE SAVE ===
 ALERT_SAVE_MATCHES_TO_LOCAL_FILE = True
