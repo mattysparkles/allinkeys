@@ -158,7 +158,7 @@ class DashboardGUI:
                     pb = ttk.Progressbar(frame, length=150, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
-                elif key in ("gpu_stats", "gpu_assignments", "status", "matches_found_lifetime", "addresses_checked_lifetime", "addresses_checked_today", "csv_checker", "alerts_sent_today"):
+                elif key in ("gpu_stats", "gpu_assignments", "status", "csv_checker", "alerts_sent_today"):
                     txt = tk.Text(frame, height=8, width=45, wrap="none", font=FONT)
                     txt.grid(row=i, column=1, sticky="nsew", padx=2, pady=2)
                     txt.configure(state="disabled")

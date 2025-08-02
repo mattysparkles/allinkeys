@@ -127,7 +127,11 @@ def save_lifetime_metrics():
     data = {}
     for key in LIFETIME_KEYS:
         val = metrics.get(key)
-        if isinstance(val, dict):
+        try:
+            from multiprocessing.managers import DictProxy
+        except Exception:
+            DictProxy = dict  # fallback
+        if isinstance(val, DictProxy) or isinstance(val, dict):
             data[key] = dict(val)
         else:
             data[key] = val

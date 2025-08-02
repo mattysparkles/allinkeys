@@ -32,6 +32,8 @@ from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU select
 total_keys_generated = 0
 keygen_start_time = time.time()
 last_output_file = None
+kps_start_time = time.time()
+kps_start_keys = 0
 
 # Used to track current batch progress
 KEYGEN_STATE = {
@@ -53,13 +55,9 @@ if LOGGING_ENABLED:
 def keygen_progress():
     elapsed_seconds = max(1, int(time.time() - keygen_start_time))
     elapsed_time_str = str(datetime.utcfromtimestamp(elapsed_seconds).strftime('%H:%M:%S'))
-    lifetime_start = get_metric('lifetime_start_timestamp')
-    try:
-        ts_start = datetime.fromisoformat(lifetime_start).timestamp() if lifetime_start else keygen_start_time
-    except Exception:
-        ts_start = keygen_start_time
-    elapsed_total = max(1, time.time() - ts_start)
-    keys_per_sec = total_keys_generated / elapsed_total
+    curr_today = get_metric('keys_generated_today', 0)
+    elapsed_total = max(1, time.time() - kps_start_time)
+    keys_per_sec = (curr_today - kps_start_keys) / elapsed_total
     return {
         "total_keys_generated": total_keys_generated,
         "current_batch_id": KEYGEN_STATE["batch_id"],
@@ -173,12 +171,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 from core.dashboard import update_dashboard_stat, get_metric
                 update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
                 update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
-                lifetime_start = get_metric('lifetime_start_timestamp')
-                try:
-                    ts_start = datetime.fromisoformat(lifetime_start).timestamp() if lifetime_start else keygen_start_time
-                except Exception:
-                    ts_start = keygen_start_time
-                kps = total_keys_generated / max(1, time.time() - ts_start)
+                curr_today = get_metric("keys_generated_today", 0)
+                kps = (curr_today - kps_start_keys) / max(1, time.time() - kps_start_time)
                 set_metric("keys_per_sec", round(kps, 2))
                 logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
         except Exception as e:
@@ -199,6 +193,9 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
+    global kps_start_time, kps_start_keys
+    kps_start_time = time.time()
+    kps_start_keys = get_metric("keys_generated_today", 0)
     from core.dashboard import register_control_events
     register_control_events(shutdown_event, pause_event, module="keygen")
     if not os.path.exists(VANITY_OUTPUT_DIR):
