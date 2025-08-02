@@ -8,6 +8,7 @@ import threading
 import logging
 import secrets
 from datetime import datetime
+from collections import deque
 from config.settings import (
     VANITYSEARCH_PATH,
     VANITY_OUTPUT_DIR,
@@ -32,8 +33,7 @@ from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU select
 total_keys_generated = 0
 keygen_start_time = time.time()
 last_output_file = None
-kps_start_time = time.time()
-kps_start_keys = 0
+KPS_WINDOW = deque()
 
 # Used to track current batch progress
 KEYGEN_STATE = {
@@ -55,9 +55,10 @@ if LOGGING_ENABLED:
 def keygen_progress():
     elapsed_seconds = max(1, int(time.time() - keygen_start_time))
     elapsed_time_str = str(datetime.utcfromtimestamp(elapsed_seconds).strftime('%H:%M:%S'))
-    curr_today = get_metric('keys_generated_today', 0)
-    elapsed_total = max(1, time.time() - kps_start_time)
-    keys_per_sec = (curr_today - kps_start_keys) / elapsed_total
+    if len(KPS_WINDOW) >= 2:
+        keys_per_sec = (KPS_WINDOW[-1][1] - KPS_WINDOW[0][1]) / max(1e-6, KPS_WINDOW[-1][0] - KPS_WINDOW[0][0])
+    else:
+        keys_per_sec = 0
     return {
         "total_keys_generated": total_keys_generated,
         "current_batch_id": KEYGEN_STATE["batch_id"],
@@ -171,9 +172,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 from core.dashboard import update_dashboard_stat, get_metric
                 update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
                 update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
-                curr_today = get_metric("keys_generated_today", 0)
-                kps = (curr_today - kps_start_keys) / max(1, time.time() - kps_start_time)
-                set_metric("keys_per_sec", round(kps, 2))
                 logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
         except Exception as e:
             logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
@@ -193,9 +191,6 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
-    global kps_start_time, kps_start_keys
-    kps_start_time = time.time()
-    kps_start_keys = get_metric("keys_generated_today", 0)
     from core.dashboard import register_control_events
     register_control_events(shutdown_event, pause_event, module="keygen")
     if not os.path.exists(VANITY_OUTPUT_DIR):
@@ -234,12 +229,26 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         while True:
             if shutdown_evt and shutdown_evt.is_set():
                 break
+
+            # update keys/sec using a moving window of the last 5 seconds
+            now = time.time()
+            current_keys = get_metric("keys_generated_today", 0)
+            KPS_WINDOW.append((now, current_keys))
+            while KPS_WINDOW and now - KPS_WINDOW[0][0] > 5:
+                KPS_WINDOW.popleft()
+            if len(KPS_WINDOW) >= 2:
+                kps = (current_keys - KPS_WINDOW[0][1]) / (now - KPS_WINDOW[0][0])
+            else:
+                kps = 0
+            set_metric("keys_per_sec", round(kps, 2))
+
             batch_start = time.perf_counter()
             index = KEYGEN_STATE["index_within_batch"]
             while index < FILES_PER_BATCH:
                 if shutdown_evt and shutdown_evt.is_set():
                     break
                 if pause_evt and pause_evt.is_set():
+                    set_metric("keys_per_sec", 0)
                     time.sleep(1)
                     continue
 

@@ -18,6 +18,10 @@ from config.settings import (
     ENABLE_AUTO_TIMEZONE_SETTING,
     MANUAL_TIME_ZONE_OVERRIDE,
 )
+try:
+    from multiprocessing.managers import DictProxy
+except Exception:  # pragma: no cover - manager may not exist
+    DictProxy = type(None)
 
 # Thread health tracking (expanded)
 THREAD_HEALTH = {
@@ -364,6 +368,11 @@ def update_dashboard_stat(key, value=None, retries=5, delay=0.2):
         traceback.print_exc()
 
 
+def _is_dict_like(obj):
+    """Return True if ``obj`` behaves like a dict (including DictProxy)."""
+    return isinstance(obj, (dict, DictProxy))
+
+
 def _update_stat_internal(key, value=None):
     global metrics
     if metrics is None:
@@ -385,12 +394,12 @@ def _update_stat_internal(key, value=None):
     # Support dotted keys for nested dict updates
     if isinstance(key, str) and "." in key:
         top, sub = key.split(".", 1)
-        if isinstance(metrics.get(top), dict):
+        if _is_dict_like(metrics.get(top)):
             metrics[top][sub] = value
             return
 
     existing = metrics.get(key)
-    if isinstance(existing, dict) and isinstance(value, dict):
+    if _is_dict_like(existing) and isinstance(value, dict):
         try:
             # Update in place to preserve Manager.dict proxies
             existing.clear()
@@ -409,14 +418,14 @@ def increment_metric(key, amount=1):
         with metrics_lock:
             if "." in key:
                 top, sub = key.split(".", 1)
-                if isinstance(metrics.get(top), dict):
+                if _is_dict_like(metrics.get(top)):
                     metrics[top][sub] = metrics[top].get(sub, 0) + amount
             elif isinstance(metrics.get(key), int):
                 metrics[key] += amount
     else:
         if "." in key:
             top, sub = key.split(".", 1)
-            if isinstance(metrics.get(top), dict):
+            if _is_dict_like(metrics.get(top)):
                 metrics[top][sub] = metrics[top].get(sub, 0) + amount
         elif isinstance(metrics.get(key), int):
             metrics[key] = metrics.get(key, 0) + amount
@@ -463,13 +472,13 @@ def get_metric(key, default=None):
         with metrics_lock:
             if "." in key:
                 top, sub = key.split(".", 1)
-                if isinstance(metrics.get(top), dict):
+                if _is_dict_like(metrics.get(top)):
                     return metrics[top].get(sub, default)
             return metrics.get(key, default)
     else:
         if "." in key:
             top, sub = key.split(".", 1)
-            if isinstance(metrics.get(top), dict):
+            if _is_dict_like(metrics.get(top)):
                 return metrics[top].get(sub, default)
         return metrics.get(key, default)
 
