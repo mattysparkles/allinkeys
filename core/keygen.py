@@ -86,7 +86,7 @@ def generate_random_seed(min_bits=128):
     return secrets.randbelow(range_span) + min_val
 
 
-def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None):
+def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None):
     """Run VanitySearch once and return when the output file is rotated.
 
     Returns ``True`` if the file was generated successfully, ``False`` if the
@@ -94,7 +94,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     """
     global total_keys_generated, last_output_file
 
-    selected_gpu_ids = get_vanitysearch_gpu_ids()
+    use_gpu = True if gpu_flag is None else bool(gpu_flag.value)
+    selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
     gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
 
     hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
@@ -106,16 +107,13 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     )
     last_output_file = current_output_path
 
-    cmd = [
-        VANITYSEARCH_PATH,
-        "-s", hex_seed_full,
-        "-gpu",
-        "-o", current_output_path,
-        "-u", VANITY_PATTERN
-    ]
+    cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full]
+    if use_gpu:
+        cmd.append("-gpu")
+    cmd.extend(["-o", current_output_path, "-u", VANITY_PATTERN])
 
     logger.info(
-        f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'default'}"
+        f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'CPU'}"
     )
     logger.info(f"🚀 Running command: {' '.join(cmd)}")
     if pause_event and pause_event.is_set():
@@ -185,7 +183,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 from core.dashboard import init_shared_metrics, set_metric, increment_metric, get_metric
 
 
-def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None):
+def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None, gpu_flag=None):
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -260,7 +258,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                 progress = round((index / float(FILES_PER_BATCH)) * 100, 2)
                 set_metric("vanity_progress_percent", progress)
 
-                success = run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index, pause_evt)
+                success = run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index, pause_evt, gpu_flag)
                 if not success:
                     time.sleep(1)
                     continue

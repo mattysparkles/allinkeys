@@ -140,6 +140,12 @@ PATTERN = "1**"
 VANITYSEARCH_GPU_INDEX = [0]
 VANITY_GPU_INDEX = [0]
 
+# ===================== GPU SCHEDULER ==========================
+GPU_STRATEGY = "swing"  # Options: "vanity_priority", "csv_priority", "swing"
+MAX_BACKLOG_THRESHOLD = 3  # backlog size to trigger GPU reassignment
+MIN_BACKLOG_THRESHOLD = 1  # backlog size to resume vanity GPU keygen
+GPU_VENDOR = "auto"  # "nvidia", "amd", or "auto"
+
 # ===================== ALTCOIN ==========================
 ALTCOIN_GPUS_INDEX = [2]
 CSV_MAX_SIZE_MB = 200
@@ -442,6 +448,10 @@ STATS_TO_DISPLAY = {
     "csv_checker": True,
     "gpu_stats": True,
     "gpu_assignments": True,
+    "gpu_strategy": True,
+    "gpu_assignment": True,
+    "vanity_gpu_on": True,
+    "altcoin_gpu_on": True,
     "status": True,
     "last_updated": True,
 }
@@ -482,6 +492,10 @@ METRICS_LABEL_MAP = {
     "csv_checker": "CSV Checker",
     "gpu_stats": "GPU Stats",
     "gpu_assignments": "GPU Assignments",
+    "gpu_strategy": "Current GPU Strategy",
+    "gpu_assignment": "Active Assignment",
+    "vanity_gpu_on": "Vanity GPU",
+    "altcoin_gpu_on": "Altcoin Derive GPU",
     "status": "Module Status",
     "last_updated": "Last Updated",
 }

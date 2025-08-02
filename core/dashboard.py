@@ -17,6 +17,7 @@ from config.settings import (
     FILES_PER_BATCH,
     ENABLE_AUTO_TIMEZONE_SETTING,
     MANUAL_TIME_ZONE_OVERRIDE,
+    GPU_STRATEGY,
 )
 try:
     from multiprocessing.managers import DictProxy
@@ -323,6 +324,10 @@ def _default_metrics():
         "ram_usage": "0 GB / 0 GB (0%)",
         "gpu_stats": {},
         "gpu_assignments": {"vanitysearch": "N/A", "altcoin_derive": "N/A"},
+        "gpu_strategy": GPU_STRATEGY,
+        "gpu_assignment": "vanity",
+        "vanity_gpu_on": False,
+        "altcoin_gpu_on": False,
         "state": "Initializing",
         "active_processes": [],
         "csv_check_queue": [],

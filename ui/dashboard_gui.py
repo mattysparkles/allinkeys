@@ -34,7 +34,8 @@ from config.settings import (
     DELETE_CSV_FILES,
     DELETE_SYSTEM_LOGS,
     DELETE_CSV_CHECKING_LOGS,
-    OPEN_CONFIG_FILE_FROM_DASHBOARD,   
+    OPEN_CONFIG_FILE_FROM_DASHBOARD,
+    GPU_STRATEGY,
 )
 
 from core.dashboard import (
@@ -97,7 +98,8 @@ class DashboardGUI:
 
         system_stats = {
             "cpu_usage", "ram_usage", "disk_free_gb", "disk_fill_eta",
-            "gpu_stats", "gpu_assignments", "uptime",
+            "gpu_stats", "gpu_assignments", "gpu_strategy", "gpu_assignment",
+            "vanity_gpu_on", "altcoin_gpu_on", "uptime",
             "vanity_progress_percent", "last_updated", "status",
         }
         csv_stats = {
@@ -227,6 +229,17 @@ class DashboardGUI:
                     self._group_button_set(btn_frame, label.capitalize(), col)
                     col += 1
 
+        # GPU swing mode toggle
+        swing_frame = ttk.LabelFrame(self.container, text="GPU Mode")
+        swing_frame.pack(pady=10)
+        self.swing_var = tk.BooleanVar(value=(GPU_STRATEGY == "swing"))
+        ttk.Checkbutton(
+            swing_frame,
+            text="Enable Swing Mode",
+            variable=self.swing_var,
+            command=self.toggle_swing_mode,
+        ).pack(side="left", padx=5)
+
         # Config and Reset
         bottom_frame = ttk.Frame(self.container)
         bottom_frame.pack(pady=10)
@@ -335,6 +348,10 @@ class DashboardGUI:
 
         update_buttons()
         self.module_buttons[label] = update_buttons
+
+    def toggle_swing_mode(self):
+        strategy = "swing" if self.swing_var.get() else "vanity_priority"
+        set_metric("gpu_strategy", strategy)
 
     def update_alert_option(self, name, value):
         try:
