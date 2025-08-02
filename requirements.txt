@@ -24,3 +24,4 @@ playsound
 GPUtil
 eth-account
 python-dotenv
+tzlocal
