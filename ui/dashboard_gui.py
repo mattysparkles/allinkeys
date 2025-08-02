@@ -103,7 +103,8 @@ class DashboardGUI:
         csv_stats = {
             "csv_checked_today", "csv_rechecked_today",
             "addresses_checked_today", "addresses_checked_lifetime",
-            "matches_found_lifetime", "csv_created_today", "csv_created_lifetime",
+            "matches_found_today", "matches_found_lifetime",
+            "csv_created_today", "csv_created_lifetime",
             "alerts_sent_today", "csv_checker",
         }
         backlog_stats = {
