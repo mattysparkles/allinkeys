@@ -233,7 +233,14 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                             "row_number": rows_scanned
                                         }
 
-                                        log_message(f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}", "ALERT")
+                                        log_message(
+                                            f"[MATCH DETECTED] ✅ Match found for {coin.upper()} in row {rows_scanned} — alert triggered",
+                                            "DEBUG",
+                                        )
+                                        log_message(
+                                            f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}",
+                                            "ALERT",
+                                        )
 
                                         if ENABLE_PGP:
                                             try:
@@ -267,6 +274,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                             update_dashboard_stat("matches_found_lifetime", get_metric("matches_found_lifetime"))
                                         row_matches.append(addr)
                                         all_matches.append(match_payload)
+                                        log_message("[STATUS] CSV Checker continuing without interruption", "DEBUG")
                                         # Continue scanning the row for additional matches
                                     except Exception as match_err:
                                         log_message(f"⚠️ Match processing error for {addr}: {match_err}", "WARN")
