@@ -389,7 +389,18 @@ def _update_stat_internal(key, value=None):
             metrics[top][sub] = value
             return
 
-    metrics[key] = value
+    existing = metrics.get(key)
+    if isinstance(existing, dict) and isinstance(value, dict):
+        try:
+            # Update in place to preserve Manager.dict proxies
+            existing.clear()
+            existing.update(value)
+        except Exception:
+            metrics[key] = manager.dict(value) if manager else value
+    elif isinstance(value, dict) and manager is not None:
+        metrics[key] = manager.dict(value)
+    else:
+        metrics[key] = value
     maybe_persist_lifetime(key)
 
 def increment_metric(key, amount=1):
