@@ -256,6 +256,13 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
     processes = []
     named_processes = []
 
+    from core.gpu_scheduler import start_scheduler
+    gpu_sched, vanity_gpu_flag, altcoin_gpu_flag, assignment_flag = start_scheduler(
+        shared_metrics, shutdown_events.get('keygen'), dashboard_core.manager
+    )
+    processes.append(gpu_sched)
+    named_processes.append(("gpu_scheduler", gpu_sched))
+
     if ENABLE_CHECKPOINT_RESTORE:
         load_keygen_checkpoint()
         log_message("🧠 Checkpoint restore enabled.", "INFO")
@@ -272,7 +279,7 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     if ENABLE_KEYGEN and not args.headless:
         try:
-            p = Process(target=start_keygen_loop, args=(shared_metrics, shutdown_events.get('keygen'), pause_events.get('keygen')))
+            p = Process(target=start_keygen_loop, args=(shared_metrics, shutdown_events.get('keygen'), pause_events.get('keygen'), vanity_gpu_flag))
             p.daemon = True
             p.start()
             log_message("[Started] Keygen subprocess", "INFO")
@@ -305,7 +312,7 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
         try:
-            p = start_altcoin_conversion_process(shutdown_events.get('altcoin'), shared_metrics, pause_events.get('altcoin'), log_q)
+            p = start_altcoin_conversion_process(shutdown_events.get('altcoin'), shared_metrics, pause_events.get('altcoin'), log_q, altcoin_gpu_flag)
             log_message("[Started] Altcoin derive subprocess", "INFO")
             processes.append(p)
             named_processes.append(("altcoin", p))

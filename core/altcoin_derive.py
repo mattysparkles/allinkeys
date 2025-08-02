@@ -448,9 +448,11 @@ def derive_altcoin_addresses_from_hex(hex_key, context=None):
     return results[0] if results else {}
 
 
-def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_event=None, context=None):
+def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_event=None, context=None, gpu_id=None):
     filename = os.path.basename(input_txt_path)
     base_name = os.path.splitext(filename)[0]
+    if gpu_id is not None:
+        base_name = f"{base_name}_gpu{gpu_id}"
     perf_stats = {"load": 0.0, "derive": 0.0, "write": 0.0}
     start_total = time.perf_counter()
 
@@ -554,7 +556,10 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
                         if len(hex_batch) >= batch_size:
                             t_der = time.perf_counter()
-                            results = derive_addresses(hex_batch, context)
+                            if context is not None:
+                                results = derive_addresses_gpu(hex_batch, context)
+                            else:
+                                results = derive_addresses_cpu(hex_batch)
                             d_dur = time.perf_counter() - t_der
                             perf_stats["derive"] += d_dur
                             log_message(
@@ -648,7 +653,10 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
             # Final flush
             if hex_batch:
                 t_der = time.perf_counter()
-                results = derive_addresses(hex_batch, context)
+                if context is not None:
+                    results = derive_addresses_gpu(hex_batch, context)
+                else:
+                    results = derive_addresses_cpu(hex_batch)
                 d_dur = time.perf_counter() - t_der
                 perf_stats["derive"] += d_dur
                 log_message(f"[PERF] Derived {len(hex_batch)} keys in {d_dur:.2f}s", "DEBUG")
@@ -775,6 +783,10 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, 
     try:
         init_shared_metrics(shared_metrics)
         full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
+        lock_path = full_path + ".lock"
+        if os.path.exists(lock_path):
+            return txt_file, 0.0, 0, "locked"
+        open(lock_path, "w").close()
         batch_id = None
         context = None
         device_name = "CPU"
@@ -795,10 +807,13 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, 
                     f"⚠️ FALLBACK TO CPU — OpenCL device not available: {safe_str(err)}",
                     "WARNING",
                 )
-        log_message(f"[WORKER] PID {os.getpid()} starting {txt_file} on {device_name}", "DEBUG")
+        log_message(
+            f"[Altcoin Derive - GPU {gpu_id if gpu_id is not None else 'CPU'}] 🚀 Starting CSV derivation on {txt_file}...",
+            "INFO",
+        )
         update_dashboard_stat("backlog_current_file", txt_file)
         start_t = time.perf_counter()
-        rows = convert_txt_to_csv(full_path, batch_id, pause_event, shutdown_event, context)
+        rows = convert_txt_to_csv(full_path, batch_id, pause_event, shutdown_event, context, gpu_id)
         increment_metric("altcoin_files_converted", 1)
         if rows:
             increment_metric("derived_addresses_today", rows)
@@ -808,12 +823,18 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, shared_metrics, 
         return txt_file, duration, rows, None
     except Exception as e:
         return txt_file, 0.0, 0, safe_str(e)
+    finally:
+        try:
+            if os.path.exists(lock_path):
+                os.remove(lock_path)
+        except Exception:
+            pass
 
 
 from core.logger import initialize_logging
 
 
-def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None):
+def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None, gpu_flag=None):
     initialize_logging(log_q)
     try:
         init_shared_metrics(shared_metrics)
@@ -843,8 +864,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     durations = []  # track per-file processing times
     # Allow at most one worker per assigned GPU
     selected_gpus = ALTCOIN_GPUS_INDEX or get_altcoin_gpu_ids()
-    gpu_workers = len(selected_gpus) if selected_gpus else 1
-    max_workers = gpu_workers
+    base_workers = len(selected_gpus) if selected_gpus else 1
+    max_workers = base_workers
     log_message(f"[GPU] Using {max_workers} worker(s) for altcoin derive", "DEBUG")
 
     def graceful_shutdown(sig, frame):
@@ -891,11 +912,13 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                         }
                     )
 
+                effective_gpus = selected_gpus if (gpu_flag is None or gpu_flag.value) else []
+                max_workers = len(effective_gpus) if effective_gpus else 1
                 while all_txt and len(futures) < max_workers:
                     txt = all_txt.pop(0)
                     assigned_gpu = None
-                    if selected_gpus:
-                        assigned_gpu = selected_gpus[len(futures) % len(selected_gpus)]
+                    if effective_gpus:
+                        assigned_gpu = effective_gpus[len(futures) % len(effective_gpus)]
                     log_message(
                         f"[QUEUE] Submitting {txt} to GPU {assigned_gpu if assigned_gpu is not None else 'CPU'}",
                         "DEBUG",
@@ -951,7 +974,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
         pass
 
 
-def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None):
+def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None, gpu_flag=None):
     """
     Starts a subprocess that monitors VANITY_OUTPUT_DIR for .txt files and converts them to multi-coin CSVs.
     Gracefully shuts down on Ctrl+C or when shutdown_event is triggered.
@@ -959,7 +982,7 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
     """
     process = multiprocessing.Process(
         target=convert_txt_to_csv_loop,
-        args=(shared_shutdown_event, shared_metrics, pause_event, log_q),
+        args=(shared_shutdown_event, shared_metrics, pause_event, log_q, gpu_flag),
         name="AltcoinConverter",
     )
     # This process launches a ``ProcessPoolExecutor`` for parallel conversions
@@ -982,7 +1005,7 @@ if __name__ == "__main__":
 
     start_listener()
     try:
-        start_altcoin_conversion_process(shared_event, None, shared_event, log_queue)
+        start_altcoin_conversion_process(shared_event, None, shared_event, log_queue, None)
         while True:
             time.sleep(10)
     except KeyboardInterrupt:
