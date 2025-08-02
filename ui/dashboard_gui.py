@@ -159,7 +159,7 @@ class DashboardGUI:
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
                 elif key in ("gpu_stats", "gpu_assignments", "status", "csv_checker", "alerts_sent_today"):
-                    txt = tk.Text(frame, height=8, width=45, wrap="none", font=FONT)
+                    txt = tk.Text(frame, height=1, width=45, wrap="none", font=FONT)
                     txt.grid(row=i, column=1, sticky="nsew", padx=2, pady=2)
                     txt.configure(state="disabled")
                     self.metrics[key] = txt
@@ -323,9 +323,9 @@ class DashboardGUI:
         btns["Stop"] = ttk.Button(sub_frame, text="Stop", width=8,
                                   command=lambda: set_state("stopped"))
         btns["Pause"] = ttk.Button(sub_frame, text="Pause", width=8,
-                                   command=lambda m=mapped: self.handle_pause_resume(m))
+                                   command=lambda m=mapped, lbl=label: self.handle_pause_resume(m, lbl))
         btns["Resume"] = ttk.Button(sub_frame, text="Resume", width=8,
-                                    command=lambda m=mapped: self.handle_pause_resume(m))
+                                    command=lambda m=mapped, lbl=label: self.handle_pause_resume(m, lbl))
 
         btns["Start"].grid(row=0, column=0)
         btns["Stop"].grid(row=0, column=1)
@@ -373,26 +373,27 @@ class DashboardGUI:
         except Exception as e:
             print(f"[GUI] Failed to load settings: {e}", flush=True)
 
-    def handle_pause_resume(self, module_name):
-        from core.dashboard import module_pause_events, set_thread_health
+    def handle_pause_resume(self, module_name, display_label=None):
+        from core.dashboard import module_pause_events
         ev = module_pause_events.get(module_name)
         if not ev:
             print(f"[GUI] ⚠️ No pause event for {module_name}", flush=True)
             return
+        label = display_label or module_name.capitalize()
         if ev.is_set():
             print(f"[GUI] ▶️ Resuming module: {module_name}", flush=True)
             ev.clear()
-            self.module_states[module_name.capitalize()] = "running"
+            self.module_states[label] = "running"
             set_metric(f"status.{module_name}", "Running")
         else:
             print(f"[GUI] ⏸️ Pausing module: {module_name}", flush=True)
             ev.set()
-            self.module_states[module_name.capitalize()] = "paused"
+            self.module_states[label] = "paused"
             set_metric(f"status.{module_name}", "Paused")
-        updater = self.module_buttons.get(module_name.capitalize())
+        updater = self.module_buttons.get(label)
         if updater:
             updater()
-        if module_name == "vanity":
+        if module_name == "keygen":
             set_metric("global_run_state", "paused" if ev.is_set() else "running")
 
     def _flash_widget(self, widget, color="#228B22", duration=500):
@@ -418,18 +419,17 @@ class DashboardGUI:
         """Synchronize button states with current metrics on startup."""
         try:
             stats = get_current_metrics()
-            status_dict = stats.get("thread_health_flags")
+            status_dict = stats.get("status", {})
             if not isinstance(status_dict, dict):
-                status_dict = stats.get("status", {})
-                if not isinstance(status_dict, dict):
-                    status_dict = {}
+                status_dict = {}
             key_map = {"vanity": "keygen"}
             for label, updater in self.module_buttons.items():
                 metric_key = key_map.get(label.lower(), label.lower())
-                if label.lower() == "vanity" and stats.get("global_run_state") == "paused":
-                    state = "paused"
+                state_str = str(status_dict.get(metric_key, "stopped")).lower()
+                if state_str not in {"running", "paused"}:
+                    state = "stopped"
                 else:
-                    state = "running" if status_dict.get(metric_key, False) else "stopped"
+                    state = state_str
                 self.module_states[label] = state
                 updater()
         except Exception:
@@ -445,18 +445,17 @@ class DashboardGUI:
                 if var.get() != live:
                     var.set(live)
             # Update module button states based on metrics
-            status_dict = stats.get("thread_health_flags")
+            status_dict = stats.get("status", {})
             if not isinstance(status_dict, dict):
-                status_dict = stats.get("status", {})
-                if not isinstance(status_dict, dict):
-                    status_dict = {}
+                status_dict = {}
             key_map = {"vanity": "keygen"}
             for label, updater in self.module_buttons.items():
                 metric_key = key_map.get(label.lower(), label.lower())
-                if label.lower() == "vanity" and stats.get("global_run_state") == "paused":
-                    state = "paused"
+                state_str = str(status_dict.get(metric_key, "stopped")).lower()
+                if state_str not in {"running", "paused"}:
+                    state = "stopped"
                 else:
-                    state = "running" if status_dict.get(metric_key, False) else "stopped"
+                    state = state_str
                 if self.module_states.get(label) != state:
                     self.module_states[label] = state
                     updater()
@@ -500,10 +499,11 @@ class DashboardGUI:
                             "checkpoint": "Checkpoint",
                             "metrics": "Metrics",
                         }
-                        for mod, running in value.items():
+                        icon_map = {"running": "✅", "stopped": "❌", "paused": "⏸"}
+                        for mod, state in value.items():
                             title = name_map.get(mod, mod.title())
-                            icon = "✅" if running else "❌"
-                            state = "Running" if running else "Stopped"
+                            s = str(state).lower()
+                            icon = icon_map.get(s, "")
                             lines.append(f"{title}: {state} {icon}")
                     elif key == "gpu_assignments":
                         name_map = {
@@ -547,6 +547,12 @@ class DashboardGUI:
                 widget.delete("1.0", "end")
                 widget.insert("end", "\n".join(lines) or "N/A")
                 widget.config(state="disabled")
+                line_count = max(1, len(lines))
+                try:
+                    if int(widget.cget("height")) != line_count:
+                        widget.config(height=line_count)
+                except Exception:
+                    pass
             else:
                 if key in (
                     "addresses_generated_today",
