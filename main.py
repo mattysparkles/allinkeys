@@ -375,10 +375,11 @@ def run_allinkeys(args):
         'csv_check': dashboard_core.manager.Event(),
         'csv_recheck': dashboard_core.manager.Event(),
     }
-    from core.dashboard import register_control_events
+    from core.dashboard import register_control_events, get_pause_event
     register_control_events(shutdown_event, None)  # global events
     for name, ev in pause_events.items():
         register_control_events(shutdown_events.get(name), ev, module=name)
+        pause_events[name] = get_pause_event(name)
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)

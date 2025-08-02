@@ -40,6 +40,42 @@ pause_event = None
 module_pause_events = {}
 module_shutdown_events = {}
 
+
+class LoggedEvent:
+    """Wrapper around multiprocessing events that logs unexpected changes.
+
+    The GUI is the only component allowed to modify pause events. If any other
+    module calls ``set()`` or ``clear()``, a warning is emitted so inadvertent
+    state changes can be detected quickly.
+    """
+
+    def __init__(self, name, ev):
+        self._ev = ev
+        self.name = name
+
+    def _called_from_gui(self):
+        import inspect
+        for frame in inspect.stack():
+            if frame.filename.endswith("dashboard_gui.py"):
+                return True
+        return False
+
+    def set(self):
+        if not self._called_from_gui():
+            log_message(f"⚠️ Pause flag '{self.name}' modified outside GUI", "WARN")
+        self._ev.set()
+
+    def clear(self):
+        if not self._called_from_gui():
+            log_message(f"⚠️ Pause flag '{self.name}' modified outside GUI", "WARN")
+        self._ev.clear()
+
+    def is_set(self):
+        return self._ev.is_set()
+
+    def wait(self, timeout=None):
+        return self._ev.wait(timeout)
+
 # Alert channels mirrored from core.alerts to avoid circular import
 ALERT_CHANNELS = [
     "email",
@@ -79,6 +115,8 @@ def register_control_events(shutdown, pause, module=None):
     global shutdown_event, pause_event
     if module:
         module_shutdown_events[module] = shutdown
+        if pause is not None and not isinstance(pause, LoggedEvent):
+            pause = LoggedEvent(module, pause)
         module_pause_events[module] = pause
     else:
         shutdown_event = shutdown

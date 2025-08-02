@@ -203,7 +203,7 @@ def alert_match(match_data, test_mode=False):
             server.login(SMTP_USERNAME, SMTP_PASSWORD)
             server.send_message(msg)
             server.quit()
-            log_message("📧 Email alert sent.", "INFO")
+            log_message("[ALERT] ✉️ Email sent", "INFO")
             increment_metric("alerts_sent_today.email")
             increment_metric("alerts_sent_lifetime.email")
         except Exception as e:
@@ -215,7 +215,7 @@ def alert_match(match_data, test_mode=False):
             telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
             resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
             if resp.ok and resp.json().get("ok"):
-                log_message("📨 Telegram alert sent.", "INFO")
+                log_message("[ALERT] 📟 Telegram sent", "INFO")
                 increment_metric("alerts_sent_today.telegram")
                 increment_metric("alerts_sent_lifetime.telegram")
             else:
