@@ -39,7 +39,9 @@ VANITYSEARCH_GPU_INDEX = [0]  # Default to GPU 0; override at runtime
 USE_CPU_FALLBACK = True
 
 # ===================== 🧠 ALTCOIN DERIVATION =======================
-ALTCOIN_GPUS_INDEX = [1]  # Index(es) for altcoin_derive.py
+# Default to GPU 0 so altcoin_derive runs on the first available device
+# without manual configuration.
+ALTCOIN_GPUS_INDEX = [0]  # Index(es) for altcoin_derive.py
 ENABLE_ALTCOIN_DERIVATION = True
 ENABLE_SEED_VERIFICATION = True
 #ALTCOIN_LIST 

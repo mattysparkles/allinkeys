@@ -228,6 +228,16 @@ def get_gpu_context_for_altcoin():
             if not selected:
                 raise RuntimeError("❌ No GPU assigned for altcoin derivation.")
 
+    gpu_list = list_gpus()
+    available_ids = {g["id"] for g in gpu_list}
+    if selected and selected[0] not in available_ids:
+        # Provided index is not present; warn and use the first available GPU instead.
+        log_message(
+            f"⚠️ GPU index {selected[0]} not found; defaulting to GPU 0",
+            "WARNING",
+        )
+        selected = [next(iter(available_ids), 0)]
+
     try:
         platforms = cl.get_platforms()
         platform_names = [p.name for p in platforms]
@@ -1015,6 +1025,18 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     result_q = multiprocessing.Queue()
 
     selected_gpus = ALTCOIN_GPUS_INDEX or get_altcoin_gpu_ids()
+    gpu_list = list_gpus()
+    available_ids = {g["id"] for g in gpu_list}
+    # Filter out GPU indices that are not actually present on this system.
+    if selected_gpus:
+        invalid = [gid for gid in selected_gpus if gid not in available_ids]
+        if invalid:
+            log_message(
+                f"⚠️ Invalid GPU index(es) {invalid} specified for altcoin derive; defaulting to GPU 0",
+                "WARNING",
+            )
+            selected_gpus = [next(iter(available_ids), None)]
+    # If no explicit GPUs are defined or none were valid, fall back to CPU.
     gpu_ids_all = selected_gpus if selected_gpus else [None]
     processes = {gid: None for gid in gpu_ids_all}
     gpu_queues = {gid: [] for gid in gpu_ids_all}
