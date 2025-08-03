@@ -77,7 +77,8 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
         )
         vanity_flag.value = 0
         altcoin_flag.value = 0
-        set_metric({"vanity_gpu_on": False, "altcoin_gpu_on": False})
+        set_metric("vanity_gpu_on", False)
+        set_metric("altcoin_gpu_on", False)
 
     strategy = GPU_STRATEGY
     set_metric("gpu_strategy", strategy)
@@ -93,13 +94,9 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                 vanity_flag.value = 1
                 altcoin_flag.value = 0
                 assignment_flag.value = 0
-                set_metric(
-                    {
-                        "vanity_gpu_on": True,
-                        "altcoin_gpu_on": False,
-                        "gpu_assignment": "vanity",
-                    }
-                )
+                set_metric("vanity_gpu_on", True)
+                set_metric("altcoin_gpu_on", False)
+                set_metric("gpu_assignment", "vanity")
             time.sleep(2)
             continue
 
@@ -108,13 +105,9 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                 vanity_flag.value = 0
                 altcoin_flag.value = 1
                 assignment_flag.value = 1
-                set_metric(
-                    {
-                        "vanity_gpu_on": False,
-                        "altcoin_gpu_on": True,
-                        "gpu_assignment": "altcoin",
-                    }
-                )
+                set_metric("vanity_gpu_on", False)
+                set_metric("altcoin_gpu_on", True)
+                set_metric("gpu_assignment", "altcoin")
             time.sleep(2)
             continue
 
@@ -132,13 +125,9 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                     f"[GPU Scheduler] 🚦 Backlog exceeded {MAX_BACKLOG_THRESHOLD} — pausing vanity GPU, prioritizing backlog processing...",
                     "INFO",
                 )
-                set_metric(
-                    {
-                        "vanity_gpu_on": False,
-                        "altcoin_gpu_on": True,
-                        "gpu_assignment": "altcoin",
-                    }
-                )
+                set_metric("vanity_gpu_on", False)
+                set_metric("altcoin_gpu_on", True)
+                set_metric("gpu_assignment", "altcoin")
         elif backlog_size <= MIN_BACKLOG_THRESHOLD:
             if not vanity_flag.value:
                 vanity_flag.value = 1
@@ -148,13 +137,9 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                     "[GPU Scheduler] ✅ Backlog reduced — resuming vanity GPU usage...",
                     "INFO",
                 )
-                set_metric(
-                    {
-                        "vanity_gpu_on": True,
-                        "altcoin_gpu_on": True,
-                        "gpu_assignment": "vanity",
-                    }
-                )
+                set_metric("vanity_gpu_on", True)
+                set_metric("altcoin_gpu_on", True)
+                set_metric("gpu_assignment", "vanity")
         time.sleep(2)
 
 
