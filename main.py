@@ -1,5 +1,12 @@
 # main.py
 
+if __name__ == "__main__":
+    import multiprocessing
+    try:
+        multiprocessing.set_start_method("spawn")
+    except RuntimeError:
+        pass  # Already set
+
 import os
 import io
 import time
@@ -9,7 +16,7 @@ import argparse
 import multiprocessing
 import threading
 from datetime import datetime, timedelta
-from multiprocessing import Process, set_start_method
+from multiprocessing import Process
 import psutil
 
 # Wrap stdout once with UTF-8 encoding if not already wrapped
@@ -487,7 +494,6 @@ def run_allinkeys(args):
 
 
 if __name__ == "__main__":
-    set_start_method("spawn")
 
     if not os.path.exists(VANITYSEARCH_PATH):
         raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")
