@@ -1029,7 +1029,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     durations = []
     result_q = multiprocessing.Queue()
 
-    selected_gpus = ALTCOIN_GPUS_INDEX or get_altcoin_gpu_ids()
+    # Prefer runtime GPU assignments, falling back to static config only if none
+    selected_gpus = get_altcoin_gpu_ids() or ALTCOIN_GPUS_INDEX
     gpu_list = list_gpus()
     available_ids = [g["id"] for g in gpu_list]
 
@@ -1050,7 +1051,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     gpu_queues = {gid: [] for gid in gpu_ids_all}
 
     log_message(
-        f"[GPU] Using {len(gpu_ids_all)} worker(s) for altcoin derive",
+        f"[GPU] Using {len(gpu_ids_all)} worker(s) for altcoin derive: {gpu_ids_all}",
         "DEBUG",
     )
 
