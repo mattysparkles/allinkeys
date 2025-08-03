@@ -20,7 +20,7 @@ from config.settings import (
     VANITY_OUTPUT_DIR,
 )
 from core.logger import log_message
-from core.dashboard import set_metric
+from core.dashboard import set_metric, init_shared_metrics
 
 
 # Alias VanitySearch output directory as the input backlog for altcoin derive
@@ -70,6 +70,9 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
     shutdown_event : multiprocessing.Event
         Optional event to stop the loop.
     """
+    # Ensure dashboard helpers have access to the shared metrics dict
+    init_shared_metrics(shared_metrics)
+
     vendor, name = _detect_gpu_vendor()
     if name:
         log_message(
