@@ -140,7 +140,11 @@ def open_new_csv_writer(index, base_name=None):
         return None, None, final_path, None
 
     partial_path = final_path.replace(".csv", ".partial.csv")
-    f = open(partial_path, "w", newline="", encoding="utf-8", buffering=1)
+    try:
+        f = open(partial_path, "w", newline="", encoding="utf-8", buffering=1)
+    except Exception as e:
+        log_message(f"❌ Failed to open {partial_path}: {safe_str(e)}", "ERROR", exc_info=True)
+        return None, None, final_path, None
     writer = csv.DictWriter(
         f,
         fieldnames=[
@@ -177,7 +181,7 @@ def finalize_csv(partial_path, final_path):
     try:
         os.replace(partial_path, final_path)
     except OSError as e:
-        log_message(f"❌ Failed to finalize {partial_path} → {final_path}: {e}", "ERROR")
+        log_message(f"❌ Failed to finalize {partial_path} → {final_path}: {e}", "ERROR", exc_info=True)
         return False
     return True
 
@@ -335,7 +339,13 @@ def load_kernel_source(device):
         f"[Altcoin Derive] Using kernel {kernel} for device {device.name}",
         "DEBUG",
     )
-    return pathlib.Path(__file__).with_name(kernel).read_text()
+    try:
+        # Read the OpenCL kernel from disk. Any failure here means the worker
+        # cannot proceed, so log the error and re-raise to surface it.
+        return pathlib.Path(__file__).with_name(kernel).read_text()
+    except Exception as e:
+        log_message(f"❌ Failed to load kernel {kernel}: {safe_str(e)}", "ERROR", exc_info=True)
+        raise
 
 
 def derive_addresses_gpu(hex_keys, context=None):
@@ -370,7 +380,7 @@ def derive_addresses_gpu(hex_keys, context=None):
                 log_message(f"Kernel build log ({dev.name}): {log}", "ERROR")
             except Exception:
                 pass
-        log_message("❌ OpenCL build failed", "ERROR")
+        log_message("❌ OpenCL build failed", "ERROR", exc_info=True)
         raise RuntimeError(f"OpenCL kernel build failed: {build_err}")
 
     kernel_hash160 = cl.Kernel(program, "hash160")
@@ -858,7 +868,7 @@ def convert_txt_to_csv(
             return rows_written
 
     except Exception as e:
-        log_message(f"❌ Fatal error in convert_txt_to_csv: {safe_str(e)}", "ERROR")
+        log_message(f"❌ Fatal error in convert_txt_to_csv: {safe_str(e)}", "ERROR", exc_info=True)
         return 0
 
 
@@ -878,9 +888,14 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q
         full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
         lock_path = full_path + ".lock"
         if os.path.exists(lock_path):
-            result_q.put((txt_file, 0.0, 0, "locked"))
+            result_q.put((txt_file, 0.0, 0, "locked", gpu_id))
             return
-        open(lock_path, "w").close()
+        try:
+            open(lock_path, "w").close()
+        except Exception as e:
+            log_message(f"❌ Could not create lock for {txt_file}: {safe_str(e)}", "ERROR", exc_info=True)
+            result_q.put((txt_file, 0.0, 0, "lock-fail", gpu_id))
+            return
         batch_id = None
         context = None
         device_name = "CPU"
@@ -929,6 +944,7 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q
         # Include gpu_id so the parent can manage per-GPU queues safely
         result_q.put((txt_file, duration, rows, None, gpu_id))
     except Exception as e:
+        log_message(f"❌ Worker failed for {txt_file}: {safe_str(e)}", "ERROR", exc_info=True)
         result_q.put((txt_file, 0.0, 0, safe_str(e), gpu_id))
     finally:
         try:
@@ -993,10 +1009,18 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
 
     from core.dashboard import get_pause_event
 
+    pause_logged = False
+
     while not safe_event_is_set(shared_shutdown_event):
         if safe_event_is_set(get_pause_event("altcoin")):
+            if not pause_logged:
+                log_message("⏸️ Altcoin derive paused. Waiting to resume...", "INFO")
+                pause_logged = True
             time.sleep(1)
             continue
+        elif pause_logged:
+            log_message("▶️ Altcoin derive resumed.", "INFO")
+            pause_logged = False
         try:
             all_txt = [
                 f
@@ -1112,7 +1136,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
             if not any(processes.values()) and not all_txt:
                 time.sleep(3)
         except Exception as e:
-            log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
+            log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR", exc_info=True)
 
     log_message("✅ Altcoin derive loop exited cleanly.", "INFO")
     set_metric("status.altcoin", "Stopped")
