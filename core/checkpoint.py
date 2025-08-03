@@ -31,17 +31,20 @@ def save_keygen_checkpoint(state: dict):
         checkpoint_path = os.path.join(CHECKPOINT_HISTORY_DIR, checkpoint_file)
         logger.debug(f"Saving checkpoint snapshot to {checkpoint_path}")
 
-        # Add UTC timestamp to saved object
+        # Add UTC timestamp to saved object so historical snapshots record when
+        # they were taken.
         state["timestamp"] = datetime.utcnow().isoformat() + "Z"
 
-        # Save versioned backup
+        # Save versioned backup.  Each snapshot acts as a rotation point so a
+        # user can roll back to an earlier state if needed.
         with open(checkpoint_path, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=4)
+        logger.info(f"Checkpoint snapshot written to {checkpoint_path}")
 
-        # Prune old snapshots
+        # Prune old snapshots to keep disk usage bounded.
         _prune_old_checkpoints()
 
-        # Overwrite main checkpoint file
+        # Overwrite main checkpoint file used for automatic resume.
         with open(CHECKPOINT_PATH, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=4)
         logger.info(f"Checkpoint saved → {checkpoint_file}")
@@ -52,6 +55,8 @@ def save_keygen_checkpoint(state: dict):
 
 def load_keygen_checkpoint():
     """Return the latest saved keygen state if present."""
+    # When a checkpoint file exists, load it so the key generation process can
+    # resume from the last recorded position after a restart or crash.
     if not CHECKPOINT_ENABLED:
         logger.debug("Checkpoint load skipped – feature disabled")
         return {}
@@ -63,7 +68,9 @@ def load_keygen_checkpoint():
                 data = json.load(f)
             logger.info("Checkpoint loaded successfully")
             return data
-        logger.debug("No checkpoint file found; starting fresh")
+        # Warn when no checkpoint exists so users know a new session is
+        # beginning from scratch.
+        logger.warning("No checkpoint file found; starting fresh")
         return {}
 
     except Exception:
@@ -78,6 +85,8 @@ def _prune_old_checkpoints():
             [f for f in os.listdir(CHECKPOINT_HISTORY_DIR) if f.startswith("checkpoint_")],
             reverse=True,
         )
+        # Iterate over any snapshots beyond the retention window and remove them
+        # to prevent unbounded disk growth.
         for f in all_files[MAX_CHECKPOINT_HISTORY:]:
             try:
                 os.remove(os.path.join(CHECKPOINT_HISTORY_DIR, f))
@@ -117,5 +126,6 @@ def save_csv_checkpoint(batch_id: int, csv_path: str):
         logger.debug(f"Recording CSV checkpoint {batch_id} → {csv_path}")
         with open(checkpoint_log, "a", encoding="utf-8") as f:
             f.write(f"csv:{batch_id}:{csv_path}\n")
+        logger.info(f"CSV checkpoint recorded for batch {batch_id}")
     except Exception:
         logger.exception(f"Failed to save CSV checkpoint for batch {batch_id}")

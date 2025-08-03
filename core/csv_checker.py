@@ -40,15 +40,17 @@ def load_csv_state():
     """Load CSV checkpoint state to resume partially processed files."""
     today = datetime.utcnow().strftime("%Y-%m-%d")
     if not os.path.exists(CSV_CHECKPOINT_STATE):
+        # Warn so users know a new scan will not resume from previous progress
+        logger.warning(f"CSV checkpoint state missing at {CSV_CHECKPOINT_STATE}; starting fresh")
         return {"date": today, "files": {}}
     try:
         with open(CSV_CHECKPOINT_STATE, "r", encoding="utf-8") as f:
             data = json.load(f)
+        logger.info(f"Loaded CSV state from {CSV_CHECKPOINT_STATE}")
         if data.get("date") != today:
             return {"date": today, "files": {}}
         if "files" not in data:
             data["files"] = {}
-        logger.debug(f"Loaded CSV state from {CSV_CHECKPOINT_STATE}")
         return data
     except Exception:
         logger.exception("Failed to load CSV state")
@@ -60,7 +62,7 @@ def save_csv_state(state):
     try:
         with open(CSV_CHECKPOINT_STATE, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
-        logger.debug(f"Saved CSV state to {CSV_CHECKPOINT_STATE}")
+        logger.info(f"Saved CSV state to {CSV_CHECKPOINT_STATE}")
     except Exception:
         logger.exception("Failed to save CSV state")
 
@@ -73,9 +75,14 @@ def normalize_address(addr: str) -> str:
     """
     if not addr:
         return ""
+    original = addr
     addr = addr.strip()
     if addr.lower().startswith("bitcoincash:"):
-        addr = addr.split(":", 1)[1]
+        normalized = addr.split(":", 1)[1]
+        logger.warning(f"Normalized BCH address: {original} → {normalized}")
+        addr = normalized
+    elif original != addr:
+        logger.warning(f"Trimmed address: '{original}' → '{addr}'")
     return addr
 
 def update_csv_eta():
@@ -161,9 +168,12 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
         logger.info(f"🔎 Resuming {filename} from row {start_row}...")
     else:
         logger.info(f"🔎 Checking {filename}...")
+    if safe_mode:
+        logger.warning("CSV checker running in safe mode – parser is more defensive and slower")
 
     try:
         with open(csv_file, newline="", encoding="utf-8", errors="replace") as f:
+            logger.info(f"Opened {filename} for reading")
             reader = csv.DictReader(f)
             headers = reader.fieldnames
 
@@ -172,6 +182,9 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                 return []
 
             known = {c for cols in coin_columns.values() for c in cols}
+            # These metadata fields are optional and may not be present in
+            # every CSV. They are useful for tracing matches but are not
+            # required for address comparisons.
             safe_metadata_columns = {
                 'original_seed', 'hex_key', 'private_key',
                 'compressed_address', 'uncompressed_address',
@@ -204,7 +217,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                         if pause_event.is_set():
                             continue
                     rows_scanned = row_num
-                    increment_metric("csv_checker.rows_checked", 1)
+                    increment_metric("csv_checker.rows_checked", 1)  # progress metric for dashboard
                     set_metric("csv_checker.rows_checked", rows_scanned)
                     if state and row_num % 1000 == 0:
                         # [FIX PHASE 2] persist progress periodically for crash resume
@@ -222,11 +235,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                 raw = row.get(col)
                                 addr = raw.strip() if raw else ""
                                 normalized = normalize_address(addr)
-                                # Normalise addresses so BCH prefixes or whitespace don't affect matching
-                                if normalized != addr and LOG_LEVEL == "DEBUG":
-                                    logger.debug(
-                                        f"[Checker] Normalized BCH address: {addr} → {normalized}"
-                                    )
+                                # Addresses are normalized to ensure prefix or
+                                # whitespace differences do not prevent a match
                                 in_funded = normalized in address_sets.get(coin, set())
                                 logger.debug(
                                     f"[Checker] {coin.upper()} column '{col}' -> '{normalized}' : {'MATCH' if in_funded else 'miss'}"
@@ -306,10 +316,13 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
 
         avg_time = round(sum(CHECK_TIME_HISTORY) / len(CHECK_TIME_HISTORY), 2)
 
+        # Record that another CSV file has been processed both for the current
+        # day and for lifetime statistics.
         increment_metric("csv_checked_today", 1)
         increment_metric("csv_checked_lifetime", 1)
         update_dashboard_stat("csv_checked_today", get_metric("csv_checked_today"))
         update_dashboard_stat("csv_checked_lifetime", get_metric("csv_checked_lifetime"))
+        logger.info(f"CSV files checked today: {get_metric('csv_checked_today')}")
         if recheck:
             increment_metric("csv_rechecked_today", 1)
             increment_metric("csv_rechecked_lifetime", 1)
@@ -319,6 +332,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
         })
         for coin in coin_columns:
             if address_sets.get(coin):
+                # Update per-coin address counters to track scanning volume
                 increment_metric(f"addresses_checked_today.{coin}", rows_scanned)
                 increment_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
         update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
@@ -360,10 +374,10 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", True)
-        print("[debug] Shared metrics initialized for", __name__, flush=True)
         logger.debug("🟢 CSV day-one checker started")
+        logger.debug(f"Shared metrics initialized for {__name__}")
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
+        logger.exception(f"init_shared_metrics failed in {__name__}: {e}")
 
     address_sets = {}
     state = load_csv_state()
@@ -413,7 +427,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", False)
     except Exception:
-        pass
+        logger.warning("Failed to update csv_check thread health", exc_info=True)
 
 
 def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False, log_q=None):
@@ -428,10 +442,10 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", True)
-        print("[debug] Shared metrics initialized for", __name__, flush=True)
         logger.debug("🟢 CSV recheck checker started")
+        logger.debug(f"Shared metrics initialized for {__name__}")
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
+        logger.exception(f"init_shared_metrics failed in {__name__}: {e}")
 
     address_sets = {}
     state = load_csv_state()
@@ -481,7 +495,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", False)
     except Exception:
-        pass
+        logger.warning("Failed to update csv_recheck thread health", exc_info=True)
 
 def inject_test_match(test_address="1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY"):
     test_csv = os.path.join(CSV_DIR, "test_match.csv")
