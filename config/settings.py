@@ -197,7 +197,6 @@ SHOW_DISK_FREE = True
 SHOW_BUTTONS_START_STOP_PAUSE_RESUME = True  # Shows main control buttons for the dashboard
 SHOW_SAVE_DIRECTORIES = True
 SHOW_UPTIME = True
-SHOW_MATCHES_TODAY = True
 SHOW_MATCHES_LIFETIME = True
 SHOW_KEYS_GENERATED_TODAY = True
 SHOW_KEYS_GENERATED_LIFETIME = True
@@ -429,7 +428,6 @@ STATS_TO_DISPLAY = {
     "uptime": SHOW_UPTIME,
     "csv_checked_today": SHOW_NEW_CSV_CHECKED_TODAY_TOTAL,
     "csv_rechecked_today": SHOW_CSV_RECHECKED_TOTAL_TODAY,
-    "matches_found_today": True,
     "matches_found_lifetime": SHOW_MATCHES_LIFETIME,
     "keys_generated_today": SHOW_KEYS_GENERATED_TODAY,
     "keys_generated_lifetime": SHOW_KEYS_GENERATED_LIFETIME,
@@ -478,7 +476,6 @@ METRICS_LABEL_MAP = {
     "altcoin_files_converted": "Converted CSVs",
     "derived_addresses_today": "Total Derived Addresses",
     "alerts_sent_today": "Alerts Sent",
-    "matches_found_today": "Matches Today",
     "matches_found_lifetime": "Matches Lifetime",
     "keys_generated_today": "Keys Generated Today",
     "keys_generated_lifetime": "Keys Generated Lifetime",

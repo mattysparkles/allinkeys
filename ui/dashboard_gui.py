@@ -105,7 +105,7 @@ class DashboardGUI:
         csv_stats = {
             "csv_checked_today", "csv_rechecked_today",
             "addresses_checked_today", "addresses_checked_lifetime",
-            "matches_found_today", "matches_found_lifetime",
+            "matches_found_lifetime",
             "csv_created_today", "csv_created_lifetime",
             "alerts_sent_today", "csv_checker",
         }
@@ -180,19 +180,30 @@ class DashboardGUI:
                     lbl.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = lbl
 
-            # Insert backlog progress bar below backlog metrics
+            # Insert active CSV conversion progress bars below backlog metrics
             if group == "Backlog":
                 bp_row = len(keys)
                 ttk.Label(
                     frame,
-                    text="Backlog Progress:",
+                    text="🛠️ CSV Conversions In Progress",
                     anchor="w",
                     wraplength=150,
                     justify="left",
                     font=FONT,
                 ).grid(row=bp_row, column=0, sticky="nw", padx=2, pady=2)
-                self.backlog_progress_frame = ttk.Frame(frame)
-                self.backlog_progress_frame.grid(row=bp_row, column=0, columnspan=2, sticky="nsew")
+                self.backlog_progress_canvas = tk.Canvas(frame, height=120)
+                self.backlog_progress_canvas.grid(row=bp_row + 1, column=0, columnspan=2, sticky="nsew")
+                self.backlog_scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.backlog_progress_canvas.yview)
+                self.backlog_scrollbar.grid(row=bp_row + 1, column=2, sticky="ns")
+                self.backlog_progress_canvas.configure(yscrollcommand=self.backlog_scrollbar.set)
+                self.backlog_progress_inner = ttk.Frame(self.backlog_progress_canvas)
+                self.backlog_progress_canvas.create_window((0, 0), window=self.backlog_progress_inner, anchor="nw")
+                self.backlog_progress_inner.bind(
+                    "<Configure>",
+                    lambda e: self.backlog_progress_canvas.configure(
+                        scrollregion=self.backlog_progress_canvas.bbox("all")
+                    ),
+                )
                 self.metrics["backlog_progress"] = {}
 
             row += 1
@@ -504,12 +515,19 @@ class DashboardGUI:
     def update_metrics_display(self, stats):
         for key, widget in self.metrics.items():
             if key == "backlog_progress":
-                for child in self.backlog_progress_frame.winfo_children():
+                for child in self.backlog_progress_inner.winfo_children():
                     child.destroy()
                 progress_data = stats.get("backlog_progress", {}) or {}
-                for idx, (fname, pct) in enumerate(progress_data.items()):
-                    ttk.Label(self.backlog_progress_frame, text=fname[:20]).grid(row=idx, column=0, sticky="w")
-                    bar = ttk.Progressbar(self.backlog_progress_frame, length=120, mode="determinate")
+                progress_data = {k: v for k, v in progress_data.items() if "_gpu" in k}
+                assign = stats.get("gpu_assignments", {}).get("altcoin_derive", "")
+                gpu_count = (
+                    len([g for g in assign.split(",") if g.strip()])
+                    if assign and assign != "N/A"
+                    else len(progress_data)
+                )
+                for idx, (fname, pct) in enumerate(list(progress_data.items())[:gpu_count]):
+                    ttk.Label(self.backlog_progress_inner, text=fname).grid(row=idx, column=0, sticky="w")
+                    bar = ttk.Progressbar(self.backlog_progress_inner, length=120, mode="determinate")
                     bar.grid(row=idx, column=1, padx=2)
                     try:
                         bar["value"] = float(pct)
@@ -555,7 +573,6 @@ class DashboardGUI:
                         "addresses_checked_lifetime",
                         "matches_found_lifetime",
                         "addresses_checked_today",
-                        "matches_found_today",
                         "addresses_generated_today",
                         "alerts_sent_today",
                         "alerts_sent_lifetime",
@@ -594,7 +611,6 @@ class DashboardGUI:
                 if key in (
                     "addresses_generated_today",
                     "addresses_generated_lifetime",
-                    "matches_found_today",
                     "matches_found_lifetime",
                     "addresses_checked_today",
                     "addresses_checked_lifetime",

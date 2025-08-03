@@ -949,6 +949,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
         set_metric("altcoin_files_converted", 0)
         set_metric("derived_addresses_today", 0)
         set_metric("backlog_files_completed", 0)
+        set_metric("backlog_progress", {})
         from core.dashboard import set_thread_health
 
         set_thread_health("altcoin", True)
@@ -1063,6 +1064,13 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                 while True:
                     txt_file, dur, rows, err, gid = result_q.get_nowait()
                     queued.discard(txt_file)
+                    base = os.path.splitext(txt_file)[0]
+                    if gid is not None:
+                        base = f"{base}_gpu{gid}"
+                    progress = dict(safe_get_metric("backlog_progress", {}))
+                    if base in progress:
+                        progress.pop(base, None)
+                        safe_update_dashboard_stat("backlog_progress", progress)
                     if err:
                         log_message(f"❌ Failed to convert {txt_file}: {err}", "ERROR")
                     else:
@@ -1072,9 +1080,6 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                         if rows:
                             safe_increment_metric("derived_addresses_today", rows)
                         safe_increment_metric("backlog_files_completed", 1)
-                        safe_update_dashboard_stat(
-                            f"backlog_progress.{os.path.splitext(txt_file)[0]}", 100
-                        )
                         if dur > 0:
                             rps = rows / dur
                             log_message(

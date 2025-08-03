@@ -267,10 +267,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                         if normalized not in new_matches:
                                             new_matches.add(normalized)
                                             increment_metric("matched_keys", 1)
-                                            increment_metric(f"matches_found_today.{coin}", 1)
                                             if filename != "test_alerts.csv":
                                                 increment_metric(f"matches_found_lifetime.{coin}", 1)
-                                            update_dashboard_stat("matches_found_today", get_metric("matches_found_today"))
                                             update_dashboard_stat("matches_found_lifetime", get_metric("matches_found_lifetime"))
                                         row_matches.append(addr)
                                         all_matches.append(match_payload)
@@ -312,8 +310,9 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
             "last_check_duration": f"{duration_sec:.2f}s"
         })
         for coin in coin_columns:
-            increment_metric(f"addresses_checked_today.{coin}", rows_scanned)
-            increment_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
+            if address_sets.get(coin):
+                increment_metric(f"addresses_checked_today.{coin}", rows_scanned)
+                increment_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
         update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
         update_dashboard_stat("addresses_checked_lifetime", get_metric("addresses_checked_lifetime"))
 
@@ -350,7 +349,6 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         set_metric("status.csv_check", "Running")
         set_metric("csv_checked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
-        set_metric("matches_found_today", {c: 0 for c in coin_columns})
         set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", True)
@@ -419,7 +417,6 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         set_metric("status.csv_recheck", "Running")
         set_metric("csv_rechecked_today", 0)
         set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
-        set_metric("matches_found_today", {c: 0 for c in coin_columns})
         set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", True)
