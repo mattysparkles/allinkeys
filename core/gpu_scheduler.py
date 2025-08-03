@@ -1,6 +1,7 @@
 """GPU scheduling and dynamic reassignment utilities."""
 
 import time
+import os
 import multiprocessing
 
 try:
@@ -15,12 +16,17 @@ except Exception:  # pragma: no cover
 
 from config.settings import (
     GPU_STRATEGY,
-    MAX_BACKLOG_THRESHOLD,
-    MIN_BACKLOG_THRESHOLD,
     GPU_VENDOR,
+    VANITY_OUTPUT_DIR,
 )
 from core.logger import log_message
 from core.dashboard import set_metric
+
+
+# Alias VanitySearch output directory as the input backlog for altcoin derive
+ALTCOIN_INPUT_DIR = VANITY_OUTPUT_DIR
+# Determine swing mode from the configured GPU strategy
+SWING_MODE = GPU_STRATEGY == "swing"
 
 
 def _detect_gpu_vendor():
@@ -80,66 +86,55 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
         set_metric("vanity_gpu_on", False)
         set_metric("altcoin_gpu_on", False)
 
-    strategy = GPU_STRATEGY
-    set_metric("gpu_strategy", strategy)
+    # Record the current scheduling strategy for the dashboard
+    set_metric("gpu_strategy", "swing" if SWING_MODE else "static")
 
     while shutdown_event is None or not shutdown_event.is_set():
         try:
-            strategy = shared_metrics.get("gpu_strategy", strategy)
+            swing_mode = shared_metrics.get("swing_mode", SWING_MODE)
         except Exception:
-            pass
+            swing_mode = SWING_MODE
 
-        if strategy == "vanity_priority":
-            if not vanity_flag.value or altcoin_flag.value:
-                vanity_flag.value = 1
-                altcoin_flag.value = 0
-                assignment_flag.value = 0
-                set_metric("vanity_gpu_on", True)
-                set_metric("altcoin_gpu_on", False)
-                set_metric("gpu_assignment", "vanity")
-            time.sleep(2)
-            continue
+        if swing_mode:
+            try:
+                backlog_files = [
+                    f for f in os.listdir(ALTCOIN_INPUT_DIR) if f.endswith(".txt")
+                ]
+            except Exception:
+                backlog_files = []
+            set_metric("backlog_files_queued", len(backlog_files))
 
-        if strategy == "csv_priority":
-            if vanity_flag.value or not altcoin_flag.value:
-                vanity_flag.value = 0
-                altcoin_flag.value = 1
-                assignment_flag.value = 1
-                set_metric("vanity_gpu_on", False)
-                set_metric("altcoin_gpu_on", True)
-                set_metric("gpu_assignment", "altcoin")
-            time.sleep(2)
-            continue
+            if backlog_files:
+                if vanity_flag.value or not altcoin_flag.value or assignment_flag.value != 1:
+                    vanity_flag.value = 0
+                    altcoin_flag.value = 1
+                    assignment_flag.value = 1
+                    log_message(
+                        "[GPU Scheduler] 🚦 Altcoin backlog detected — switching GPU to altcoin derive...",
+                        "INFO",
+                    )
+                    set_metric("vanity_gpu_on", False)
+                    set_metric("altcoin_gpu_on", True)
+                    set_metric("gpu_assignment", "altcoin")
+            else:
+                if not vanity_flag.value or altcoin_flag.value or assignment_flag.value != 0:
+                    vanity_flag.value = 1
+                    altcoin_flag.value = 0
+                    assignment_flag.value = 0
+                    log_message(
+                        "[GPU Scheduler] ✅ Altcoin backlog empty — resuming vanity GPU usage...",
+                        "INFO",
+                    )
+                    set_metric("vanity_gpu_on", True)
+                    set_metric("altcoin_gpu_on", False)
+                    set_metric("gpu_assignment", "vanity")
+        else:
+            if assignment_flag.value != 2:
+                assignment_flag.value = 2
+                set_metric("gpu_assignment", "split")
+                set_metric("vanity_gpu_on", bool(vanity_flag.value))
+                set_metric("altcoin_gpu_on", bool(altcoin_flag.value))
 
-        # Swing mode dynamic loop
-        try:
-            backlog_size = shared_metrics.get("backlog_files_queued", 0)
-        except Exception:
-            backlog_size = 0
-        if backlog_size > MAX_BACKLOG_THRESHOLD:
-            if vanity_flag.value:
-                vanity_flag.value = 0
-                altcoin_flag.value = 1
-                assignment_flag.value = 1
-                log_message(
-                    f"[GPU Scheduler] 🚦 Backlog exceeded {MAX_BACKLOG_THRESHOLD} — pausing vanity GPU, prioritizing backlog processing...",
-                    "INFO",
-                )
-                set_metric("vanity_gpu_on", False)
-                set_metric("altcoin_gpu_on", True)
-                set_metric("gpu_assignment", "altcoin")
-        elif backlog_size <= MIN_BACKLOG_THRESHOLD:
-            if not vanity_flag.value:
-                vanity_flag.value = 1
-                altcoin_flag.value = 1
-                assignment_flag.value = 0
-                log_message(
-                    "[GPU Scheduler] ✅ Backlog reduced — resuming vanity GPU usage...",
-                    "INFO",
-                )
-                set_metric("vanity_gpu_on", True)
-                set_metric("altcoin_gpu_on", True)
-                set_metric("gpu_assignment", "vanity")
         time.sleep(2)
 
 
