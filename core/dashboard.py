@@ -362,6 +362,8 @@ def _default_metrics():
             "backlog": "Running" if ENABLE_BACKLOG_CONVERSION else "Stopped",
             "alerts": "Running" if ENABLE_ALERTS else "Stopped",
         },
+        # Flattened status for backward compatibility with older dashboard code
+        "alerts_status": "Running" if ENABLE_ALERTS else "Stopped",
         "global_run_state": "running",
         "auto_resume_enabled": True,
         "alerts_enabled": {

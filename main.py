@@ -59,6 +59,7 @@ from core.dashboard import (
     init_dashboard_manager,
     get_current_metrics,
     get_metric,
+    set_metric,
 )
 import core.dashboard as dashboard_core
 from ui.dashboard_gui import start_dashboard
@@ -277,7 +278,28 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
         # Ensure test CSV exists even when downloads are skipped
         generate_test_csv()
 
-    if ENABLE_KEYGEN and not args.headless:
+    backlog_files = []
+    try:
+        backlog_files = [
+            f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")
+        ]
+    except Exception:
+        pass
+
+    skip_vanity = GPU_STRATEGY == "swing" and len(backlog_files) >= 100
+    if skip_vanity:
+        log_message(
+            "[Startup] Detected backlog of 100+ files; delaying VanitySearch.",
+            "INFO",
+        )
+        set_metric("status.keygen", "Stopped")
+        vanity_gpu_flag.value = 0
+        altcoin_gpu_flag.value = 1
+        assignment_flag.value = 1
+        set_metric("vanity_gpu_on", False)
+        set_metric("altcoin_gpu_on", True)
+        set_metric("gpu_assignment", "altcoin")
+    elif ENABLE_KEYGEN and not args.headless:
         try:
             p = Process(target=start_keygen_loop, args=(shared_metrics, shutdown_events.get('keygen'), pause_events.get('keygen'), vanity_gpu_flag))
             p.daemon = True
