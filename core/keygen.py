@@ -27,6 +27,7 @@ from config.settings import (
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
 from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
+from core.logger import get_logger
 
 
 # Runtime trackers
@@ -42,14 +43,8 @@ KEYGEN_STATE = {
     "last_seed": None
 }
 
-# Setup logging
-logger = logging.getLogger("KeyGen")
-logger.setLevel(logging.INFO)
-if LOGGING_ENABLED:
-    handler = logging.FileHandler("keygen.log", encoding='utf-8')
-    formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+# Setup centralized logging
+logger = get_logger("keygen")
 
 
 def keygen_progress():
@@ -111,7 +106,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     if use_gpu:
         cmd.append("-gpu")
     cmd.extend(["-o", current_output_path, "-u", VANITY_PATTERN])
-
     logger.info(
         f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'CPU'}"
     )
@@ -120,40 +114,47 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
         return False
 
-    with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=outfile,
-            stderr=subprocess.STDOUT,
-            env={**os.environ, **gpu_env}
-        )
+    try:
+        with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
+            # Launch VanitySearch as a subprocess and stream output to the file
+            proc = subprocess.Popen(
+                cmd,
+                stdout=outfile,
+                stderr=subprocess.STDOUT,
+                env={**os.environ, **gpu_env},
+            )
 
-        def monitor_process(p, path):
-            start = time.time()
-            while p.poll() is None:
-                if pause_event and pause_event.is_set():
-                    logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
-                    p.terminate()
-                    break
-                if time.time() - start >= ROTATE_INTERVAL_SECONDS:
-                    logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
-                    p.terminate()
-                    break
-                try:
-                    if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
-                        logger.info(
-                            f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {os.path.basename(path)}"
-                        )
+            def monitor_process(p, path):
+                """Monitor file size and pause requests while VanitySearch runs."""
+                start = time.time()
+                while p.poll() is None:
+                    if pause_event and pause_event.is_set():
+                        logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
                         p.terminate()
                         break
-                except FileNotFoundError:
-                    pass
-                time.sleep(1)
+                    if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                        logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
+                        p.terminate()
+                        break
+                    try:
+                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
+                            logger.info(
+                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {os.path.basename(path)}"
+                            )
+                            p.terminate()
+                            break
+                    except FileNotFoundError:
+                        # File might not exist yet; ignore and retry
+                        pass
+                    time.sleep(1)
 
-        timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
-        timer_thread.start()
-        proc.wait()
-        timer_thread.join()
+            timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
+            timer_thread.start()
+            proc.wait()
+            timer_thread.join()
+    except Exception as e:
+        logger.exception(f"Failed to execute VanitySearch: {e}")
+        return False
 
     if os.path.exists(current_output_path):
         size = os.path.getsize(current_output_path)
@@ -223,10 +224,25 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
 
         batches_completed = 0
         total_time = 0.0
+        pause_logged = False
+        pause_log_ts = 0.0
 
         while True:
             if shutdown_evt and shutdown_evt.is_set():
                 break
+
+            if pause_evt and pause_evt.is_set():
+                # Emit a heartbeat log every 5s while paused so the user knows
+                # the key generator is still alive.
+                if (not pause_logged) or (time.time() - pause_log_ts > 5):
+                    logger.info("⏸️ Keygen paused. Waiting to resume...")
+                    pause_logged = True
+                    pause_log_ts = time.time()
+                time.sleep(1)
+                continue
+            elif pause_logged:
+                logger.info("▶️ Keygen resumed.")
+                pause_logged = False
 
             # update keys/sec using a moving window of the last 5 seconds
             now = time.time()
@@ -246,6 +262,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                 if shutdown_evt and shutdown_evt.is_set():
                     break
                 if pause_evt and pause_evt.is_set():
+                    # Inner-loop pause check to halt new VanitySearch runs
                     set_metric("keys_per_sec", 0)
                     time.sleep(1)
                     continue
@@ -286,7 +303,8 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     except KeyboardInterrupt:
         logger.info("🛑 Keygen loop interrupted by user. Exiting cleanly.")
     except Exception as e:
-        logger.error(f"❌ Unexpected error: {e}")
+        # Log full stack trace for any unexpected failure
+        logger.exception("❌ Unexpected error in keygen loop")
     finally:
         set_metric("status.keygen", "Stopped")
         try:
