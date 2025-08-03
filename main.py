@@ -258,7 +258,7 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     from core.gpu_scheduler import start_scheduler
     gpu_sched, vanity_gpu_flag, altcoin_gpu_flag, assignment_flag = start_scheduler(
-        shared_metrics, shutdown_events.get('keygen'), dashboard_core.manager
+        shared_metrics, shutdown_events.get('keygen')
     )
     processes.append(gpu_sched)
     named_processes.append(("gpu_scheduler", gpu_sched))

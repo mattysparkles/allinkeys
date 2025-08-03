@@ -158,17 +158,16 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
         time.sleep(2)
 
 
-def start_scheduler(shared_metrics, shutdown_event, manager=None):
+def start_scheduler(shared_metrics, shutdown_event):
     """Helper to spawn the scheduler in its own process.
 
     Returns (process, vanity_flag, altcoin_flag, assignment_flag)
     """
-    if manager is None:
-        manager = multiprocessing.Manager()
-    vanity_flag = manager.Value("i", 1)
-    altcoin_flag = manager.Value("i", 1)
-    assignment_flag = manager.Value("i", 0)
-    proc = multiprocessing.Process(
+    ctx = multiprocessing.get_context("spawn")
+    vanity_flag = ctx.Value("i", 1)
+    altcoin_flag = ctx.Value("i", 1)
+    assignment_flag = ctx.Value("i", 0)
+    proc = ctx.Process(
         target=monitor_backlog_and_reassign,
         args=(shared_metrics, vanity_flag, altcoin_flag, assignment_flag, shutdown_event),
         name="GPUScheduler",
