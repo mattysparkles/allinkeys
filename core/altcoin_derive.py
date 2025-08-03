@@ -495,7 +495,15 @@ def derive_altcoin_addresses_from_hex(hex_key, context=None):
     return results[0] if results else {}
 
 
-def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_event=None, context=None, gpu_id=None):
+def convert_txt_to_csv(
+    input_txt_path,
+    batch_id,
+    pause_event=None,
+    shutdown_event=None,
+    context=None,
+    gpu_id=None,
+    enable_dashboard=True,
+):
     filename = os.path.basename(input_txt_path)
     base_name = os.path.splitext(filename)[0]
     if gpu_id is not None:
@@ -508,6 +516,10 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
     if existing:
         log_message(f"ℹ️ Skipping {filename} because CSV output already exists", "INFO")
         return 0
+
+    dash_update = safe_update_dashboard_stat if enable_dashboard else lambda *a, **k: None
+    metric_inc = safe_increment_metric if enable_dashboard else lambda *a, **k: None
+    metric_get = safe_get_metric if enable_dashboard else (lambda *a, **k: 0)
 
     try:
         with open(input_txt_path, "rb") as infile_raw:
@@ -583,7 +595,7 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
 
                 i += 1
                 progress = (i / total_lines) * 100 if total_lines else 100
-                safe_update_dashboard_stat(f"backlog_progress.{base_name}", round(progress, 1))
+                dash_update(f"backlog_progress.{base_name}", round(progress, 1))
                 stripped = line.strip()
                 if stripped.startswith("PubAddress:") or stripped.startswith("Pub Addr:"):
                     line_buffer = [stripped]
@@ -771,12 +783,12 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                 f.flush()
             f.close()
             finalize_csv(partial_path, path)
-            safe_update_dashboard_stat(f"backlog_progress.{base_name}", 100)
+            dash_update(f"backlog_progress.{base_name}", 100)
 
-            safe_increment_metric("csv_created_today", 1)
-            safe_increment_metric("csv_created_lifetime", 1)
-            safe_update_dashboard_stat("csv_created_today", safe_get_metric("csv_created_today"))
-            safe_update_dashboard_stat("csv_created_lifetime", safe_get_metric("csv_created_lifetime"))
+            metric_inc("csv_created_today", 1)
+            metric_inc("csv_created_lifetime", 1)
+            dash_update("csv_created_today", metric_get("csv_created_today"))
+            dash_update("csv_created_lifetime", metric_get("csv_created_lifetime"))
             log_message(f"✅ {os.path.basename(path)} written ({rows_written} rows)", "INFO")
             coin_map = {
                 "btc_U": "btc",
@@ -804,8 +816,8 @@ def convert_txt_to_csv(input_txt_path, batch_id, pause_event=None, shutdown_even
                 log_message(f"🔢 {key.upper()}: {count}", "DEBUG")
 
             for coin, count in per_coin.items():
-                safe_increment_metric(f"addresses_generated_today.{coin}", count)
-                safe_increment_metric(f"addresses_generated_lifetime.{coin}", count)
+                metric_inc(f"addresses_generated_today.{coin}", count)
+                metric_inc(f"addresses_generated_lifetime.{coin}", count)
 
             for coin, count in per_coin.items():
                 log_message(f"📈 Generated {count} {coin.upper()} addresses", "DEBUG")
@@ -865,7 +877,15 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id):
             "INFO",
         )
         start_t = time.perf_counter()
-        rows = convert_txt_to_csv(full_path, batch_id, pause_event, shutdown_event, context, gpu_id)
+        rows = convert_txt_to_csv(
+            full_path,
+            batch_id,
+            pause_event,
+            shutdown_event,
+            context,
+            gpu_id,
+            enable_dashboard=False,
+        )
         duration = time.perf_counter() - start_t
         return txt_file, duration, rows, None
     except Exception as e:
