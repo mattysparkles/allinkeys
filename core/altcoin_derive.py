@@ -80,11 +80,17 @@ def safe_event_is_set(ev):
     """Return ``ev.is_set()`` but swallow proxy-related errors."""
     if ev is None:
         return False
+    real_ev = getattr(ev, "_ev", ev)
     try:
-        return ev.is_set()
+        return real_ev.is_set()
     except (OSError, EOFError, KeyError):
         log_message("⚠️ Lost access to control event; assuming not set", "WARNING")
         return False
+
+
+def _unwrap_event(ev):
+    """Return the underlying ``multiprocessing.Event`` if wrapped."""
+    return getattr(ev, "_ev", ev)
 
 
 def safe_update_dashboard_stat(key, value=None):
@@ -826,6 +832,8 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id):
     dashboard updates are handled in the parent process to prevent proxy
     invalidation when workers exit.
     """
+    pause_event = _unwrap_event(pause_event)
+    shutdown_event = _unwrap_event(shutdown_event)
     try:
         full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
         lock_path = full_path + ".lock"
@@ -965,8 +973,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                     future = executor.submit(
                         _convert_file_worker,
                         txt,
-                        pause_event,
-                        shared_shutdown_event,
+                        _unwrap_event(pause_event),
+                        _unwrap_event(shared_shutdown_event),
                         assigned_gpu,
                     )
                     futures[future] = txt
@@ -1027,6 +1035,8 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
     Gracefully shuts down on Ctrl+C or when shutdown_event is triggered.
     Intended specifically for altcoin GPU derivation workloads.
     """
+    shared_shutdown_event = _unwrap_event(shared_shutdown_event)
+    pause_event = _unwrap_event(pause_event)
     process = multiprocessing.Process(
         target=convert_txt_to_csv_loop,
         args=(shared_shutdown_event, shared_metrics, pause_event, log_q, gpu_flag),
