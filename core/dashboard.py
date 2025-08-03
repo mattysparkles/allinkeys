@@ -225,7 +225,7 @@ TODAY_METRIC_KEYS = [
     'altcoin_files_converted',
     'alerts_sent_today',
 ]
-TODAY_METRIC_KEYS += [f'addresses_checked_today', f'addresses_generated_today', f'matches_found_today']
+TODAY_METRIC_KEYS += [f'addresses_checked_today', f'addresses_generated_today']
 
 
 def reset_daily_metrics_if_needed():
@@ -307,9 +307,6 @@ def _default_metrics():
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
         },
         "addresses_checked_lifetime": {
-            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
-        },
-        "matches_found_today": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
         },
         "matches_found_lifetime": {
@@ -521,7 +518,6 @@ def set_metric(key, value):
         "matches_found_lifetime",
         "addresses_generated_today",
         "addresses_checked_today",
-        "matches_found_today",
     }
     base = key.split(".", 1)[0] if isinstance(key, str) else key
     if base in dict_expected and not isinstance(value, dict):

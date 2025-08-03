@@ -84,7 +84,6 @@ MATCHES = MATCHES_DIR #Defined in System Path Section
 CHECKPOINT = CHECKPOINT_PATH #Defined in System Path Section
 VANITY SEARCH = VANITY_OUTPUT_DIR #Defined in System Path Section
 SHOW_UPTIME = True  # shows how long the program has been running
-SHOW_MATCHES_TODAY = True # total number of addresses that matched a funded list today, will likely be 0 most days
 BTC = True
 DOGE = True
 DASH = True
