@@ -21,7 +21,7 @@ from config.settings import (
 from utils.file_utils import find_latest_funded_file
 from core.alerts import alert_match
 from config.coin_definitions import coin_columns
-from core.logger import log_message
+from core.logger import get_logger
 from utils.pgp_utils import encrypt_with_pgp
 from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics, set_metric, get_metric
 from utils.balance_checker import fetch_live_balance
@@ -30,10 +30,14 @@ csv.field_size_limit(2**30)  # 1GB
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
 os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
 
+# Dedicated logger for this module
+logger = get_logger(__name__)
+
 CHECK_TIME_HISTORY = []
 MAX_HISTORY_SIZE = 10
 
 def load_csv_state():
+    """Load CSV checkpoint state to resume partially processed files."""
     today = datetime.utcnow().strftime("%Y-%m-%d")
     if not os.path.exists(CSV_CHECKPOINT_STATE):
         return {"date": today, "files": {}}
@@ -44,17 +48,21 @@ def load_csv_state():
             return {"date": today, "files": {}}
         if "files" not in data:
             data["files"] = {}
+        logger.debug(f"Loaded CSV state from {CSV_CHECKPOINT_STATE}")
         return data
     except Exception:
+        logger.exception("Failed to load CSV state")
         return {"date": today, "files": {}}
 
 
 def save_csv_state(state):
+    """Persist CSV checkpoint state to disk."""
     try:
         with open(CSV_CHECKPOINT_STATE, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
-    except Exception as e:
-        log_message(f"⚠️ Failed to save CSV state: {e}", "WARN")
+        logger.debug(f"Saved CSV state to {CSV_CHECKPOINT_STATE}")
+    except Exception:
+        logger.exception("Failed to save CSV state")
 
 def normalize_address(addr: str) -> str:
     """Return a normalized version of ``addr`` for matching.
@@ -71,6 +79,7 @@ def normalize_address(addr: str) -> str:
     return addr
 
 def update_csv_eta():
+    """Estimate remaining time for CSV scanning and push to dashboard."""
     try:
         all_files = [
             f for f in os.listdir(CSV_DIR)
@@ -91,8 +100,9 @@ def update_csv_eta():
         else:
             eta_str = "N/A"
         update_dashboard_stat("csv_eta", eta_str)
-    except Exception as e:
-        log_message(f"⚠️ Failed to update CSV ETA: {e}", "WARN")
+        logger.debug(f"CSV ETA updated to {eta_str} for {files_left} files")
+    except Exception:
+        logger.exception("Failed to update CSV ETA")
 
 def mark_csv_as_checked(filename, log_file):
     with open(log_file, "a") as f:
@@ -113,8 +123,8 @@ def scan_csv_for_oversized_lines(csv_path, threshold=10_000_000):
                     print(
                         f"\U0001F6A8 Line {i+1} in {csv_path} exceeds {threshold} bytes"
                     )
-    except Exception as e:
-        log_message(f"⚠️ Failed scanning {csv_path}: {e}", "WARNING")
+    except Exception:
+        logger.exception(f"Failed scanning {csv_path}")
 
 def load_funded_addresses(file_path):
     """Load funded addresses from ``file_path`` applying ``normalize_address``
@@ -143,13 +153,14 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
     if filename.endswith(".partial.csv"):
         return [], True
     if not os.path.exists(csv_file) or os.path.getsize(csv_file) == 0:
-        log_message(f"❌ {filename} is empty or missing. Skipping.", "ERROR")
+        logger.error(f"❌ {filename} is empty or missing. Skipping.")
         return [], True
 
+    logger.debug(f"Scanning {filename} | recheck={recheck} | start_row={start_row}")
     if start_row:
-        log_message(f"🔎 Resuming {filename} from row {start_row}...")
+        logger.info(f"🔎 Resuming {filename} from row {start_row}...")
     else:
-        log_message(f"🔎 Checking {filename}...")
+        logger.info(f"🔎 Checking {filename}...")
 
     try:
         with open(csv_file, newline="", encoding="utf-8", errors="replace") as f:
@@ -157,7 +168,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
             headers = reader.fieldnames
 
             if not headers:
-                log_message(f"❌ {filename} missing headers. Skipping file.", "ERROR")
+                logger.error(f"❌ {filename} missing headers. Skipping file.")
                 return []
 
             known = {c for cols in coin_columns.values() for c in cols}
@@ -171,14 +182,14 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                 if h not in known and h not in safe_metadata_columns
             ]
             if unknown:
-                log_message(f"⚠️ Unknown columns in {filename}: {unknown}", "WARN")
+                logger.warning(f"⚠️ Unknown columns in {filename}: {unknown}")
 
             for coin, columns in coin_columns.items():
                 missing = [col for col in columns if col not in headers]
                 if missing:
-                    log_message(f"⚠️ {coin.upper()} columns missing in {filename}: {missing}", "WARN")
+                    logger.warning(f"⚠️ {coin.upper()} columns missing in {filename}: {missing}")
                 else:
-                    log_message(f"🔎 {coin.upper()} columns scanned: {columns}", "DEBUG")
+                    logger.debug(f"🔎 {coin.upper()} columns scanned: {columns}")
 
             try:
                 for row_num, row in enumerate(reader, start=1):
@@ -199,8 +210,9 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                         # [FIX PHASE 2] persist progress periodically for crash resume
                         state.setdefault("files", {})[filename] = row_num
                         save_csv_state(state)
+                    # Emit a heartbeat every 10k rows so long scans show activity
                     if rows_scanned % 10000 == 0:
-                        log_message(f"[Progress] {filename}: {rows_scanned} rows scanned", "DEBUG")
+                        logger.debug(f"[Progress] {filename}: {rows_scanned} rows scanned")
                     row_matches = []
                     try:
                         for coin, columns in coin_columns.items():
@@ -210,15 +222,14 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                 raw = row.get(col)
                                 addr = raw.strip() if raw else ""
                                 normalized = normalize_address(addr)
+                                # Normalise addresses so BCH prefixes or whitespace don't affect matching
                                 if normalized != addr and LOG_LEVEL == "DEBUG":
-                                    log_message(
-                                        f"[Checker] Normalized BCH address: {addr} → {normalized}",
-                                        "DEBUG",
+                                    logger.debug(
+                                        f"[Checker] Normalized BCH address: {addr} → {normalized}"
                                     )
                                 in_funded = normalized in address_sets.get(coin, set())
-                                log_message(
-                                    f"[Checker] {coin.upper()} column '{col}' -> '{normalized}' : {'MATCH' if in_funded else 'miss'}",
-                                    "DEBUG",
+                                logger.debug(
+                                    f"[Checker] {coin.upper()} column '{col}' -> '{normalized}' : {'MATCH' if in_funded else 'miss'}"
                                 )
                                 if addr and in_funded:
                                     try:
@@ -233,13 +244,12 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                             "row_number": rows_scanned
                                         }
 
-                                        log_message(
-                                            f"[MATCH DETECTED] ✅ Match found for {coin.upper()} in row {rows_scanned} — alert triggered",
-                                            "DEBUG",
+                                        # Log the match and trigger downstream alerts
+                                        logger.debug(
+                                            f"[MATCH DETECTED] ✅ Match found for {coin.upper()} in row {rows_scanned} — alert triggered"
                                         )
-                                        log_message(
-                                            f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}",
-                                            "ALERT",
+                                        logger.error(
+                                            f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}"
                                         )
 
                                         if ENABLE_PGP:
@@ -248,7 +258,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                                 alert_match(match_payload)
                                                 alert_match({"encrypted": encrypted})
                                             except Exception as pgp_err:
-                                                log_message(f"⚠️ PGP failed for {addr}: {pgp_err}", "WARN")
+                                                logger.warning(f"⚠️ PGP failed for {addr}: {pgp_err}")
                                                 alert_match(match_payload)
                                         else:
                                             alert_match(match_payload)
@@ -257,12 +267,11 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                             bal = fetch_live_balance(addr, coin)
                                             if bal is not None:
                                                 ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-                                                log_message(
-                                                    f"🎯 Matched {coin.upper()} address {addr} – Current balance: {bal} {coin.upper()} (fetched at {ts})",
-                                                    "ALERT",
+                                                logger.error(
+                                                    f"🎯 Matched {coin.upper()} address {addr} – Current balance: {bal} {coin.upper()} (fetched at {ts})"
                                                 )
                                             else:
-                                                log_message(f"⚠️ Could not fetch balance for {addr}", "WARN")
+                                                logger.warning(f"⚠️ Could not fetch balance for {addr}")
 
                                         if normalized not in new_matches:
                                             new_matches.add(normalized)
@@ -272,23 +281,22 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                             update_dashboard_stat("matches_found_lifetime", get_metric("matches_found_lifetime"))
                                         row_matches.append(addr)
                                         all_matches.append(match_payload)
-                                        log_message("[STATUS] CSV Checker continuing without interruption", "DEBUG")
+                                        logger.debug("[STATUS] CSV Checker continuing without interruption")
                                         # Continue scanning the row for additional matches
                                     except Exception as match_err:
-                                        log_message(f"⚠️ Match processing error for {addr}: {match_err}", "WARN")
+                                        logger.exception(f"Match processing error for {addr}: {match_err}")
                                         continue
                     except Exception as row_err:
                         # [FIX PHASE 2] one bad row should not abort entire scan
-                        log_message(
-                            f"⚠️ Row skipped due to error in {csv_file}: {row_err}",
-                            "WARNING",
+                        logger.exception(
+                            f"Row skipped due to error in {csv_file}: {row_err}"
                         )
                         continue
                     if row_matches:
                         increment_metric("csv_checker.matches_found", len(row_matches))
                         set_metric("csv_checker.matches_found", get_metric("csv_checker.matches_found"))
             except csv.Error as e:
-                log_message(f"❌ CSV parsing error in {filename}: {e}", "ERROR")
+                logger.error(f"❌ CSV parsing error in {filename}: {e}")
 
         end_time = time.perf_counter()
         duration_sec = round(end_time - start_time, 2)
@@ -316,8 +324,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
         update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
         update_dashboard_stat("addresses_checked_lifetime", get_metric("addresses_checked_lifetime"))
 
-        log_message(f"✅ {'Recheck' if recheck else 'Check'} complete: {len(new_matches)} matches found", "INFO")
-        log_message(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s", "INFO")
+        logger.info(f"✅ {'Recheck' if recheck else 'Check'} complete: {len(new_matches)} matches found")
+        logger.info(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s")
 
         if state and completed and filename in state.get("files", {}):
             # [FIX PHASE 2] clear resume state only when file fully processed
@@ -328,14 +336,14 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
             dest_path = os.path.join(MATCHED_CSV_DIR, filename)
             try:
                 os.rename(csv_file, dest_path)
-                log_message(f"📂 Moved matched CSV to {dest_path}", "INFO")
+                logger.info(f"📂 Moved matched CSV to {dest_path}")
             except Exception as e:
-                log_message(f"⚠️ Failed to move {filename} to matched_csv/: {e}", "WARNING")
+                logger.warning(f"⚠️ Failed to move {filename} to matched_csv/: {e}")
 
         return all_matches, completed
 
     except Exception as e:
-        log_message(f"❌ Error reading {filename}: {str(e)}", "ERROR")
+        logger.exception(f"Error reading {filename}: {e}")
         return [], False
 
 from core.logger import initialize_logging
@@ -353,7 +361,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
-        log_message("🟢 CSV day-one checker started", "DEBUG")
+        logger.debug("🟢 CSV day-one checker started")
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 
@@ -363,10 +371,10 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
     for coin, columns in coin_columns.items():
         full_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR, unique=False)
         if full_path:
-            log_message(f"🔎 Using funded list {os.path.basename(full_path)} for {coin.upper()}.")
+            logger.info(f"🔎 Using funded list {os.path.basename(full_path)} for {coin.upper()}.")
             address_sets[coin] = load_funded_addresses(full_path)
         else:
-            log_message(f"⚠️ No funded list found for {coin.upper()} in DOWNLOADS_DIR", "WARN")
+            logger.warning(f"⚠️ No funded list found for {coin.upper()} in DOWNLOADS_DIR")
 
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
@@ -375,7 +383,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         if filename.endswith(".partial.csv"):
             final = filename.replace(".partial.csv", ".csv")
             if os.path.exists(os.path.join(CSV_DIR, final)):
-                log_message(f"ℹ️ Skipping {filename} because final CSV already exists", "INFO")
+                logger.info(f"ℹ️ Skipping {filename} because final CSV already exists")
             continue
         if get_pause_event("csv_check") and get_pause_event("csv_check").is_set():
             time.sleep(1)
@@ -421,7 +429,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", True)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
-        log_message("🟢 CSV recheck checker started", "DEBUG")
+        logger.debug("🟢 CSV recheck checker started")
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
 
@@ -430,10 +438,10 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
     for coin, columns in coin_columns.items():
         unique_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR, unique=True)
         if unique_path:
-            log_message(f"🔎 Using unique list {os.path.basename(unique_path)} for {coin.upper()}.")
+            logger.info(f"🔎 Using unique list {os.path.basename(unique_path)} for {coin.upper()}.")
             address_sets[coin] = load_funded_addresses(unique_path)
         else:
-            log_message(f"⚠️ No unique list found for {coin.upper()} in DOWNLOADS_DIR", "WARN")
+            logger.warning(f"⚠️ No unique list found for {coin.upper()} in DOWNLOADS_DIR")
 
     from core.dashboard import get_pause_event
     for filename in os.listdir(CSV_DIR):
@@ -442,7 +450,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         if filename.endswith(".partial.csv"):
             final = filename.replace(".partial.csv", ".csv")
             if os.path.exists(os.path.join(CSV_DIR, final)):
-                log_message(f"ℹ️ Skipping {filename} because final CSV already exists", "INFO")
+                logger.info(f"ℹ️ Skipping {filename} because final CSV already exists")
             continue
         if get_pause_event("csv_recheck") and get_pause_event("csv_recheck").is_set():
             time.sleep(1)

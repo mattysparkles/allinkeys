@@ -123,6 +123,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 stderr=subprocess.STDOUT,
                 env={**os.environ, **gpu_env},
             )
+            logger.debug(f"Spawned VanitySearch PID {proc.pid}")
 
             def monitor_process(p, path):
                 """Monitor file size and pause requests while VanitySearch runs."""

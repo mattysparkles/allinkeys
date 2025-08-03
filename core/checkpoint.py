@@ -6,23 +6,30 @@ from config.settings import (
     CHECKPOINT_PATH, CHECKPOINT_ENABLED, CHECKPOINT_INTERVAL_SECONDS,
     MAX_CHECKPOINT_HISTORY
 )
-from core.logger import log_message
+from core.logger import get_logger
+
+# Dedicated module logger
+logger = get_logger(__name__)
 
 CHECKPOINT_HISTORY_DIR = os.path.dirname(CHECKPOINT_PATH)
 
 
 def save_keygen_checkpoint(state: dict):
-    """
-    Save the checkpoint data to a JSON file, with a timestamped backup.
-    Includes full runtime progress: batch_id, index, seed, output_file, etc.
+    """Persist the current keygen progress to disk.
+
+    A timestamped snapshot is written to ``CHECKPOINT_HISTORY_DIR`` and the
+    latest state is stored at ``CHECKPOINT_PATH``.  This allows the key
+    generation process to resume after interruptions.
     """
     if not CHECKPOINT_ENABLED or not isinstance(state, dict):
+        logger.debug("Checkpoint save skipped – disabled or invalid state")
         return
 
     try:
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         checkpoint_file = f"checkpoint_{timestamp}.json"
         checkpoint_path = os.path.join(CHECKPOINT_HISTORY_DIR, checkpoint_file)
+        logger.debug(f"Saving checkpoint snapshot to {checkpoint_path}")
 
         # Add UTC timestamp to saved object
         state["timestamp"] = datetime.utcnow().isoformat() + "Z"
@@ -37,62 +44,55 @@ def save_keygen_checkpoint(state: dict):
         # Overwrite main checkpoint file
         with open(CHECKPOINT_PATH, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=4)
+        logger.info(f"Checkpoint saved → {checkpoint_file}")
 
-        log_message(f"💾 Checkpoint saved: {checkpoint_file}", "DEBUG")
-
-    except Exception as e:
-        log_message(f"❌ Failed to save checkpoint: {e}", "ERROR")
+    except Exception:
+        logger.exception("Failed to save checkpoint")
 
 
 def load_keygen_checkpoint():
-    """
-    Load the most recent keygen checkpoint from disk.
-    Returns dictionary with: batch_id, index_within_batch, last_seed, output_file, etc.
-    """
+    """Return the latest saved keygen state if present."""
     if not CHECKPOINT_ENABLED:
+        logger.debug("Checkpoint load skipped – feature disabled")
         return {}
 
     try:
         if os.path.exists(CHECKPOINT_PATH):
+            logger.debug(f"Loading checkpoint from {CHECKPOINT_PATH}")
             with open(CHECKPOINT_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            log_message("✅ Checkpoint loaded successfully", "INFO")
+            logger.info("Checkpoint loaded successfully")
             return data
-        else:
-            log_message("🧼 No checkpoint found, starting fresh", "DEBUG")
-            return {}
+        logger.debug("No checkpoint file found; starting fresh")
+        return {}
 
-    except Exception as e:
-        log_message(f"❌ Failed to load checkpoint: {e}", "ERROR")
+    except Exception:
+        logger.exception("Failed to load checkpoint")
         return {}
 
 
 def _prune_old_checkpoints():
-    """
-    Remove old checkpoint backup files beyond MAX_CHECKPOINT_HISTORY.
-    """
+    """Delete stale checkpoint snapshots beyond ``MAX_CHECKPOINT_HISTORY``."""
     try:
         all_files = sorted(
             [f for f in os.listdir(CHECKPOINT_HISTORY_DIR) if f.startswith("checkpoint_")],
-            reverse=True
+            reverse=True,
         )
         for f in all_files[MAX_CHECKPOINT_HISTORY:]:
             try:
                 os.remove(os.path.join(CHECKPOINT_HISTORY_DIR, f))
-                log_message(f"🧹 Pruned old checkpoint: {f}", "DEBUG")
-            except Exception as e:
-                log_message(f"❌ Failed to delete old checkpoint {f}: {e}", "ERROR")
+                logger.debug(f"Pruned old checkpoint {f}")
+            except Exception:
+                logger.exception(f"Failed to delete old checkpoint {f}")
 
-    except Exception as e:
-        log_message(f"❌ Prune failed: {e}", "ERROR")
+    except Exception:
+        logger.exception("Prune failed")
 
 
 def checkpoint_loop(state_fn=None):
-    """
-    Background thread loop to save keygen checkpoints every X seconds.
-    Accepts custom state provider function, defaults to keygen_progress().
-    """
+    """Periodically invoke ``save_keygen_checkpoint`` using ``state_fn``."""
     if not CHECKPOINT_ENABLED:
+        logger.debug("Checkpoint loop skipped – feature disabled")
         return
 
     from core.keygen import keygen_progress  # prevent circular import
@@ -102,21 +102,20 @@ def checkpoint_loop(state_fn=None):
         try:
             data = state_fn() if state_fn else keygen_progress()
             if isinstance(data, dict):
+                logger.debug("Checkpoint loop obtained state")
                 save_keygen_checkpoint(data)
             else:
-                log_message("⚠️ Checkpoint data was not a dict. Skipped save.", "WARNING")
-        except Exception as e:
-            log_message(f"❌ Checkpoint loop error: {e}", "ERROR")
+                logger.warning("Checkpoint data was not a dict; skipping save")
+        except Exception:
+            logger.exception("Checkpoint loop error")
 
 
 def save_csv_checkpoint(batch_id: int, csv_path: str):
-    """
-    Records CSV output batch checkpoint to avoid duplicate processing.
-    Logs each line to separate .log file.
-    """
+    """Append ``csv_path`` to a log tracking processed CSV batches."""
     try:
         checkpoint_log = CHECKPOINT_PATH.replace(".json", "_csv.log")
+        logger.debug(f"Recording CSV checkpoint {batch_id} → {csv_path}")
         with open(checkpoint_log, "a", encoding="utf-8") as f:
             f.write(f"csv:{batch_id}:{csv_path}\n")
-    except Exception as e:
-        log_message(f"❌ Failed to save CSV checkpoint for batch {batch_id}: {e}", "ERROR")
+    except Exception:
+        logger.exception(f"Failed to save CSV checkpoint for batch {batch_id}")
