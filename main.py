@@ -369,18 +369,24 @@ def run_allinkeys(args):
     # Initialize shared metrics manager and create events from it so they can be
     # passed safely to worker processes spawned via ``spawn``.
     shared_metrics = init_dashboard_manager()
-    shutdown_event = dashboard_core.manager.Event()
+
+    # ``multiprocessing.Manager().Event`` objects can trigger ``KeyError`` when
+    # forwarded through a ``ProcessPoolExecutor``.  Using plain
+    # ``multiprocessing.Event`` avoids proxy lookups that occasionally fail when
+    # worker processes start up or exit.  Events are created once here and then
+    # shared with child processes.
+    shutdown_event = multiprocessing.Event()
     shutdown_events = {
-        'keygen': dashboard_core.manager.Event(),
-        'altcoin': dashboard_core.manager.Event(),
-        'csv_check': dashboard_core.manager.Event(),
-        'csv_recheck': dashboard_core.manager.Event(),
+        'keygen': multiprocessing.Event(),
+        'altcoin': multiprocessing.Event(),
+        'csv_check': multiprocessing.Event(),
+        'csv_recheck': multiprocessing.Event(),
     }
     pause_events = {
-        'keygen': dashboard_core.manager.Event(),
-        'altcoin': dashboard_core.manager.Event(),
-        'csv_check': dashboard_core.manager.Event(),
-        'csv_recheck': dashboard_core.manager.Event(),
+        'keygen': multiprocessing.Event(),
+        'altcoin': multiprocessing.Event(),
+        'csv_check': multiprocessing.Event(),
+        'csv_recheck': multiprocessing.Event(),
     }
     from core.dashboard import register_control_events, get_pause_event
     register_control_events(shutdown_event, None)  # global events
