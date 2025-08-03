@@ -142,6 +142,7 @@ def open_new_csv_writer(index, base_name=None):
     partial_path = final_path.replace(".csv", ".partial.csv")
     try:
         f = open(partial_path, "w", newline="", encoding="utf-8", buffering=1)
+        log_message(f"Opened {partial_path} for writing", "INFO")
     except Exception as e:
         log_message(f"❌ Failed to open {partial_path}: {safe_str(e)}", "ERROR", exc_info=True)
         return None, None, final_path, None
@@ -180,6 +181,7 @@ def open_new_csv_writer(index, base_name=None):
 def finalize_csv(partial_path, final_path):
     try:
         os.replace(partial_path, final_path)
+        log_message(f"Finalized CSV {final_path}", "INFO")
     except OSError as e:
         log_message(f"❌ Failed to finalize {partial_path} → {final_path}: {e}", "ERROR", exc_info=True)
         return False
@@ -210,6 +212,9 @@ def b58(prefix, payload):
 
 def get_gpu_context_for_altcoin():
     """Return an OpenCL context for the configured altcoin GPU."""
+    # Detect available platforms and map the configured GPU index to the
+    # correct OpenCL device. This establishes the context used by workers for
+    # kernel execution.
     global _gpu_logged_once
 
     selected = ALTCOIN_GPUS_INDEX
@@ -226,22 +231,22 @@ def get_gpu_context_for_altcoin():
     try:
         platforms = cl.get_platforms()
         platform_names = [p.name for p in platforms]
-        print("🌐 Detected OpenCL Platforms:", flush=True)
+        log_message("🌐 Detected OpenCL Platforms:", "INFO")
         for i, p in enumerate(platforms):
-            print(f"  [{i}] {p.name}", flush=True)
+            log_message(f"  [{i}] {p.name}", "INFO")
         if LOG_LEVEL == "DEBUG":
-            print(f"[DEBUG] clGetPlatformIDs -> {platform_names}", flush=True)
+            log_message(f"clGetPlatformIDs -> {platform_names}", "DEBUG")
 
         devices = []
-        print("🖥️  OpenCL Devices:", flush=True)
+        log_message("🖥️  OpenCL Devices:", "INFO")
         for p_index, p in enumerate(platforms):
             for d_index, d in enumerate(p.get_devices(device_type=cl.device_type.GPU)):
                 idx = len(devices)
                 devices.append((p_index, d_index, p, d))
-                print(f"  [{idx}] {p.name} / {d.name}", flush=True)
+                log_message(f"  [{idx}] {p.name} / {d.name}", "INFO")
         if LOG_LEVEL == "DEBUG":
             dev_info = [f"{i}: {pl.name} / {dv.name}" for i, (_, _, pl, dv) in enumerate(devices)]
-            print(f"[DEBUG] clGetDeviceIDs -> {dev_info}", flush=True)
+            log_message(f"clGetDeviceIDs -> {dev_info}", "DEBUG")
 
         if not devices:
             raise RuntimeError("❌ No OpenCL devices found")
@@ -253,18 +258,21 @@ def get_gpu_context_for_altcoin():
         display_index = selected[0]
         cl_index = gpu_map.get(display_index)
         if cl_index is None:
-            print(f"⚠️ OpenCL mapping not found for GPU index {display_index}", flush=True)
+            log_message(f"⚠️ OpenCL mapping not found for GPU index {display_index}", "WARNING")
             raise RuntimeError("No suitable OpenCL device")
 
         if cl_index < 0 or cl_index >= len(devices):
-            print(f"⚠️ FALLBACK TO CPU — OpenCL index {cl_index} is invalid or out of bounds", flush=True)
+            log_message(
+                f"⚠️ FALLBACK TO CPU — OpenCL index {cl_index} is invalid or out of bounds",
+                "WARNING",
+            )
             raise RuntimeError("Invalid OpenCL device index")
 
         p_idx, d_idx, platform, device = devices[cl_index]
         if LOG_LEVEL == "DEBUG":
-            print(
+            log_message(
                 f"Mapped GPU index {display_index} → Platform {p_idx}, Device {d_idx} ({device.name})",
-                flush=True,
+                "DEBUG",
             )
 
         log_message(
@@ -272,10 +280,15 @@ def get_gpu_context_for_altcoin():
             "DEBUG",
         )
         context = cl.Context([device])
+        log_message(
+            f"GPU context established for {device.vendor} {device.name} (cl index {cl_index})",
+            "INFO",
+        )
 
         if not _gpu_logged_once:
             log_message(
-                f"🧠 Using GPU for altcoin derive on PID {os.getpid()}: {platform.name} / {device.name}"
+                f"🧠 Using GPU for altcoin derive on PID {os.getpid()}: {platform.name} / {device.name}",
+                "INFO",
             )
             _gpu_logged_once = True
 
@@ -334,6 +347,7 @@ def cashaddr_encode(prefix, payload):
 
 def load_kernel_source(device):
     """Return the appropriate OpenCL kernel source based on GPU vendor."""
+    # Choose kernel based on vendor; NVIDIA needs a separate implementation.
     kernel = "hash160_nvidia.cl" if "NVIDIA" in device.name.upper() else "hash160.cl"
     log_message(
         f"[Altcoin Derive] Using kernel {kernel} for device {device.name}",
@@ -342,7 +356,9 @@ def load_kernel_source(device):
     try:
         # Read the OpenCL kernel from disk. Any failure here means the worker
         # cannot proceed, so log the error and re-raise to surface it.
-        return pathlib.Path(__file__).with_name(kernel).read_text()
+        source = pathlib.Path(__file__).with_name(kernel).read_text()
+        log_message(f"Loaded kernel {kernel} for {device.vendor}", "INFO")
+        return source
     except Exception as e:
         log_message(f"❌ Failed to load kernel {kernel}: {safe_str(e)}", "ERROR", exc_info=True)
         raise
@@ -365,13 +381,14 @@ def derive_addresses_gpu(hex_keys, context=None):
     program = cl.Program(context, kernel_code)
     try:
         program.build()
+        log_message(f"OpenCL kernel compiled for {device.name}", "INFO")
         # Log any compiler messages for debugging
         try:
             build_log = program.get_build_info(device, cl.program_build_info.LOG)
             if build_log.strip():
                 log_message(f"Kernel build log ({device.name}): {build_log.strip()}", "DEBUG")
         except Exception:
-            pass
+            log_message("Failed to retrieve kernel build log", "DEBUG", exc_info=True)
     except Exception as build_err:
         # Capture and report the build log from each device to aid debugging
         for dev in context.devices:
@@ -379,7 +396,11 @@ def derive_addresses_gpu(hex_keys, context=None):
                 log = program.get_build_info(dev, cl.program_build_info.LOG)
                 log_message(f"Kernel build log ({dev.name}): {log}", "ERROR")
             except Exception:
-                pass
+                log_message(
+                    f"Failed to retrieve build log for {getattr(dev, 'name', 'unknown device')}",
+                    "DEBUG",
+                    exc_info=True,
+                )
         log_message("❌ OpenCL build failed", "ERROR", exc_info=True)
         raise RuntimeError(f"OpenCL kernel build failed: {build_err}")
 
@@ -561,6 +582,7 @@ def convert_txt_to_csv(
 
     try:
         with open(input_txt_path, "rb") as infile_raw:
+            log_message(f"Opened {input_txt_path} for reading", "INFO")
             t_load = time.perf_counter()
             total_lines = sum(1 for _ in infile_raw)
             infile_raw.seek(0)
@@ -917,13 +939,17 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q
                 )
                 context = cl.Context([device])
                 device_name = f"GPU{gpu_id} {device.name}"
+                log_message(
+                    f"GPU worker context established for {device.vendor} {device.name}",
+                    "INFO",
+                )
             except Exception as err:
                 log_message(
                     f"⚠️ FALLBACK TO CPU — OpenCL device not available: {safe_str(err)}",
                     "WARNING",
                 )
         log_message(
-            f"[Altcoin Derive - GPU {gpu_id if gpu_id is not None else 'CPU'}] 🚀 Starting CSV derivation on {txt_file}...",
+            f"[Altcoin Derive - GPU {gpu_id if gpu_id is not None else 'CPU'}] 🚀 Starting CSV derivation on {txt_file} (PID {os.getpid()})...",
             "INFO",
         )
         start_t = time.perf_counter()
@@ -951,7 +977,7 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q
             if os.path.exists(lock_path):
                 os.remove(lock_path)
         except Exception:
-            pass
+            log_message("Failed to remove lock file after worker completion", "DEBUG", exc_info=True)
 
 
 from core.logger import initialize_logging
@@ -970,9 +996,9 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
 
         set_thread_health("altcoin", True)
         register_control_events(shared_shutdown_event, pause_event, module="altcoin")
-        print("[debug] Shared metrics initialized for", __name__, flush=True)
+        log_message(f"Shared metrics initialized for {__name__}", "DEBUG")
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
+        log_message(f"init_shared_metrics failed in {__name__}: {safe_str(e)}", "ERROR", exc_info=True)
     """
     Monitors ``VANITY_OUTPUT_DIR`` for ``.txt`` files and converts them to CSV
     using GPU derivation.  Each GPU gets its own worker process and writes to a
@@ -1060,7 +1086,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                 if not gpu_queues[gid] and all_txt:
                     gpu_queues[gid].append(all_txt.pop(0))
 
-            # Launch one worker per GPU from its queue
+            # Launch a dedicated subprocess per GPU so each device works in parallel
+            # without sharing file handles or GPU contexts.
             for gid in effective_gpus:
                 if processes[gid] is None and gpu_queues[gid]:
                     txt = gpu_queues[gid].pop(0)
@@ -1081,6 +1108,10 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                     )
                     p.daemon = True
                     p.start()
+                    log_message(
+                        f"Spawned altcoin worker PID {p.pid} for {txt} on GPU {gid if gid is not None else 'CPU'}",
+                        "INFO",
+                    )
                     processes[gid] = p
                     queued.add(txt)
 
@@ -1145,7 +1176,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
 
         set_thread_health("altcoin", False)
     except Exception:
-        pass
+        log_message("Failed to update altcoin thread health", "WARNING", exc_info=True)
 
 
 def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None, gpu_flag=None):
@@ -1156,9 +1187,10 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
     """
     shared_shutdown_event = _unwrap_event(shared_shutdown_event)
     pause_event = _unwrap_event(pause_event)
+    proc_args = (shared_shutdown_event, shared_metrics, pause_event, log_q, gpu_flag)
     process = multiprocessing.Process(
         target=convert_txt_to_csv_loop,
-        args=(shared_shutdown_event, shared_metrics, pause_event, log_q, gpu_flag),
+        args=proc_args,
         name="AltcoinConverter",
     )
     # This process spawns worker ``Process`` instances for parallel conversions
@@ -1166,7 +1198,10 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
     # ``daemonic processes are not allowed to have children`` errors.
     process.daemon = False
     process.start()
-    log_message("🚀 Altcoin derive subprocess started...", "INFO")
+    log_message(
+        f"🚀 Altcoin derive subprocess PID {process.pid} started with args {proc_args}",
+        "INFO",
+    )
     return process
 
 

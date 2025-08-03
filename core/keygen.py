@@ -66,6 +66,11 @@ def keygen_progress():
 
 
 def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1024000):
+    """Derive a deterministic seed from ``batch_id`` and ``index``.
+
+    This ensures each output file in a batch has a unique starting seed while
+    still being reproducible across runs.
+    """
     seed = batch_id * batch_size + index_within_batch
     min_val = 1 << 128
     if seed < min_val:
@@ -76,6 +81,7 @@ def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1024000):
 
 
 def generate_random_seed(min_bits=128):
+    """Generate a cryptographically secure random seed."""
     min_val = 1 << min_bits
     range_span = SECP256K1_ORDER - min_val
     return secrets.randbelow(range_span) + min_val
@@ -89,6 +95,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     """
     global total_keys_generated, last_output_file
 
+    # ``gpu_flag`` allows the GUI to toggle GPU usage at runtime. When False we
+    # skip setting ``CUDA_VISIBLE_DEVICES`` so VanitySearch runs on CPU only.
     use_gpu = True if gpu_flag is None else bool(gpu_flag.value)
     selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
     gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
@@ -104,7 +112,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
     cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full]
     if use_gpu:
-        cmd.append("-gpu")
+        cmd.append("-gpu")  # Enable CUDA acceleration
     cmd.extend(["-o", current_output_path, "-u", VANITY_PATTERN])
     logger.info(
         f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'CPU'}"
@@ -116,6 +124,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
     try:
         with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
+            logger.info(f"Opened {current_output_path} for writing")
             # Launch VanitySearch as a subprocess and stream output to the file
             proc = subprocess.Popen(
                 cmd,
@@ -123,7 +132,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 stderr=subprocess.STDOUT,
                 env={**os.environ, **gpu_env},
             )
-            logger.debug(f"Spawned VanitySearch PID {proc.pid}")
+            logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd}")
 
             def monitor_process(p, path):
                 """Monitor file size and pause requests while VanitySearch runs."""
@@ -134,6 +143,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                         p.terminate()
                         break
                     if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                        # Periodically rotate output files so they don't grow without bound
                         logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
                         p.terminate()
                         break
@@ -145,8 +155,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                             p.terminate()
                             break
                     except FileNotFoundError:
-                        # File might not exist yet; ignore and retry
-                        pass
+                        # File might not exist yet; log at debug and retry
+                        logger.debug("Output file not yet created during monitoring")
                     time.sleep(1)
 
             timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
@@ -165,6 +175,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
             return False
         try:
             with open(current_output_path, 'r', encoding='utf-8') as f:
+                logger.info(f"Opened {current_output_path} for reading")
                 lines = sum(1 for _ in f)
                 total_keys_generated += lines
                 increment_metric("keys_generated_today", lines)
@@ -188,9 +199,9 @@ from core.dashboard import init_shared_metrics, set_metric, increment_metric, ge
 def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None, gpu_flag=None):
     try:
         init_shared_metrics(shared_metrics)
-        print("[debug] Shared metrics initialized for", __name__, flush=True)
+        logger.debug(f"Shared metrics initialized for {__name__}")
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
+        logger.exception(f"init_shared_metrics failed in {__name__}: {e}")
     from core.dashboard import register_control_events
     register_control_events(shutdown_event, pause_event, module="keygen")
     if not os.path.exists(VANITY_OUTPUT_DIR):
@@ -281,6 +292,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                     time.sleep(1)
                     continue
 
+                # Save after each file so progress can resume mid-batch
                 save_checkpoint({
                     "batch_id": KEYGEN_STATE["batch_id"],
                     "index_within_batch": index + 1,
@@ -292,10 +304,12 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
             total_time += batch_end - batch_start
             set_metric("batches_completed", batches_completed)
             set_metric("avg_keygen_time", round(total_time / batches_completed, 2))
+            logger.info(f"Batch {KEYGEN_STATE['batch_id']} completed")
 
             KEYGEN_STATE["batch_id"] += 1
             KEYGEN_STATE["index_within_batch"] = 0
             set_metric("vanity_progress_percent", 0)
+            # Record start of next batch so restarts begin at correct position
             save_checkpoint({
                 "batch_id": KEYGEN_STATE["batch_id"],
                 "index_within_batch": 0,
@@ -312,7 +326,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
             from core.dashboard import set_thread_health
             set_thread_health("keygen", False)
         except Exception:
-            pass
+            logger.warning("Failed to update keygen thread health", exc_info=True)
 
 
 # 🧪 One-time run (for debugging only)
