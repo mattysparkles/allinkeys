@@ -221,6 +221,7 @@ class DashboardGUI:
         # Ensure Alerts module starts running on launch
         try:
             set_metric("status.alerts", "Running")
+            set_metric("alerts_status", "Running")
         except Exception:
             pass
 

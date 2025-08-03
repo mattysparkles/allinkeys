@@ -105,15 +105,16 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                 ]
             except Exception:
                 backlog_files = []
-            set_metric("backlog_files_queued", len(backlog_files))
+            backlog_count = len(backlog_files)
+            set_metric("backlog_files_queued", backlog_count)
 
-            if backlog_files:
+            if backlog_count >= 100:
                 if vanity_flag.value or not altcoin_flag.value or assignment_flag.value != 1:
                     vanity_flag.value = 0
                     altcoin_flag.value = 1
                     assignment_flag.value = 1
                     log_message(
-                        "[GPU Scheduler] 🚦 Altcoin backlog detected — switching GPU to altcoin derive...",
+                        "[GPU Scheduler] 🚦 100+ backlog files — prioritizing altcoin derive on all GPUs...",
                         "INFO",
                     )
                     set_metric("vanity_gpu_on", False)
@@ -125,18 +126,19 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                     altcoin_flag.value = 0
                     assignment_flag.value = 0
                     log_message(
-                        "[GPU Scheduler] ✅ Altcoin backlog empty — resuming vanity GPU usage...",
+                        "[GPU Scheduler] ✅ Backlog under 100 files — resuming vanity GPU usage...",
                         "INFO",
                     )
                     set_metric("vanity_gpu_on", True)
                     set_metric("altcoin_gpu_on", False)
                     set_metric("gpu_assignment", "vanity")
         else:
+            # Manual mode – respect dashboard assignments without forcing flags
             if assignment_flag.value != 2:
                 assignment_flag.value = 2
-                set_metric("gpu_assignment", "split")
-                set_metric("vanity_gpu_on", bool(vanity_flag.value))
-                set_metric("altcoin_gpu_on", bool(altcoin_flag.value))
+            set_metric("gpu_assignment", "split")
+            set_metric("vanity_gpu_on", bool(vanity_flag.value))
+            set_metric("altcoin_gpu_on", bool(altcoin_flag.value))
 
         time.sleep(2)
 
