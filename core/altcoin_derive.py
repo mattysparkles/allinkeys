@@ -17,9 +17,9 @@ import numpy as np
 from eth_hash.auto import keccak
 from ecdsa import SigningKey, SECP256k1
 import time
-import threading
 import multiprocessing
 import io
+from queue import Empty
 
 try:
     import psutil
@@ -837,12 +837,12 @@ def convert_txt_to_csv(
 from core.dashboard import init_shared_metrics, register_control_events
 
 
-def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id):
-    """Helper for ProcessPoolExecutor to convert a single file.
+def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q):
+    """Worker process that converts a single file on one GPU.
 
-    The worker intentionally avoids touching shared ``Manager`` state. Metrics and
-    dashboard updates are handled in the parent process to prevent proxy
-    invalidation when workers exit.
+    Results are communicated back to the parent through ``result_q`` to avoid
+    ``multiprocessing.Manager`` proxies that previously triggered ``KeyError``
+    when workers exited.
     """
     pause_event = _unwrap_event(pause_event)
     shutdown_event = _unwrap_event(shutdown_event)
@@ -850,7 +850,8 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id):
         full_path = os.path.join(VANITY_OUTPUT_DIR, txt_file)
         lock_path = full_path + ".lock"
         if os.path.exists(lock_path):
-            return txt_file, 0.0, 0, "locked"
+            result_q.put((txt_file, 0.0, 0, "locked"))
+            return
         open(lock_path, "w").close()
         batch_id = None
         context = None
@@ -863,7 +864,9 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id):
                 platforms = cl.get_platforms()
                 devices = [d for p in platforms for d in p.get_devices()]
                 if cl_index is None or cl_index >= len(devices):
-                    raise RuntimeError(f"Invalid GPU ID {gpu_id} — OpenCL index {cl_index} not available")
+                    raise RuntimeError(
+                        f"Invalid GPU ID {gpu_id} — OpenCL index {cl_index} not available"
+                    )
                 device = devices[cl_index]
                 context = cl.Context([device])
                 device_name = f"GPU{gpu_id} {device.name}"
@@ -887,9 +890,9 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id):
             enable_dashboard=False,
         )
         duration = time.perf_counter() - start_t
-        return txt_file, duration, rows, None
+        result_q.put((txt_file, duration, rows, None))
     except Exception as e:
-        return txt_file, 0.0, 0, safe_str(e)
+        result_q.put((txt_file, 0.0, 0, safe_str(e)))
     finally:
         try:
             if os.path.exists(lock_path):
@@ -917,98 +920,107 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     except Exception as e:
         print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
     """
-    Monitors VANITY_OUTPUT_DIR for .txt files and converts them to CSV using GPU derivation.
-    Handles multiple files in parallel using a process pool for true concurrency.
-    Terminates cleanly on shared shutdown event (e.g. Ctrl+C).
+    Monitors ``VANITY_OUTPUT_DIR`` for ``.txt`` files and converts them to CSV
+    using GPU derivation.  Each GPU gets its own worker process and writes to a
+    dedicated CSV so no shared state or file handles are used between workers.
+    ``multiprocessing.Manager`` proxies are intentionally avoided to prevent
+    ``KeyError`` crashes when workers exit.
     """
-    from concurrent.futures import ProcessPoolExecutor, as_completed
 
     log_message("📦 Altcoin conversion loop (multi-process) started...", "INFO")
 
     processed = set()
     queued = set()
-    proc_lock = threading.Lock()
-    durations = []  # track per-file processing times
-    # Allow at most one worker per assigned GPU
+    durations = []
+    result_q = multiprocessing.Queue()
+    processes = {}
+
     selected_gpus = ALTCOIN_GPUS_INDEX or get_altcoin_gpu_ids()
-    base_workers = len(selected_gpus) if selected_gpus else 1
-    max_workers = base_workers
-    log_message(f"[GPU] Using {max_workers} worker(s) for altcoin derive", "DEBUG")
+    log_message(
+        f"[GPU] Using {len(selected_gpus) if selected_gpus else 1} worker(s) for altcoin derive",
+        "DEBUG",
+    )
 
     def graceful_shutdown(sig, frame):
-        log_message("🛑 Ctrl+C received in altcoin conversion loop. Shutting down...", "WARNING")
+        log_message(
+            "🛑 Ctrl+C received in altcoin conversion loop. Shutting down...",
+            "WARNING",
+        )
         shared_shutdown_event.set()
 
     signal.signal(signal.SIGINT, graceful_shutdown)
 
     from core.dashboard import get_pause_event
 
-    ctx = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
-        futures = {}
-        while not safe_event_is_set(shared_shutdown_event):
-            if safe_event_is_set(get_pause_event("altcoin")):
-                time.sleep(1)
-                continue
-            try:
-                all_txt = [
-                    f
-                    for f in os.listdir(VANITY_OUTPUT_DIR)
-                    if f.endswith(".txt") and f not in processed and f not in queued
-                ]
+    while not safe_event_is_set(shared_shutdown_event):
+        if safe_event_is_set(get_pause_event("altcoin")):
+            time.sleep(1)
+            continue
+        try:
+            all_txt = [
+                f
+                for f in os.listdir(VANITY_OUTPUT_DIR)
+                if f.endswith(".txt") and f not in processed and f not in queued
+            ]
 
-                safe_update_dashboard_stat("backlog_files_queued", len(all_txt) + len(queued))
+            safe_update_dashboard_stat("backlog_files_queued", len(all_txt) + len(queued))
+            log_message(
+                f"[QUEUE] workers:{len(processes)} queued:{len(all_txt) + len(queued)}",
+                "DEBUG",
+            )
+            if psutil:
+                proc = psutil.Process()
+                mem_mb = proc.memory_info().rss / (1024 * 1024)
+                log_message(f"[MEM] RSS {mem_mb:.1f} MB", "DEBUG")
+            if durations:
+                avg = sum(durations) / len(durations)
+                eta_sec = avg * (len(all_txt) + len(queued))
+                hrs = int(eta_sec // 3600)
+                mins = int((eta_sec % 3600) // 60)
+                secs = int(eta_sec % 60)
+                safe_update_dashboard_stat(
+                    {
+                        "backlog_avg_time": f"{avg:.2f}s",
+                        "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
+                    }
+                )
+
+            effective_gpus = selected_gpus if (gpu_flag is None or gpu_flag.value) else []
+            max_workers = len(effective_gpus) if effective_gpus else 1
+
+            while all_txt and len(processes) < max_workers:
+                txt = all_txt.pop(0)
+                assigned_gpu = None
+                if effective_gpus:
+                    assigned_gpu = effective_gpus[len(processes) % len(effective_gpus)]
                 log_message(
-                    f"[QUEUE] workers:{len(futures)}/{max_workers} queued:{len(all_txt) + len(queued)}",
+                    f"[QUEUE] Launching {txt} on GPU {assigned_gpu if assigned_gpu is not None else 'CPU'}",
                     "DEBUG",
                 )
-                if psutil:
-                    proc = psutil.Process()
-                    mem_mb = proc.memory_info().rss / (1024 * 1024)
-                    log_message(f"[MEM] RSS {mem_mb:.1f} MB", "DEBUG")
-                if durations:
-                    avg = sum(durations) / len(durations)
-                    eta_sec = avg * (len(all_txt) + len(queued))
-                    hrs = int(eta_sec // 3600)
-                    mins = int((eta_sec % 3600) // 60)
-                    secs = int(eta_sec % 60)
-                    safe_update_dashboard_stat(
-                        {
-                            "backlog_avg_time": f"{avg:.2f}s",
-                            "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
-                        }
-                    )
-
-                effective_gpus = selected_gpus if (gpu_flag is None or gpu_flag.value) else []
-                max_workers = len(effective_gpus) if effective_gpus else 1
-                while all_txt and len(futures) < max_workers:
-                    txt = all_txt.pop(0)
-                    assigned_gpu = None
-                    if effective_gpus:
-                        assigned_gpu = effective_gpus[len(futures) % len(effective_gpus)]
-                    log_message(
-                        f"[QUEUE] Submitting {txt} to GPU {assigned_gpu if assigned_gpu is not None else 'CPU'}",
-                        "DEBUG",
-                    )
-                    future = executor.submit(
-                        _convert_file_worker,
+                p = multiprocessing.Process(
+                    target=_convert_file_worker,
+                    args=(
                         txt,
                         _unwrap_event(pause_event),
                         _unwrap_event(shared_shutdown_event),
                         assigned_gpu,
-                    )
-                    futures[future] = txt
-                    queued.add(txt)
+                        result_q,
+                    ),
+                    name=f"AltcoinWorker-{txt}",
+                )
+                p.daemon = True
+                p.start()
+                processes[p.pid] = (p, txt)
+                queued.add(txt)
 
-                done = [fut for fut in futures if fut.done()]
-                for fut in done:
-                    txt_file, dur, rows, err = fut.result()
-                    queued.discard(futures[fut])
+            try:
+                while True:
+                    txt_file, dur, rows, err = result_q.get_nowait()
+                    queued.discard(txt_file)
                     if err:
                         log_message(f"❌ Failed to convert {txt_file}: {err}", "ERROR")
                     else:
-                        with proc_lock:
-                            processed.add(txt_file)
+                        processed.add(txt_file)
                         durations.append(dur)
                         safe_increment_metric("altcoin_files_converted", 1)
                         if rows:
@@ -1029,15 +1041,28 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                                 f"[STATS] Avg time per file: {avg_dur:.2f}s over {len(durations)} files",
                                 "DEBUG",
                             )
-                    del futures[fut]
+                    # Clean up the finished process
+                    for pid, (proc, fname) in list(processes.items()):
+                        if fname == txt_file:
+                            proc.join()
+                            processes.pop(pid, None)
+                            break
+            except Empty:
+                pass
 
-                safe_update_dashboard_stat(
-                    "backlog_current_file", list(queued)[0] if queued else ""
-                )
-                if not futures and not all_txt:
-                    time.sleep(3)
-            except Exception as e:
-                log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
+            # Remove any dead processes that didn't report back
+            for pid, (proc, fname) in list(processes.items()):
+                if not proc.is_alive():
+                    proc.join()
+                    processes.pop(pid, None)
+
+            safe_update_dashboard_stat(
+                "backlog_current_file", next(iter(queued), "")
+            )
+            if not processes and not all_txt:
+                time.sleep(3)
+        except Exception as e:
+            log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR")
 
     log_message("✅ Altcoin derive loop exited cleanly.", "INFO")
     set_metric("status.altcoin", "Stopped")
@@ -1062,8 +1087,8 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
         args=(shared_shutdown_event, shared_metrics, pause_event, log_q, gpu_flag),
         name="AltcoinConverter",
     )
-    # This process launches a ``ProcessPoolExecutor`` for parallel conversions
-    # and therefore cannot be a daemon.  Marking it as non-daemonic avoids
+    # This process spawns worker ``Process`` instances for parallel conversions
+    # and therefore cannot be a daemon. Marking it as non-daemonic avoids
     # ``daemonic processes are not allowed to have children`` errors.
     process.daemon = False
     process.start()
@@ -1072,12 +1097,11 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
 
 
 if __name__ == "__main__":
-    from multiprocessing import freeze_support, Manager
+    from multiprocessing import freeze_support, Event
 
     freeze_support()
     print("🧪 Running one-shot altcoin conversion test (dev mode)...", flush=True)
-    mgr = Manager()
-    shared_event = mgr.Event()
+    shared_event = Event()
     from core.logger import start_listener, log_queue
 
     start_listener()
