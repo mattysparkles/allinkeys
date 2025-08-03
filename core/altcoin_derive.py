@@ -230,7 +230,7 @@ def get_gpu_context_for_altcoin():
         devices = []
         print("🖥️  OpenCL Devices:", flush=True)
         for p_index, p in enumerate(platforms):
-            for d_index, d in enumerate(p.get_devices()):
+            for d_index, d in enumerate(p.get_devices(device_type=cl.device_type.GPU)):
                 idx = len(devices)
                 devices.append((p_index, d_index, p, d))
                 print(f"  [{idx}] {p.name} / {d.name}", flush=True)
@@ -262,10 +262,16 @@ def get_gpu_context_for_altcoin():
                 flush=True,
             )
 
+        log_message(
+            f"Initializing OpenCL for GPU {display_index} ({device.name})",
+            "DEBUG",
+        )
         context = cl.Context([device])
 
         if not _gpu_logged_once:
-            log_message(f"🧠 Using GPU for altcoin derive on PID {os.getpid()}: {platform.name} / {device.name}")
+            log_message(
+                f"🧠 Using GPU for altcoin derive on PID {os.getpid()}: {platform.name} / {device.name}"
+            )
             _gpu_logged_once = True
 
         return context, device
@@ -338,12 +344,26 @@ def derive_addresses_gpu(hex_keys, context=None):
     with open(kernel_path, "r", encoding="utf-8") as kf:
         kernel_code = kf.read()
 
+    program = cl.Program(context, kernel_code)
     try:
-        program = cl.Program(context, kernel_code).build()
+        program.build()
+        # Log any compiler messages for debugging
+        try:
+            build_log = program.get_build_info(device, cl.program_build_info.LOG)
+            if build_log.strip():
+                log_message(f"Kernel build log ({device.name}): {build_log.strip()}", "DEBUG")
+        except Exception:
+            pass
     except Exception as build_err:
+        # Capture and report the build log from each device to aid debugging
+        for dev in context.devices:
+            try:
+                log = program.get_build_info(dev, cl.program_build_info.LOG)
+                log_message(f"Kernel build log ({dev.name}): {log}", "ERROR")
+            except Exception:
+                pass
         log_message("❌ OpenCL build failed", "ERROR")
-        log_message(str(build_err), "ERROR")
-        raise
+        raise RuntimeError(f"OpenCL kernel build failed: {build_err}")
 
     kernel_hash160 = cl.Kernel(program, "hash160")
 
@@ -616,7 +636,7 @@ def convert_txt_to_csv(
                         if len(hex_batch) >= batch_size:
                             t_der = time.perf_counter()
                             if context is not None:
-                                results = derive_addresses_gpu(hex_batch, context)
+                                results = derive_addresses(hex_batch, context)
                             else:
                                 results = derive_addresses_cpu(hex_batch)
                             d_dur = time.perf_counter() - t_der
@@ -713,7 +733,7 @@ def convert_txt_to_csv(
             if hex_batch:
                 t_der = time.perf_counter()
                 if context is not None:
-                    results = derive_addresses_gpu(hex_batch, context)
+                    results = derive_addresses(hex_batch, context)
                 else:
                     results = derive_addresses_cpu(hex_batch)
                 d_dur = time.perf_counter() - t_der
@@ -868,6 +888,10 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q
                         f"Invalid GPU ID {gpu_id} — OpenCL index {cl_index} not available"
                     )
                 device = devices[cl_index]
+                log_message(
+                    f"Initializing OpenCL for GPU {gpu_id} ({device.name})",
+                    "DEBUG",
+                )
                 context = cl.Context([device])
                 device_name = f"GPU{gpu_id} {device.name}"
             except Exception as err:
@@ -890,6 +914,10 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q
             enable_dashboard=False,
         )
         duration = time.perf_counter() - start_t
+        log_message(
+            f"Derivation complete for file {txt_file} using GPU {gpu_id if gpu_id is not None else 'CPU'}",
+            "INFO",
+        )
         result_q.put((txt_file, duration, rows, None))
     except Exception as e:
         result_q.put((txt_file, 0.0, 0, safe_str(e)))

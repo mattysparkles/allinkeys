@@ -21,32 +21,55 @@ SELECTION_TIMEOUT = 20  # seconds
 
 
 def list_gpus():
+    """Return a list of available GPUs with OpenCL device indices."""
+
     gpus = []
-    seen_names = set()
+    seen = set()
 
-    # NVIDIA GPUs via GPUtil
-    if GPUtil:
-        try:
-            for gpu in GPUtil.getGPUs():
-                name = f"NVIDIA: {gpu.name}"
-                if name not in seen_names:
-                    gpus.append({"type": "nvidia", "name": gpu.name, "id": gpu.id, "cl_index": None})
-                    seen_names.add(name)
-        except:
-            pass
-
-    # AMD or others via OpenCL
+    # Enumerate all OpenCL GPU devices so that both AMD and NVIDIA cards
+    # receive a valid ``cl_index`` for later context creation.  Falling back to
+    # GPUtil (if available) ensures we still display devices even if OpenCL is
+    # missing or misconfigured.
     try:
         cl_index = 0
         for platform in cl.get_platforms():
-            for device in platform.get_devices():
-                name = f"AMD: {device.name}"
-                if name not in seen_names:
-                    gpus.append({"type": "amd", "name": device.name, "id": len(gpus), "cl_index": cl_index})
-                    seen_names.add(name)
+            for device in platform.get_devices(device_type=cl.device_type.GPU):
+                vendor = device.vendor.lower()
+                if "nvidia" in vendor:
+                    gtype = "nvidia"
+                elif "amd" in vendor or "advanced micro devices" in vendor:
+                    gtype = "amd"
+                else:
+                    gtype = "other"
+                name = device.name.strip()
+                entry = {
+                    "type": gtype,
+                    "name": name,
+                    "id": len(gpus),
+                    "cl_index": cl_index,
+                }
+                gpus.append(entry)
+                seen.add(name)
                 cl_index += 1
-    except:
+    except Exception:
         pass
+
+    # Supplement with GPUtil results (no ``cl_index``) for visibility
+    if GPUtil:
+        try:
+            for gpu in GPUtil.getGPUs():
+                if gpu.name not in seen:
+                    gpus.append(
+                        {
+                            "type": "nvidia",
+                            "name": gpu.name,
+                            "id": len(gpus),
+                            "cl_index": None,
+                        }
+                    )
+                    seen.add(gpu.name)
+        except Exception:
+            pass
 
     return gpus
 
