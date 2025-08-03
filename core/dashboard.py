@@ -390,25 +390,50 @@ def init_shared_metrics(shared_dict):
         metrics = shared_dict
 
 
-def update_dashboard_stat(key, value=None, retries=5, delay=0.2):
+def update_dashboard_stat(key, value=None, retries=5, delay=0.5):
+    """Safely update dashboard metrics shared across processes.
+
+    Parameters
+    ----------
+    key : str | dict
+        Metric name or mapping of names to values.
+    value : any, optional
+        Value to store.  If ``key`` is a dict, ``value`` is ignored.
+    retries : int, optional
+        Number of times to wait for ``metrics`` to be initialised.  Defaults
+        to 5.
+    delay : float, optional
+        Seconds to wait between retries.  Defaults to 0.5 seconds.
+
+    The function blocks until ``metrics`` is available or the retry limit is
+    reached.  Errors during the update are logged but do not raise, making
+    this safe to call from early‑starting subprocesses.
+    """
+
     global metrics
-    for attempt in range(retries):
-        if metrics is None:
-            if attempt == retries - 1:
-                print(f"⚠️ update_dashboard_stat skipped after {retries} tries: metrics is None (key={key})", flush=True)
+
+    for _ in range(retries):
+        if metrics is not None:
+            try:
+                if metrics_lock:
+                    with metrics_lock:
+                        _update_stat_internal(key, value)
+                else:
+                    _update_stat_internal(key, value)
                 return
-            time.sleep(delay)
-        else:
-            break
-    try:
-        if metrics_lock:
-            with metrics_lock:
-                _update_stat_internal(key, value)
-        else:
-            _update_stat_internal(key, value)
-    except Exception as e:
-        print(f"❌ update_dashboard_stat failed on key: {key} | {e}", flush=True)
-        traceback.print_exc()
+            except Exception as e:
+                log_message(
+                    f"⚠️ update_dashboard_stat failed on key: {key} | {e}",
+                    "WARNING",
+                )
+                return
+        time.sleep(delay)
+
+    # metrics never became available
+    log_message(
+        f"❌ metrics not initialised after {retries} attempts; could not update '{key}'",
+        "ERROR",
+    )
 
 
 def _is_dict_like(obj):
