@@ -197,6 +197,15 @@ class DashboardGUI:
 
             row += 1
 
+        # GPU swing mode toggle at bottom of column 3
+        self.gpu_swing_mode_enabled = tk.BooleanVar(value=(GPU_STRATEGY == "swing"))
+        self.swing_mode_button = ttk.Button(
+            self.section_frame,
+            text=f"GPU Swing Mode: {'ON' if self.gpu_swing_mode_enabled.get() else 'OFF'}",
+            command=self.toggle_swing_mode,
+        )
+        self.swing_mode_button.grid(row=1, column=2, padx=5, pady=(0, 10), sticky="ew")
+
         # Alert Configuration Checkboxes
         if SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES:
             alert_frame = ttk.LabelFrame(self.container, text="Alert Methods")
@@ -228,17 +237,6 @@ class DashboardGUI:
                 if BUTTONS_ENABLED.get(label):
                     self._group_button_set(btn_frame, label.capitalize(), col)
                     col += 1
-
-        # GPU swing mode toggle
-        swing_frame = ttk.LabelFrame(self.container, text="GPU Mode")
-        swing_frame.pack(pady=10)
-        self.swing_var = tk.BooleanVar(value=(GPU_STRATEGY == "swing"))
-        ttk.Checkbutton(
-            swing_frame,
-            text="Enable Swing Mode",
-            variable=self.swing_var,
-            command=self.toggle_swing_mode,
-        ).pack(side="left", padx=5)
 
         # Config and Reset
         bottom_frame = ttk.Frame(self.container)
@@ -350,8 +348,13 @@ class DashboardGUI:
         self.module_buttons[label] = update_buttons
 
     def toggle_swing_mode(self):
-        strategy = "swing" if self.swing_var.get() else "vanity_priority"
+        new_state = not self.gpu_swing_mode_enabled.get()
+        self.gpu_swing_mode_enabled.set(new_state)
+        label = "ON" if new_state else "OFF"
+        self.swing_mode_button.config(text=f"GPU Swing Mode: {label}")
+        strategy = "swing" if new_state else "vanity_priority"
         set_metric("gpu_strategy", strategy)
+        set_metric("swing_mode", new_state)
 
     def update_alert_option(self, name, value):
         try:
