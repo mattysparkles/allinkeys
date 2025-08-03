@@ -149,8 +149,12 @@ def get_timestamp() -> str:
     """Return current timestamp in ``[YYYY-MM-DD HH:MM:SS]`` format."""
     return datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
 
+# Public alias for extremely verbose trace logging
+# Maps directly to DEBUG so log handlers still capture the output.
+TRACE = logging.DEBUG
+
 _LEVEL_MAP = {
-    "TRACE": logging.DEBUG,
+    "TRACE": TRACE,
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
     "WARN": logging.WARNING,

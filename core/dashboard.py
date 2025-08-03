@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import core.checkpoint as checkpoint
 import traceback
 import multiprocessing
-from core.logger import log_message
+from core.logger import get_logger
 from config.settings import (
     ENABLE_KEYGEN,
     ENABLE_DAY_ONE_CHECK,
@@ -41,6 +41,9 @@ pause_event = None
 module_pause_events = {}
 module_shutdown_events = {}
 
+# Module-level logger
+logger = get_logger(__name__)
+
 
 class LoggedEvent:
     """Wrapper around multiprocessing events that logs unexpected changes.
@@ -63,12 +66,12 @@ class LoggedEvent:
 
     def set(self):
         if not self._called_from_gui():
-            log_message(f"⚠️ Pause flag '{self.name}' modified outside GUI", "WARN")
+            logger.warning(f"⚠️ Pause flag '{self.name}' modified outside GUI")
         self._ev.set()
 
     def clear(self):
         if not self._called_from_gui():
-            log_message(f"⚠️ Pause flag '{self.name}' modified outside GUI", "WARN")
+            logger.warning(f"⚠️ Pause flag '{self.name}' modified outside GUI")
         self._ev.clear()
 
     def is_set(self):
@@ -158,8 +161,10 @@ def load_lifetime_metrics():
             ):
                 if not isinstance(data.get(key), dict):
                     data[key] = {c: 0 for c in defaults[key]}
+            logger.debug("Lifetime metrics loaded from disk")
             return data
     except Exception:
+        logger.exception("Failed to load lifetime metrics")
         return {}
 
 
@@ -186,8 +191,9 @@ def save_lifetime_metrics():
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, METRICS_LIFETIME_PATH)
+        logger.debug("Lifetime metrics saved to disk")
     except Exception:
-        pass
+        logger.exception("Failed to save lifetime metrics")
 
 
 def maybe_persist_lifetime(key):
@@ -421,17 +427,15 @@ def update_dashboard_stat(key, value=None, retries=5, delay=0.5):
                     _update_stat_internal(key, value)
                 return
             except Exception as e:
-                log_message(
-                    f"⚠️ update_dashboard_stat failed on key: {key} | {e}",
-                    "WARNING",
+                logger.warning(
+                    f"update_dashboard_stat failed on key: {key} | {e}"
                 )
                 return
         time.sleep(delay)
 
     # metrics never became available
-    log_message(
-        f"❌ metrics not initialised after {retries} attempts; could not update '{key}'",
-        "ERROR",
+    logger.error(
+        f"metrics not initialised after {retries} attempts; could not update '{key}'"
     )
 
 
@@ -507,9 +511,8 @@ def set_metric(key, value):
         "matches_found_lifetime",
     }:
         if not isinstance(value, dict):
-            log_message(
-                f"❌ Refusing to overwrite {key} with {type(value).__name__}",
-                "ERROR",
+            logger.error(
+                f"Refusing to overwrite {key} with {type(value).__name__}"
             )
             return
     dict_expected = {
