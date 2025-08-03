@@ -357,16 +357,21 @@ def cashaddr_encode(prefix, payload):
 
 def load_kernel_source(device):
     """Return the appropriate OpenCL kernel source based on GPU vendor."""
-    # Choose kernel based on vendor; NVIDIA needs a separate implementation.
-    kernel = "hash160_nvidia.cl" if "NVIDIA" in device.name.upper() else "hash160.cl"
+    name = (getattr(device, "name", "") or "").upper()
+    vendor = (getattr(device, "vendor", "") or "").upper()
+    use_nvidia = "NVIDIA" in name or "NVIDIA" in vendor
+    kernel = "hash160_nvidia.cl" if use_nvidia else "hash160.cl"
     log_message(
         f"[Altcoin Derive] Using kernel {kernel} for device {device.name}",
-        "DEBUG",
+        "INFO",
     )
+    path = pathlib.Path(__file__).with_name(kernel)
+    if not path.is_file():
+        msg = f"Kernel file {kernel} not found at {path}"
+        log_message(f"❌ {msg}", "ERROR")
+        raise FileNotFoundError(msg)
     try:
-        # Read the OpenCL kernel from disk. Any failure here means the worker
-        # cannot proceed, so log the error and re-raise to surface it.
-        source = pathlib.Path(__file__).with_name(kernel).read_text()
+        source = path.read_text()
         log_message(f"Loaded kernel {kernel} for {device.vendor}", "INFO")
         return source
     except Exception as e:
@@ -1026,23 +1031,26 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
 
     selected_gpus = ALTCOIN_GPUS_INDEX or get_altcoin_gpu_ids()
     gpu_list = list_gpus()
-    available_ids = {g["id"] for g in gpu_list}
-    # Filter out GPU indices that are not actually present on this system.
+    available_ids = [g["id"] for g in gpu_list]
+
     if selected_gpus:
+        valid = [gid for gid in selected_gpus if gid in available_ids]
         invalid = [gid for gid in selected_gpus if gid not in available_ids]
         if invalid:
             log_message(
-                f"⚠️ Invalid GPU index(es) {invalid} specified for altcoin derive; defaulting to GPU 0",
+                f"⚠️ Invalid GPU index(es) {invalid} specified for altcoin derive; ignoring",
                 "WARNING",
             )
-            selected_gpus = [next(iter(available_ids), None)]
-    # If no explicit GPUs are defined or none were valid, fall back to CPU.
+        selected_gpus = valid
+    else:
+        selected_gpus = available_ids
+
     gpu_ids_all = selected_gpus if selected_gpus else [None]
     processes = {gid: None for gid in gpu_ids_all}
     gpu_queues = {gid: [] for gid in gpu_ids_all}
 
     log_message(
-        f"[GPU] Using {len(selected_gpus) if selected_gpus else 1} worker(s) for altcoin derive",
+        f"[GPU] Using {len(gpu_ids_all)} worker(s) for altcoin derive",
         "DEBUG",
     )
 
