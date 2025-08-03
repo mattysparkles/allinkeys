@@ -286,7 +286,17 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
     except Exception:
         pass
 
-    skip_vanity = GPU_STRATEGY == "swing" and len(backlog_files) >= 100
+    # Determine current GPU strategy from shared metrics with a safe fallback
+    gpu_strategy = "manual"
+    try:
+        gpu_strategy = shared_metrics.get("gpu_strategy", "manual")
+    except Exception:
+        try:
+            gpu_strategy = get_current_metrics().get("gpu_strategy", "manual")
+        except Exception:
+            pass
+
+    skip_vanity = gpu_strategy == "swing" and len(backlog_files) >= 100
     if skip_vanity:
         log_message(
             "[Startup] Detected backlog of 100+ files; delaying VanitySearch.",
@@ -445,24 +455,35 @@ def run_allinkeys(args):
 
     threading.Thread(target=monitor, daemon=True).start()
 
-    def shutdown_handler(sig, frame):
+    try:
+        if ENABLE_DASHBOARD and not args.no_dashboard:
+            start_dashboard()
+        else:
+            while not shutdown_event.is_set():
+                time.sleep(10)
+    except KeyboardInterrupt:
         print("\n🛑 Ctrl+C received. Shutting down gracefully...", flush=True)
+    finally:
         shutdown_event.set()
+        for ev in shutdown_events.values():
+            ev.set()
+        for p in processes:
+            try:
+                p.join(timeout=5)
+            except Exception:
+                pass
         for p in processes:
             if p.is_alive():
                 p.terminate()
-        for p in processes:
-            p.join()
-        stop_listener()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, shutdown_handler)
-
-    if ENABLE_DASHBOARD and not args.no_dashboard:
-        start_dashboard()
-    else:
-        while True:
-            time.sleep(10)
+                p.join()
+        try:
+            log_queue.put_nowait(None)
+        except Exception:
+            pass
+        try:
+            stop_listener()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
