@@ -19,6 +19,7 @@ from ecdsa import SigningKey, SECP256k1
 import time
 import multiprocessing
 import io
+import pathlib
 from queue import Empty
 
 try:
@@ -327,6 +328,13 @@ def cashaddr_encode(prefix, payload):
     return prefix + ":" + "".join([CHARSET[d] for d in data])
 
 
+def load_kernel_source(ctx):
+    """Return the appropriate OpenCL kernel source based on GPU vendor."""
+    platform = ctx.devices[0].platform
+    kernel = "hash160_nvidia.cl" if "NVIDIA" in platform.vendor else "hash160.cl"
+    return pathlib.Path(__file__).with_name(kernel).read_text()
+
+
 def derive_addresses_gpu(hex_keys, context=None):
     """Derive addresses using the GPU if available."""
 
@@ -337,12 +345,7 @@ def derive_addresses_gpu(hex_keys, context=None):
     # Enable profiling so we can time kernel execution
     queue = cl.CommandQueue(context, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
-    kernel_path = os.path.join(os.path.dirname(__file__), "hash160.cl")
-    if not os.path.isfile(kernel_path):
-        raise FileNotFoundError(f"❌ Missing kernel file: {kernel_path}")
-
-    with open(kernel_path, "r", encoding="utf-8") as kf:
-        kernel_code = kf.read()
+    kernel_code = load_kernel_source(context)
 
     program = cl.Program(context, kernel_code)
     try:
