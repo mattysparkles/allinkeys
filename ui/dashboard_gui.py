@@ -197,14 +197,32 @@ class DashboardGUI:
 
             row += 1
 
-        # GPU swing mode toggle at bottom of column 3
+            if group == "Backlog":
+                backlog_col = col
+                backlog_row = row
+
+        # GPU swing mode toggle below backlog stats (column 3)
         self.gpu_swing_mode_enabled = tk.BooleanVar(value=(GPU_STRATEGY == "swing"))
-        self.swing_mode_button = ttk.Button(
+        self.swing_mode_button = ttk.Checkbutton(
             self.section_frame,
-            text=f"GPU Swing Mode: {'ON' if self.gpu_swing_mode_enabled.get() else 'OFF'}",
+            text="Enable Swing Mode",
+            variable=self.gpu_swing_mode_enabled,
             command=self.toggle_swing_mode,
         )
-        self.swing_mode_button.grid(row=1, column=2, padx=5, pady=(0, 10), sticky="ew")
+        swing_row = backlog_row if 'backlog_row' in locals() else 1
+        self.swing_mode_button.grid(
+            row=swing_row,
+            column=backlog_col if 'backlog_col' in locals() else 2,
+            padx=5,
+            pady=(5, 10),
+            sticky="w",
+        )
+
+        # Ensure Alerts module starts running on launch
+        try:
+            set_metric("status.alerts", "Running")
+        except Exception:
+            pass
 
         # Alert Configuration Checkboxes
         if SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES:
@@ -348,10 +366,7 @@ class DashboardGUI:
         self.module_buttons[label] = update_buttons
 
     def toggle_swing_mode(self):
-        new_state = not self.gpu_swing_mode_enabled.get()
-        self.gpu_swing_mode_enabled.set(new_state)
-        label = "ON" if new_state else "OFF"
-        self.swing_mode_button.config(text=f"GPU Swing Mode: {label}")
+        new_state = self.gpu_swing_mode_enabled.get()
         strategy = "swing" if new_state else "vanity_priority"
         set_metric("gpu_strategy", strategy)
         set_metric("swing_mode", new_state)
