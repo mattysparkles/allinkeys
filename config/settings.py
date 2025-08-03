@@ -147,7 +147,10 @@ MIN_BACKLOG_THRESHOLD = 1  # backlog size to resume vanity GPU keygen
 GPU_VENDOR = "auto"  # "nvidia", "amd", or "auto"
 
 # ===================== ALTCOIN ==========================
-ALTCOIN_GPUS_INDEX = [2]
+# Default to the first detected GPU for altcoin derivation. This avoids
+# referencing a non-existent device which previously caused the process to
+# fall back to CPU and produce no GPU-accelerated output.
+ALTCOIN_GPUS_INDEX = [0]
 CSV_MAX_SIZE_MB = 200
 MAX_CSV_MB = CSV_MAX_SIZE_MB # alias do not change
 CSV_MAX_ROWS = 200000
