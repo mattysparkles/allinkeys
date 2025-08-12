@@ -1,7 +1,9 @@
 # core/btc_only_checker.py
 
 import os
-from typing import Iterable, Tuple
+import re
+import bisect
+from typing import Tuple, List
 
 from config.settings import (
     VANITY_OUTPUT_DIR,
@@ -65,27 +67,47 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
         logger.info(f"Loaded {len(FUNDed_SET)} funded BTC addresses")
 
 
+def _extract_pubaddr_blocks(path: str, logger) -> Tuple[List[Tuple[str, int, int]], List[str]]:
+    """Extract PubAddr blocks from a VanitySearch output file."""
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    pattern = re.compile(r"^\s*(pubaddr|pubaddress)\s*:\s*(\S+)", re.IGNORECASE)
+    triples: List[Tuple[str, int, int]] = []
+    for idx, line in enumerate(lines):
+        m = pattern.match(line)
+        if m:
+            addr = m.group(2)
+            start = max(0, idx - 2)
+            end = idx
+            triples.append((addr, start, end))
+    triples.sort(key=lambda t: t[0])
+    return triples, lines
+
+
 def sort_addresses_in_file(input_txt: str, output_txt: str, logger) -> None:
-    """Sort addresses in ``input_txt`` and write to ``output_txt``."""
-    with open(input_txt, "r", encoding="utf-8") as f:
-        addrs = [ln.strip() for ln in f if ln.strip()]
-    addrs = sorted(set(addrs))
+    """Extract and sort BTC addresses, writing them to a sidecar file."""
+    triples, _ = _extract_pubaddr_blocks(input_txt, logger)
+    logger.info(f"🧩 Extracted {len(triples)} PubAddr blocks from {os.path.basename(input_txt)}")
     with open(output_txt, "w", encoding="utf-8") as f:
-        for a in addrs:
-            f.write(a + "\n")
-    logger.info(f"Sorted {len(addrs)} addresses from {os.path.basename(input_txt)}")
+        for addr, _, _ in triples:
+            f.write(addr + "\n")
+    logger.info(
+        f"✅ Sorted {len(triples)} BTC addresses to sidecar: {os.path.basename(output_txt)}"
+    )
 
 
 def _binary_search_file(file_path: str, target: str) -> bool:
     with open(file_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
-    import bisect
     i = bisect.bisect_left(lines, target + "\n")
     return i < len(lines) and lines[i].strip() == target
 
 
 def check_vanity_file_against_ranges(sorted_vanity_txt: str, ranges_dir: str, logger) -> Tuple[int, int]:
     """Check addresses against BTC ranges or funded set."""
+    original_path = sorted_vanity_txt[: -len(".sorted")]
+    triples, lines = _extract_pubaddr_blocks(original_path, logger)
+    addr_list = [addr for addr, _, _ in triples]
     rows = matches = 0
     with open(sorted_vanity_txt, "r", encoding="utf-8") as f:
         for line in f:
@@ -93,24 +115,35 @@ def check_vanity_file_against_ranges(sorted_vanity_txt: str, ranges_dir: str, lo
             if not addr:
                 continue
             rows += 1
+            matched = False
             if USE_ALL:
                 idx = route_address_to_range(addr, BOUNDARIES)
                 range_file = os.path.join(ranges_dir, BTC_RANGE_FILE_PATTERN.format(idx))
-                if _binary_search_file(range_file, addr):
-                    matches += 1
-                    try:
-                        from core.alerts import alert_match
-                        alert_match({"coin": "BTC", "address": addr, "csv_file": sorted_vanity_txt})
-                    except Exception:
-                        logger.info(f"Match found for {addr} but alerts unavailable")
+                matched = _binary_search_file(range_file, addr)
             else:
-                if addr in FUNDed_SET:
-                    matches += 1
-                    try:
-                        from core.alerts import alert_match
-                        alert_match({"coin": "BTC", "address": addr, "csv_file": sorted_vanity_txt})
-                    except Exception:
-                        logger.info(f"Match found for {addr} but alerts unavailable")
+                matched = addr in FUNDed_SET
+            if matched:
+                matches += 1
+                i = bisect.bisect_left(addr_list, addr)
+                if i < len(triples) and triples[i][0] == addr:
+                    start, end = triples[i][1], triples[i][2]
+                    block_lines = lines[start : end + 1]
+                    matches_file = original_path + ".matches.txt"
+                    with open(matches_file, "a", encoding="utf-8") as mf:
+                        mf.writelines(block_lines)
+                        mf.write("---\n")
+                    logger.info(
+                        f"🎯 BTC match in {os.path.basename(original_path)} → wrote block to {os.path.basename(matches_file)}"
+                    )
+                try:
+                    from core.alerts import alert_match
+                    alert_match({
+                        "coin": "BTC",
+                        "address": addr,
+                        "csv_file": os.path.basename(original_path),
+                    })
+                except Exception:
+                    logger.info(f"Match found for {addr} but alerts unavailable")
     return rows, matches
 
 
@@ -120,7 +153,7 @@ def process_pending_vanity_outputs_once(logger) -> int:
     files = [f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")]
     for fname in files:
         path = os.path.join(VANITY_OUTPUT_DIR, fname)
-        marker = path + ".checked"
+        marker = path + ".btcchk"
         if os.path.exists(marker):
             continue
         sorted_path = path + ".sorted"
@@ -130,7 +163,8 @@ def process_pending_vanity_outputs_once(logger) -> int:
         increment_metric("btc_only_matches_found_today", matches)
         increment_metric("addresses_checked_today.btc", rows)
         increment_metric("addresses_checked_lifetime.btc", rows)
-        os.rename(path, marker)
+        with open(marker, "w", encoding="utf-8") as m:
+            m.write(f"checked={rows} matches={matches}\n")
         os.remove(sorted_path)
         processed += 1
     return processed
@@ -141,6 +175,6 @@ def get_vanity_backlog_count() -> int:
     return len([
         f
         for f in os.listdir(VANITY_OUTPUT_DIR)
-        if f.endswith(".txt") and not os.path.exists(os.path.join(VANITY_OUTPUT_DIR, f + ".checked"))
+        if f.endswith(".txt") and not os.path.exists(os.path.join(VANITY_OUTPUT_DIR, f + ".btcchk"))
     ])
 
