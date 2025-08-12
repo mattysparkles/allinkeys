@@ -3,6 +3,7 @@
 import os
 import re
 import bisect
+import time
 from typing import Tuple, List
 
 from config.settings import (
@@ -10,6 +11,7 @@ from config.settings import (
     ALL_BTC_ADDRESSES_DIR,
     ALL_BTC_RANGES_COUNT,
     BTC_RANGE_FILE_PATTERN,
+    BTC_MIN_FILE_AGE_SEC,
 )
 from core.dashboard import set_metric, increment_metric
 from utils.file_utils import find_latest_funded_file
@@ -103,6 +105,40 @@ def _binary_search_file(file_path: str, target: str) -> bool:
     return i < len(lines) and lines[i].strip() == target
 
 
+def _is_file_stable(path: str, logger) -> bool:
+    """
+    A file is considered 'stable' if:
+      - Its mtime is older than BTC_MIN_FILE_AGE_SEC, AND
+      - Its size does not change over BTC_FILE_STABILITY_POLLS spaced by
+        BTC_FILE_STABILITY_INTERVAL_SEC.
+    We never block long; worst case ~BTC_FILE_STABILITY_WINDOW_SEC.
+    """
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return False
+
+    age_ok = (time.time() - st.st_mtime) >= BTC_MIN_FILE_AGE_SEC
+    if not age_ok:
+        return False
+
+    from config.settings import (
+        BTC_FILE_STABILITY_POLLS, BTC_FILE_STABILITY_INTERVAL_SEC
+    )
+    try:
+        last = os.path.getsize(path)
+        for _ in range(BTC_FILE_STABILITY_POLLS):
+            time.sleep(BTC_FILE_STABILITY_INTERVAL_SEC)
+            cur = os.path.getsize(path)
+            if cur != last:
+                return False
+            last = cur
+        return True
+    except Exception as e:
+        logger.debug(f"Stability check failed for {os.path.basename(path)}: {e}")
+        return False
+
+
 def check_vanity_file_against_ranges(sorted_vanity_txt: str, ranges_dir: str, logger) -> Tuple[int, int]:
     """Check addresses against BTC ranges or funded set."""
     original_path = sorted_vanity_txt[: -len(".sorted")]
@@ -157,6 +193,10 @@ def process_pending_vanity_outputs_once(logger) -> int:
         path = os.path.join(VANITY_OUTPUT_DIR, fname)
         marker = path + ".btcchk"
         if os.path.exists(marker):
+            continue
+        # Skip if not stable yet
+        if not _is_file_stable(path, logger):
+            increment_metric("vanity_unstable_skips", 1)
             continue
         sorted_path = path + ".sorted"
         sort_addresses_in_file(path, sorted_path, logger)

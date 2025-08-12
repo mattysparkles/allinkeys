@@ -48,6 +48,12 @@ ALL_BTC_GZ_LOCAL = os.path.join(ALL_BTC_ADDRESSES_DIR, "all_Bitcoin_addresses_ev
 BTC_RANGE_FILE_PATTERN = "btc_range_{:02d}.txt"  # 00..19
 CHECKER_BACKLOG_PAUSE_THRESHOLD = 20
 
+# BTC-only processing stability settings
+BTC_FILE_STABILITY_WINDOW_SEC = 3.0   # how long size must remain unchanged
+BTC_FILE_STABILITY_POLLS = 6          # number of polls
+BTC_FILE_STABILITY_INTERVAL_SEC = BTC_FILE_STABILITY_WINDOW_SEC / BTC_FILE_STABILITY_POLLS
+BTC_MIN_FILE_AGE_SEC = 2.0            # ignore files newer than this
+
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
 VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")  # Adjust if renamed
