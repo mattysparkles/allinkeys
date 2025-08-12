@@ -450,9 +450,17 @@ def run_btc_only(args):
             backlog = get_vanity_backlog_count()
             set_metric("vanity_backlog_count", backlog)
             if backlog > CHECKER_BACKLOG_PAUSE_THRESHOLD:
-                keygen_pause.set()
+                if not keygen_pause.is_set():
+                    keygen_pause.set()
+                    logger.info(
+                        f"Paused keygen: backlog {backlog} > {CHECKER_BACKLOG_PAUSE_THRESHOLD}"
+                    )
             else:
-                keygen_pause.clear()
+                if keygen_pause.is_set():
+                    keygen_pause.clear()
+                    logger.info(
+                        f"Resumed keygen: backlog {backlog} ≤ {CHECKER_BACKLOG_PAUSE_THRESHOLD}"
+                    )
             process_pending_vanity_outputs_once(logger)
             time.sleep(2)
     except KeyboardInterrupt:

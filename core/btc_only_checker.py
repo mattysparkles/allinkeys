@@ -137,13 +137,15 @@ def check_vanity_file_against_ranges(sorted_vanity_txt: str, ranges_dir: str, lo
                     )
                 try:
                     from core.alerts import alert_match
-                    alert_match({
-                        "coin": "BTC",
-                        "address": addr,
-                        "csv_file": os.path.basename(original_path),
-                    })
-                except Exception:
-                    logger.info(f"Match found for {addr} but alerts unavailable")
+                    alert_match(
+                        {
+                            "coin": "BTC",
+                            "address": addr,
+                            "csv_file": os.path.basename(original_path),
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"alert_match failed (non-fatal): {e}")
     return rows, matches
 
 
