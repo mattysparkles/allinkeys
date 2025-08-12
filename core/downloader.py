@@ -198,3 +198,17 @@ def download_and_compare_address_lists() -> None:
             future.result()
 
     generate_test_csv()
+
+
+def get_daily_funded_btc_addresses(logger):
+    """Yield BTC addresses from the latest daily funded list."""
+    file_path = find_latest_funded_file("btc", DOWNLOADS_DIR)
+    if not file_path:
+        logger.warning("No BTC funded address file found")
+        return []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for addr in parse_address_lines(f):
+                yield addr
+    except Exception as exc:
+        logger.warning(f"Failed reading BTC funded file {file_path}: {exc}")

@@ -51,10 +51,11 @@ from config.settings import (
     LOGO_ART, ENABLE_DAY_ONE_CHECK, ENABLE_UNIQUE_RECHECK,
     ENABLE_DASHBOARD, ENABLE_KEYGEN, ENABLE_ALERTS,
     ENABLE_BACKLOG_CONVERSION, LOG_DIR, CONFIG_FILE_PATH,
-    CSV_DIR, VANITYSEARCH_PATH, DOWNLOAD_DIR
+    CSV_DIR, VANITYSEARCH_PATH, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
+    CHECKER_BACKLOG_PAUSE_THRESHOLD
 )
 
-from core.logger import log_message, start_listener, stop_listener
+from core.logger import log_message, start_listener, stop_listener, get_logger
 from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint
 from core.downloader import download_and_compare_address_lists, generate_test_csv
 from core.csv_checker import check_csvs_day_one, check_csvs
@@ -393,7 +394,85 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
     return processes, named_processes
 
 
+def run_btc_only(args):
+    """Run BTC-only keygen and checker pipeline."""
+    from multiprocessing import Process
+    from core.keygen import start_keygen_loop
+    from core.btc_only_checker import (
+        prepare_btc_only_mode,
+        process_pending_vanity_outputs_once,
+        get_vanity_backlog_count,
+    )
+
+    os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(VANITY_OUTPUT_DIR, exist_ok=True)
+    start_listener()
+    display_logo()
+    assign_gpu_roles()
+
+    shared_metrics = init_dashboard_manager()
+    init_shared_metrics(shared_metrics)
+
+    shutdown_event = multiprocessing.Event()
+    keygen_shutdown = multiprocessing.Event()
+    keygen_pause = multiprocessing.Event()
+
+    from core.dashboard import register_control_events, get_pause_event, get_shutdown_event
+    register_control_events(shutdown_event, None)
+    register_control_events(keygen_shutdown, keygen_pause, module="keygen")
+    keygen_pause = get_pause_event("keygen")
+    keygen_shutdown = get_shutdown_event("keygen")
+
+    logger = get_logger("btc_only")
+    use_all = bool(args.all)
+    use_funded = bool(args.funded)
+    if not (use_all ^ use_funded):
+        log_message("Must specify exactly one of -all or -funded", "ERROR")
+        return
+
+    prepare_btc_only_mode(use_all, logger, skip_downloads=args.skip_downloads)
+
+    keygen_proc = Process(target=start_keygen_loop, args=(shared_metrics, keygen_shutdown, keygen_pause, None))
+    keygen_proc.daemon = True
+    keygen_proc.start()
+
+    metrics_proc = Process(target=metrics_updater, args=(shared_metrics,))
+    metrics_proc.daemon = True
+    metrics_proc.start()
+
+    if ENABLE_DASHBOARD and not args.no_dashboard:
+        dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
+        dashboard_thread.start()
+
+    try:
+        while not shutdown_event.is_set():
+            backlog = get_vanity_backlog_count()
+            set_metric("vanity_backlog_count", backlog)
+            if backlog > CHECKER_BACKLOG_PAUSE_THRESHOLD:
+                keygen_pause.set()
+            else:
+                keygen_pause.clear()
+            process_pending_vanity_outputs_once(logger)
+            time.sleep(2)
+    except KeyboardInterrupt:
+        log_message("Shutting down BTC-only mode", "INFO")
+    finally:
+        shutdown_event.set()
+        keygen_shutdown.set()
+        try:
+            keygen_proc.join(timeout=5)
+        except Exception:
+            pass
+        try:
+            metrics_proc.terminate()
+        except Exception:
+            pass
+        stop_listener()
+
 def run_allinkeys(args):
+    if getattr(args, "only", None) == "btc":
+        run_btc_only(args)
+        return
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(CSV_DIR, exist_ok=True)
     start_listener()
@@ -506,6 +585,10 @@ if __name__ == "__main__":
     parser.add_argument("--skip-downloads", action="store_true", help="Skip downloading balance files")
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
+    parser.add_argument("-only", choices=["btc"], help="Restrict to a single coin flow.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("-all", action="store_true", help="Use 'all BTC addresses ever used' range mode")
+    mode.add_argument("-funded", action="store_true", help="Use daily funded BTC list")
     args = parser.parse_args()
 
     run_allinkeys(args)

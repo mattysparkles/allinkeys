@@ -349,6 +349,13 @@ def _default_metrics():
         "backlog_avg_time": "N/A",
         "backlog_current_file": "",
         "backlog_progress": {},
+        "btc_ranges_download_size_bytes": 0,
+        "btc_ranges_download_progress_bytes": 0,
+        "btc_ranges_files_ready": False,
+        "btc_ranges_updated_today": False,
+        "vanity_backlog_count": 0,
+        "btc_only_files_checked_today": 0,
+        "btc_only_matches_found_today": 0,
         "csv_checker": {
             "rows_checked": 0,
             "matches_found": 0,

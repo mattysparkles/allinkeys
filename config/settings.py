@@ -40,6 +40,14 @@ CSV_CHECKPOINT_STATE = os.path.join(LOG_DIR, "csv_checker_state.json")
 DOWNLOAD_DIR = DOWNLOADS_DIR
 CHECKPOINT_FILE = os.path.join(BASE_DIR, "checkpoint.json")
 
+# === BTC-only mode settings ===
+ALL_BTC_ADDRESSES_URL = "http://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"
+ALL_BTC_ADDRESSES_DIR = os.path.join(BASE_DIR, "all_btc_addresses")
+ALL_BTC_RANGES_COUNT = 20
+ALL_BTC_GZ_LOCAL = os.path.join(ALL_BTC_ADDRESSES_DIR, "all_Bitcoin_addresses_ever_used_sorted.txt.gz")
+BTC_RANGE_FILE_PATTERN = "btc_range_{:02d}.txt"  # 00..19
+CHECKER_BACKLOG_PAUSE_THRESHOLD = 20
+
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
 VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")  # Adjust if renamed
@@ -446,6 +454,13 @@ STATS_TO_DISPLAY = {
     "backlog_eta": SHOW_BACKLOG_PROCESS_TIME_UNTIL_CAUGHT_UP,
     "backlog_avg_time": SHOW_AVERAGE_TIME_PER_BACKLOG_FILE,
     "backlog_current_file": SHOW_PROGRESS_BAR_CURRENT_BACKLOG_FILENAME_PROCESSING,
+    "vanity_backlog_count": True,
+    "btc_ranges_download_size_bytes": True,
+    "btc_ranges_download_progress_bytes": True,
+    "btc_ranges_files_ready": True,
+    "btc_ranges_updated_today": True,
+    "btc_only_files_checked_today": True,
+    "btc_only_matches_found_today": True,
     "csv_checker": True,
     "gpu_stats": True,
     "gpu_assignments": True,
@@ -485,10 +500,17 @@ METRICS_LABEL_MAP = {
     "vanity_progress_percent": "Keygen Progress %",
     "addresses_checked_today": "Addresses Checked Today",
     "addresses_checked_lifetime": "Addresses Checked Lifetime",
-    "backlog_files_queued": "Backlog Queue", 
+    "backlog_files_queued": "Backlog Queue",
     "backlog_eta": "Backlog ETA",
     "backlog_avg_time": "Avg. Backlog Time",
     "backlog_current_file": "Current Backlog File",
+    "vanity_backlog_count": "Vanity Backlog",
+    "btc_ranges_download_size_bytes": "BTC Ranges Size (bytes)",
+    "btc_ranges_download_progress_bytes": "BTC Ranges Progress (bytes)",
+    "btc_ranges_files_ready": "BTC Ranges Ready",
+    "btc_ranges_updated_today": "BTC Ranges Updated",
+    "btc_only_files_checked_today": "BTC Files Checked Today",
+    "btc_only_matches_found_today": "BTC Matches Today",
     "csv_checker": "CSV Checker",
     "gpu_stats": "GPU Stats",
     "gpu_assignments": "GPU Assignments",
