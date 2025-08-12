@@ -17,6 +17,7 @@ import multiprocessing
 import threading
 from datetime import datetime, timedelta
 from multiprocessing import Process
+from core.logger import get_logger
 import psutil
 
 # Wrap stdout once with UTF-8 encoding if not already wrapped
