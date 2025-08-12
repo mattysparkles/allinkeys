@@ -6,6 +6,8 @@ from datetime import datetime, timezone, timedelta
 import core.checkpoint as checkpoint
 import traceback
 import multiprocessing
+from contextlib import nullcontext
+from typing import Dict
 from core.logger import get_logger
 from config.settings import (
     ENABLE_KEYGEN,
@@ -50,8 +52,12 @@ class LoggedEvent:
 
     The GUI is the only component allowed to modify pause events. If any other
     module calls ``set()`` or ``clear()``, a warning is emitted so inadvertent
-    state changes can be detected quickly.
+    state changes can be detected quickly. Warnings are rate-limited so the log
+    is not spammed by repeated modifications.
     """
+
+    _last_warn_ts: Dict[str, float] = {}
+    _warn_interval = 30.0
 
     def __init__(self, name, ev):
         self._ev = ev
@@ -64,14 +70,21 @@ class LoggedEvent:
                 return True
         return False
 
-    def set(self):
-        if not self._called_from_gui():
+    def _warn_if_needed(self):
+        if self._called_from_gui():
+            return
+        now = time.monotonic()
+        last = self._last_warn_ts.get(self.name, 0.0)
+        if now - last >= self._warn_interval:
             logger.warning(f"⚠️ Pause flag '{self.name}' modified outside GUI")
+            self._last_warn_ts[self.name] = now
+
+    def set(self):
+        self._warn_if_needed()
         self._ev.set()
 
     def clear(self):
-        if not self._called_from_gui():
-            logger.warning(f"⚠️ Pause flag '{self.name}' modified outside GUI")
+        self._warn_if_needed()
         self._ev.clear()
 
     def is_set(self):
@@ -183,17 +196,28 @@ def save_lifetime_metrics():
             data[key] = dict(val)
         else:
             data[key] = val
-    try:
-        # [FIX PHASE 2] atomic write to survive crashes/power loss
-        tmp_path = METRICS_LIFETIME_PATH + '.tmp'
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, METRICS_LIFETIME_PATH)
-        logger.debug("Lifetime metrics saved to disk")
-    except Exception:
-        logger.exception("Failed to save lifetime metrics")
+    lock = metrics_lock if metrics_lock else nullcontext()
+    with lock:
+        delays = [0.1, 0.25, 0.5, 0.75, 1.0]
+        for i, delay in enumerate(delays, 1):
+            try:
+                # [FIX PHASE 2] atomic write to survive crashes/power loss
+                tmp_path = METRICS_LIFETIME_PATH + '.tmp'
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, METRICS_LIFETIME_PATH)
+                logger.debug("Lifetime metrics saved to disk")
+                break
+            except OSError:
+                if i == len(delays):
+                    logger.exception("Failed to save lifetime metrics")
+                else:
+                    time.sleep(delay)
+            except Exception:
+                logger.exception("Failed to save lifetime metrics")
+                break
 
 
 def maybe_persist_lifetime(key):
