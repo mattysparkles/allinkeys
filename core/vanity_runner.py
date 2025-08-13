@@ -12,6 +12,11 @@ from config.settings import (
     VANITYSEARCH_BIN_CPU,
     MIN_EXPECTED_GPU_MKEYS,
     MAX_OUTPUT_FILE_SIZE,
+    ENABLE_P2WPKH,
+    ENABLE_TAPROOT,
+    DEFAULT_BTC_PATTERNS,
+    DEFAULT_BTC_PATTERNS_BECH32,
+    DEFAULT_BTC_PATTERNS_BECH32M,
 )
 from core.logger import get_logger
 from core.dashboard import set_metric, update_dashboard_stat
@@ -127,13 +132,25 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
     return backend, device_id, device_name, binary
 
 
+def build_vanitysearch_args(hex_seed: str) -> List[Tuple[List[str], str]]:
+    """Return a list of argument lists for each enabled address type."""
+    jobs: List[Tuple[List[str], str]] = []
+    jobs.append((["-s", hex_seed, "-u", DEFAULT_BTC_PATTERNS[0]], "p2pkh"))
+    if ENABLE_P2WPKH:
+        jobs.append((["-s", hex_seed, "-u", DEFAULT_BTC_PATTERNS_BECH32[0]], "p2wpkh"))
+    if ENABLE_TAPROOT:
+        jobs.append((["-s", hex_seed, "-u", DEFAULT_BTC_PATTERNS_BECH32M[0]], "taproot"))
+    return jobs
+
+
 def run_vanitysearch(seed_args: List[str], output_path: str, device_id: Optional[int], backend: str,
-                     timeout: int = 60, pause_event=None) -> bool:
+                     timeout: int = 60, pause_event=None, addr_mode: str = "p2pkh") -> bool:
     """Execute VanitySearch with live speed parsing and output capture."""
     binary = resolve_vanitysearch_binary(backend)
     cmd = [binary] + seed_args + ["-o", output_path]
     if backend in ("cuda", "opencl") and device_id is not None:
         cmd += ["-gpu", str(device_id)]
+    update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
     logger.info(f"Executing: {' '.join(cmd)}")
 
     try:
