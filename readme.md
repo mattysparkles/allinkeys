@@ -1,12 +1,12 @@
 # 🧠 AllInKeys — Modular Key Discovery System
 
-AllInKeys is a high-performance Python-based tool designed for Bitcoin and altcoin key discovery, address monitoring, and wallet analysis. It supports GPU-accelerated key generation, altcoin derivation, vanity address searches, PGP-encrypted alerts, daily balance list scanning, and a live system dashboard.
+AllInKeys is a Python toolkit for discovering and monitoring cryptocurrency keys and addresses. It wraps GPU-accelerated tools like VanitySearch and adds a modular pipeline for downloading balance lists, deriving altcoin addresses, checking matches, and notifying you via encrypted alerts or a live dashboard.
 
 ## 🚧 Project Status
 
-This repository was recently opened to the public and is still a work in progress. Several modules are being refactored and may not behave perfectly yet. I wanted to share the code early for fun and to get feedback while the remaining pieces are fixed up.
+This repository was recently opened to the public and remains a work in progress. Modules are actively being refactored and new features are added frequently.
 
-> 🔐 Whether you're a security researcher, digital archaeologist, or white-hat crypto enthusiast, AllInKeys is a fully modular suite for probing and understanding blockchain address keyspace.
+> 🔐 Whether you're a security researcher, digital archaeologist, or white‑hat crypto enthusiast, AllInKeys is a modular suite for probing and understanding blockchain address keyspace.
 
 ---
 
@@ -14,7 +14,9 @@ This repository was recently opened to the public and is still a work in progres
 
 ### 🧱 Requirements
 
-Install Python 3.9+ and Git first, then:
+* Python 3.9+
+* Git
+* Optional: CUDA/OpenCL drivers for GPU support
 
 ```bash
 git clone https://github.com/mattysparkles/allinkeys.git
@@ -24,56 +26,63 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 📁 Directory Structure
+Copy `.env.example` to `.env` and fill in any credentials needed for alert channels (email, Telegram, Twilio, etc.).
+
+### 📁 Directory Overview
 
 ```
 allinkeys/
+├── alerts/                  # Alert sounds and assets
+├── bin/                     # Third‑party binaries (VanitySearch)
 ├── config/
-│   ├── settings.py           # Master config for all modules
-│   ├── coin_definitions.py   # Address column mapping by coin
+│   ├── settings.py          # Master configuration
+│   ├── constants.py         # Shared constants
+│   └── coin_definitions.py  # Column mapping per coin
 ├── core/
-│   ├── keygen.py             # Bitcoin key generator (VanitySearch)
-│   ├── altcoin_derive.py     # Seed → WIF + address derivation
-│   ├── downloader.py         # Balance list downloader
-│   ├── csv_checker.py        # CSV address matching logic
-│   ├── logger.py             # Logger system
-│   ├── alerts.py             # All alert types (PGP, popup, email, etc.)
-│   ├── checkpoint.py         # Save/restore progress
-│   ├── pgp_utils.py          # PGP encryption helpers
+│   ├── keygen.py            # Bitcoin key generation (VanitySearch wrapper)
+│   ├── altcoin_derive.py    # Seed → WIF + altcoin address derivation
+│   ├── csv_checker.py       # CSV address matching logic
+│   ├── downloader.py        # Balance list downloader
+│   ├── backlog.py           # Convert VanitySearch output to CSV
+│   ├── gpu_scheduler.py     # Assign work across GPUs
+│   ├── gpu_selector.py      # GPU role selection helpers
+│   ├── alerts.py            # PGP, desktop, Telegram, etc.
+│   ├── checkpoint.py        # Save/restore keygen progress
+│   ├── logger.py            # Central logging setup
+│   ├── dashboard.py         # Metrics for the GUI
+│   └── utils/               # Misc helpers
 ├── ui/
-│   ├── dashboard_gui.py      # Tkinter-based system dashboard
-├── Downloads/                # Funded address lists
-├── VanityOutput/             # Raw VanitySearch output
-├── CSVs/                     # Altcoin-derived address files
-├── Matches/                  # Alert match logs
-├── main.py                   # Central orchestration script
-├── README.md
-├── requirements.txt
+│   └── dashboard_gui.py     # Tkinter-based dashboard
+├── utils/
+│   ├── balance_checker.py
+│   ├── file_utils.py
+│   └── pgp_utils.py
+├── Downloads/               # Downloaded funded address lists
+├── logs/                    # Runtime logs and checkpoints
+├── output/
+│   └── csv/                 # Converted address batches
+├── vanity_output/           # Raw VanitySearch batches (.txt)
+├── .env.example
+├── main.py                  # Orchestrates modules
+└── requirements.txt
 ```
 
 ---
 
 ## 🧩 Configuration
 
-### 🛠 settings.py (Found in `/config/`)
+### 🛠 `settings.py` (in `/config`)
+All runtime behaviour is configured in `config/settings.py`. Tweak this file to enable or disable modules, change GPU strategy, alert options and more.
 
-All runtime behavior is controlled from `settings.py`, a Python-based config file.
-
-Example:
+Example snippet:
 
 ```python
 USE_GPU = True
-CHECKPOINT_ENABLED = True
-CHECKPOINT_INTERVAL_SECONDS = 30
 ENABLE_ALERTS = True
-ENABLE_PGP = True
+ENABLE_BACKLOG_CONVERSION = True
+CHECKPOINT_INTERVAL_SECONDS = 30
 PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
-ENABLE_KEYGEN = True
-ENABLE_DASHBOARD = True
-ENABLE_UNIQUE_RECHECK = True
 ```
-
-> ✅ Edit this file directly. It acts like `raspi-config` — all modules read from it.
 
 ---
 
@@ -81,33 +90,51 @@ ENABLE_UNIQUE_RECHECK = True
 
 ### 🔹 Default Run
 
-Launch the full system:
-
 ```bash
 python main.py
 ```
 
-This will:
-- Load or create a checkpoint
-- Download address lists (BTC, ETH, DOGE, etc.)
+The default run will:
+
+- Restore or create checkpoints
+- Download funded address lists
 - Start the GUI dashboard
-- Begin key generation and CSV monitoring
-- Trigger match alerts if enabled
+- Launch key generation and CSV monitoring
+- Convert VanitySearch backlog to CSV
+- Send match alerts if enabled
+
+### 🔸 Command Line Options
+
+`python main.py --help` displays all flags. Common examples:
+
+| Flag | Description |
+|------|-------------|
+| `--skip-backlog` | Start without backlog conversion |
+| `--no-dashboard` | Do not launch the GUI dashboard |
+| `--skip-downloads` | Skip downloading balance files |
+| `--headless` | Run without any GUI components |
+| `--match-test` | Trigger a fake match alert on startup |
+| `-only btc` | Restrict processing to a single coin flow |
+| `-all` | Use "all BTC addresses ever used" list |
+| `-funded` | Use daily funded BTC list |
 
 ---
 
 ## 🧪 Features by Module
 
-| Feature                     | Module                 | Config Setting                            |
-|----------------------------|------------------------|--------------------------------------------|
-| GPU Vanity Key Generation  | `core/keygen.py`       | `USE_GPU`, `PATTERN`, `MAX_BATCH_SIZE`     |
-| Altcoin Address Derivation | `core/altcoin_derive.py` | `ENABLE_ALTCOIN_DERIVATION`                |
-| CSV Address Check          | `core/csv_checker.py`  | `ENABLE_DAY_ONE_CHECK`, `ENABLE_UNIQUE_RECHECK` |
-| Daily Download of Lists    | `core/downloader.py`   | N/A (auto-enabled)                         |
-| Alerts (PGP, audio, popup) | `core/alerts.py`       | `ENABLE_ALERTS`, `PGP_PUBLIC_KEY_PATH`, etc. |
-| Live System Dashboard      | `ui/dashboard_gui.py`  | `ENABLE_DASHBOARD`, various SHOW_* flags   |
-| Logging                    | `core/logger.py`       | `LOG_LEVEL`, `LOG_TO_FILE`                 |
-| Checkpoint Save/Restore    | `core/checkpoint.py`   | `CHECKPOINT_ENABLED`, `CHECKPOINT_PATH`    |
+| Feature                         | Module                     | Config Toggle / Notes               |
+|---------------------------------|----------------------------|------------------------------------|
+| GPU Vanity Key Generation       | `core/keygen.py`           | `USE_GPU`, `VANITY_PATTERN`, etc.  |
+| Altcoin Address Derivation      | `core/altcoin_derive.py`   | `ENABLE_ALTCOIN_DERIVATION`        |
+| CSV Address Checking            | `core/csv_checker.py`      | `ENABLE_DAY_ONE_CHECK`, `ENABLE_UNIQUE_RECHECK` |
+| Daily Download of Lists         | `core/downloader.py`       | auto-enabled                       |
+| Vanity Output → CSV Backlog     | `core/backlog.py`          | `ENABLE_BACKLOG_CONVERSION`        |
+| GPU Scheduling                  | `core/gpu_scheduler.py`    | `GPU_STRATEGY`                     |
+| GPU Role Assignment             | `core/gpu_selector.py`     | `VANITY_GPU_INDEX`, `ALTCOIN_GPUS_INDEX` |
+| Alerts (PGP, audio, popup...)   | `core/alerts.py`           | `ENABLE_ALERTS`, `PGP_PUBLIC_KEY_PATH` |
+| Live System Dashboard           | `ui/dashboard_gui.py`      | `ENABLE_DASHBOARD`, `ENABLE_GUI`   |
+| Logging                         | `core/logger.py`           | `LOG_LEVEL`, `LOG_TO_FILE`         |
+| Checkpoint Save/Restore         | `core/checkpoint.py`       | `CHECKPOINT_INTERVAL_SECONDS`      |
 
 ---
 
@@ -115,24 +142,23 @@ This will:
 
 - 🔊 Audio file alert (`.wav`, `.mp3`)
 - 🖥 Desktop popup window
-- 🔐 PGP-encrypted email (SMTP)
+- 🔐 PGP‑encrypted email (SMTP)
 - 📩 Telegram bot
 - 📱 SMS / phone call via Twilio
 - 💬 Discord webhook
 - 🏠 Home Assistant integration
-- ☁️ Upload match files to: iCloud, Dropbox, Google Drive
+- ☁️ Upload match files to iCloud, Dropbox, Google Drive
 
 ---
 
 ## 🔐 Example: Add Your PGP Key
-
-To enable match alerts via encrypted PGP:
 
 ```bash
 gpg --armor --export you@example.com > my_pgp_key.asc
 ```
 
 Then set in `settings.py`:
+
 ```python
 ENABLE_PGP = True
 PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
@@ -157,7 +183,7 @@ pip install pyinstaller
 pyinstaller --onefile main.py
 ```
 
-Yields `dist/main.exe` — standalone binary.
+Produces `dist/main.exe` — a standalone binary.
 
 ---
 
@@ -173,27 +199,26 @@ Yields `dist/main.exe` — standalone binary.
 
 ## 🧩 Included Component: VanitySearch Binary (MIT License)
 
-This project includes a precompiled binary of **VanitySearch**, a GPU-accelerated Bitcoin vanity address generator.
-### Binary Tools
+This project includes a precompiled binary of **VanitySearch**, a GPU‑accelerated Bitcoin vanity address generator.
 
-`bin/VanitySearch.exe`, a precompiled binary from a third-party MIT-licensed fork of [VanitySearch](https://github.com/JeanLucPons/VanitySearch). See `third_party_licenses.md` for details.
-
+`bin/VanitySearch.exe` comes from a third‑party MIT‑licensed fork. See `third_party_licenses.md` for details.
 
 - **Original project**: [VanitySearch by Jean-Luc Pons](https://github.com/JeanLucPons/VanitySearch)
 - **License**: MIT
-- **Binary origin**: A third-party fork of the VanitySearch project that adds seed-based deterministic search capability.
-- **Compiler**: Not compiled by us — this executable was distributed by the forked project directly.
+- **Binary origin**: Third‑party fork with deterministic seed search
+- **Compiler**: Provided by the forked project
 
-We make **no claims or guarantees** about the performance, security, or accuracy of the included VanitySearch binary. Use at your own discretion.
+We make **no claims or guarantees** about the performance, security or accuracy of the included VanitySearch binary. Use at your own discretion.
 
-> If you are the author of the specific fork used, and would like attribution or changes, feel free to open an issue or PR.
+> If you are the author of the specific fork used and would like attribution or changes, feel free to open an issue or PR.
+
+**License Notice**: The original VanitySearch project and most forks are distributed under the MIT License. A copy of the license is included below.
 
 ---
 
-**License Notice**: The original VanitySearch project and most of its forks are distributed under the MIT License. A copy of the license is included below.
-
 ## 🚨 Legal Notice
 
-AllInKeys is provided for **educational and research use only**. The authors do not condone or support illegal behavior. Use responsibly.
+AllInKeys is provided for **educational and research use only**. The authors do not condone or support illegal behaviour. Use responsibly.
 
 🧠 _Created with love and paranoia by Sparkles_
+
