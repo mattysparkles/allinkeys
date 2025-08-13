@@ -107,6 +107,13 @@ ALERT_CHANNELS = [
     "home_assistant",
 ]
 
+# Map legacy metric names to new ones so older modules keep functioning
+METRIC_ALIASES = {
+    "btc_ranges_download_size_bytes": "new_btc_ranges_size_bytes",
+    "btc_ranges_download_progress_bytes": "btc_ranges_progress",
+    "btc_ranges_updated_today": "btc_ranges_last_updated",
+}
+
 # Lifetime metrics persistence
 METRICS_LIFETIME_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'metrics_lifetime.json'))
 LIFETIME_KEYS = {
@@ -308,6 +315,9 @@ def _default_metrics():
         "batches_completed": 0,
         "current_seed_index": 0,
         "vanitysearch_speed": "0 MKeys/s",
+        "vanitysearch_current_mkeys": 0.0,
+        "vanitysearch_backend": "cpu",
+        "vanitysearch_device_name": "N/A",
         "keys_per_sec": 0,
         "active_gpus": {},
         "csv_checked_today": 0,
@@ -337,6 +347,9 @@ def _default_metrics():
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
         },
         "addresses_checked_lifetime": {
+            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
+        },
+        "matches_found_today": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
         },
         "matches_found_lifetime": {
@@ -373,8 +386,9 @@ def _default_metrics():
         "backlog_avg_time": "N/A",
         "backlog_current_file": "",
         "backlog_progress": {},
-        "btc_ranges_download_size_bytes": 0,
-        "btc_ranges_download_progress_bytes": 0,
+        "new_btc_ranges_size_bytes": 0,
+        "btc_ranges_progress": 0,
+        "btc_ranges_last_updated": "N/A",
         "btc_ranges_files_ready": False,
         "btc_ranges_updated_today": False,
         "vanity_backlog_count": 0,
@@ -513,6 +527,9 @@ def _update_stat_internal(key, value=None):
     else:
         metrics[key] = value
     maybe_persist_lifetime(key)
+    alias = METRIC_ALIASES.get(key)
+    if alias:
+        metrics[alias] = value
 
 def increment_metric(key, amount=1):
     """Increase a metric value in a process-safe manner."""
@@ -524,6 +541,9 @@ def increment_metric(key, amount=1):
                     metrics[top][sub] = metrics[top].get(sub, 0) + amount
             elif isinstance(metrics.get(key), int):
                 metrics[key] += amount
+            alias = METRIC_ALIASES.get(key)
+            if alias:
+                metrics[alias] = metrics.get(key)
     else:
         if "." in key:
             top, sub = key.split(".", 1)
@@ -531,6 +551,9 @@ def increment_metric(key, amount=1):
                 metrics[top][sub] = metrics[top].get(sub, 0) + amount
         elif isinstance(metrics.get(key), int):
             metrics[key] = metrics.get(key, 0) + amount
+        alias = METRIC_ALIASES.get(key)
+        if alias:
+            metrics[alias] = metrics.get(key)
     maybe_persist_lifetime(key)
 
 

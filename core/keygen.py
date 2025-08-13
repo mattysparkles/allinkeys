@@ -1,33 +1,28 @@
 # core/keygen.py
 
 import os
-import sys
 import time
-import subprocess
-import threading
 import logging
 import secrets
 from datetime import datetime
 from collections import deque
 from config.settings import (
-    VANITYSEARCH_PATH,
     VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
     BATCH_SIZE,
     ADDR_PER_FILE,
-    LOGGING_ENABLED,
     CHECKPOINT_PATH,
-    MAX_OUTPUT_FILE_SIZE,
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
-    FILES_PER_BATCH
+    FILES_PER_BATCH,
+    FORCE_CPU_FALLBACK
 
 )
 
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
-from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 from core.logger import get_logger
+from core import vanity_runner
 
 
 # Runtime trackers
@@ -95,12 +90,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     """
     global total_keys_generated, last_output_file
 
-    # ``gpu_flag`` allows the GUI to toggle GPU usage at runtime. When False we
-    # skip setting ``CUDA_VISIBLE_DEVICES`` so VanitySearch runs on CPU only.
-    use_gpu = True if gpu_flag is None else bool(gpu_flag.value)
-    selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
-    gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
-
     hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
     hex_seed_short = hex(initial_seed_int)[2:].lstrip("0")[:8] or "00000000"
 
@@ -110,61 +99,18 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     )
     last_output_file = current_output_path
 
-    cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full]
-    if use_gpu:
-        cmd.append("-gpu")  # Enable CUDA acceleration
-    cmd.extend(["-o", current_output_path, "-u", VANITY_PATTERN])
-    logger.info(
-        f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'CPU'}"
+    seed_args = ["-s", hex_seed_full, "-u", VANITY_PATTERN]
+    backend = vanity_runner.get_selected_backend()
+    device_id = vanity_runner.get_selected_device_id()
+    success = vanity_runner.run_vanitysearch(
+        seed_args,
+        current_output_path,
+        device_id,
+        backend,
+        timeout=ROTATE_INTERVAL_SECONDS,
+        pause_event=pause_event,
     )
-    logger.info(f"🚀 Running command: {' '.join(cmd)}")
-    if pause_event and pause_event.is_set():
-        logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
-        return False
-
-    try:
-        with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
-            logger.info(f"Opened {current_output_path} for writing")
-            # Launch VanitySearch as a subprocess and stream output to the file
-            proc = subprocess.Popen(
-                cmd,
-                stdout=outfile,
-                stderr=subprocess.STDOUT,
-                env={**os.environ, **gpu_env},
-            )
-            logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd}")
-
-            def monitor_process(p, path):
-                """Monitor file size and pause requests while VanitySearch runs."""
-                start = time.time()
-                while p.poll() is None:
-                    if pause_event and pause_event.is_set():
-                        logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
-                        p.terminate()
-                        break
-                    if time.time() - start >= ROTATE_INTERVAL_SECONDS:
-                        # Periodically rotate output files so they don't grow without bound
-                        logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
-                        p.terminate()
-                        break
-                    try:
-                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
-                            logger.info(
-                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {os.path.basename(path)}"
-                            )
-                            p.terminate()
-                            break
-                    except FileNotFoundError:
-                        # File might not exist yet; log at debug and retry
-                        logger.debug("Output file not yet created during monitoring")
-                    time.sleep(1)
-
-            timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
-            timer_thread.start()
-            proc.wait()
-            timer_thread.join()
-    except Exception as e:
-        logger.exception(f"Failed to execute VanitySearch: {e}")
+    if not success:
         return False
 
     if os.path.exists(current_output_path):
@@ -221,6 +167,11 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     set_metric("keys_generated_today", 0)
     set_metric("vanity_progress_percent", 0)
     set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
+
+    backend, device_id, device_name, binary = vanity_runner.probe_device()
+    logger.info(
+        f"Startup selection → device: {device_name} | backend: {backend} | binary: {binary} | FORCE_CPU_FALLBACK={FORCE_CPU_FALLBACK}"
+    )
 
     try:
         set_metric("status.keygen", "Running")

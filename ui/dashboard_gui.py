@@ -101,8 +101,6 @@ class DashboardGUI:
             "gpu_stats", "gpu_assignments", "gpu_strategy", "gpu_assignment",
             "vanity_gpu_on", "altcoin_gpu_on", "uptime",
             "vanity_progress_percent", "last_updated", "status",
-            "btc_ranges_download_size_bytes", "btc_ranges_download_progress_bytes",
-            "btc_ranges_files_ready", "btc_ranges_updated_today",
         }
         csv_stats = {
             "csv_checked_today", "csv_rechecked_today",
@@ -118,6 +116,8 @@ class DashboardGUI:
             "current_seed_index", "altcoin_files_converted",
             "derived_addresses_today", "vanity_backlog_count",
             "btc_only_files_checked_today", "btc_only_matches_found_today",
+            "new_btc_ranges_size_bytes", "btc_ranges_progress", "btc_ranges_last_updated",
+            "vanitysearch_current_mkeys", "vanitysearch_backend", "vanitysearch_device_name",
         }
 
         for key, enabled in STATS_TO_DISPLAY.items():
@@ -131,35 +131,34 @@ class DashboardGUI:
             elif key in backlog_stats:
                 grouped_keys["Backlog"].append((key, label))
 
-        frames = [(g, k) for g, k in grouped_keys.items() if k]
-        per_col = (len(frames) + 2) // 3
-        col = 0
-        row = 0
         FONT = ("Segoe UI", 9)
         SMALL_FONT = ("Segoe UI", 8)
 
-        for idx, (group, keys) in enumerate(frames):
-            if idx and idx % per_col == 0:
-                col += 1
-                row = 0
-            frame = ttk.LabelFrame(self.section_frame, text=group)
-            frame.grid(row=row, column=col, padx=5, pady=10, sticky="nsew")
-            self.section_frame.grid_columnconfigure(col, weight=1, uniform="metric")
-            frame.grid_columnconfigure(1, weight=1)
-            SMALL_FONT_KEYS = {
-                "addresses_checked_today", "addresses_checked_lifetime",
-                "matches_found_lifetime"
-            }
-            for i, (key, label_text) in enumerate(keys):
-                ttk.Label(
-                    frame,
-                    text=label_text + ":",
-                    anchor="w",
-                    wraplength=150,
-                    justify="left",
-                    font=FONT,
-                ).grid(row=i, column=0, sticky="nw", padx=2, pady=2)
+        self.section_frame.grid_columnconfigure(0, weight=1)
+        self.section_frame.grid_columnconfigure(1, weight=1)
+        self.section_frame.grid_columnconfigure(2, weight=1)
+        self.section_frame.grid_rowconfigure(0, weight=1)
+        column_frames = {
+            "System Stats": ttk.Frame(self.section_frame),
+            "CSV Checker": ttk.Frame(self.section_frame),
+            "Backlog": ttk.Frame(self.section_frame),
+        }
+        column_frames["System Stats"].grid(row=0, column=0, sticky="nsew", padx=5)
+        column_frames["CSV Checker"].grid(row=0, column=1, sticky="nsew", padx=5)
+        column_frames["Backlog"].grid(row=0, column=2, sticky="nsew", padx=5)
 
+        for group, keys in grouped_keys.items():
+            if not keys:
+                continue
+            parent = column_frames[group]
+            frame = ttk.LabelFrame(parent, text=group)
+            frame.pack(fill="both", expand=True, pady=10)
+            frame.grid_columnconfigure(1, weight=1)
+            SMALL_FONT_KEYS = {"addresses_checked_today", "addresses_checked_lifetime", "matches_found_lifetime"}
+            for i, (key, label_text) in enumerate(keys):
+                ttk.Label(frame, text=label_text + ":", anchor="w", justify="left", font=FONT).grid(
+                    row=i, column=0, sticky="nw", padx=2, pady=2
+                )
                 if key not in ("cpu_usage", "ram_usage") and any(x in key for x in ["usage", "percent", "progress"]) and key != "keys_per_sec":
                     pb = ttk.Progressbar(frame, length=150, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
@@ -177,20 +176,18 @@ class DashboardGUI:
                         fg="white",
                         bg="#222222",
                         font=font_opt,
-                        wraplength=300,
                         justify="left",
                     )
                     lbl.grid(row=i, column=1, sticky="w", padx=2, pady=2)
+                    lbl.bind("<Configure>", lambda e, l=lbl: l.config(wraplength=l.winfo_width()))
                     self.metrics[key] = lbl
 
-            # Insert active CSV conversion progress bars below backlog metrics
             if group == "Backlog":
                 bp_row = len(keys)
                 ttk.Label(
                     frame,
                     text="🛠️ CSV Conversions In Progress",
                     anchor="w",
-                    wraplength=150,
                     justify="left",
                     font=FONT,
                 ).grid(row=bp_row, column=0, sticky="nw", padx=2, pady=2)
@@ -203,9 +200,7 @@ class DashboardGUI:
                 self.backlog_progress_canvas.create_window((0, 0), window=self.backlog_progress_inner, anchor="nw")
                 self.backlog_progress_inner.bind(
                     "<Configure>",
-                    lambda e: self.backlog_progress_canvas.configure(
-                        scrollregion=self.backlog_progress_canvas.bbox("all")
-                    ),
+                    lambda e: self.backlog_progress_canvas.configure(scrollregion=self.backlog_progress_canvas.bbox("all")),
                 )
                 self.metrics["backlog_progress"] = {}
 
@@ -256,7 +251,12 @@ class DashboardGUI:
                     lambda *_, n=name, v=var: self.on_checkbox_toggle(n, v.get())
                 )
                 self.checkbox_vars[name] = var
-                cb = tk.Checkbutton(alert_frame, text=name, variable=var)
+                label_text = name
+                if name == "ENABLE_PHONE_CALL_ALERT":
+                    label_text = "Enable Call Alert (Twilio)"
+                elif name == "ENABLE_SMS_ALERT":
+                    label_text = "Enable SMS Alert (Twilio)"
+                cb = tk.Checkbutton(alert_frame, text=label_text, variable=var)
                 cb.grid(row=row, column=col, sticky="w", padx=(0, 2))
                 if ALERT_CREDENTIAL_WARNINGS.get(name):
                     tk.Label(alert_frame, text="⚠", fg="red").grid(row=row, column=col + 1)

@@ -254,13 +254,18 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                             "row_number": rows_scanned
                                         }
 
-                                        # Log the match and trigger downstream alerts
-                                        logger.debug(
-                                            f"[MATCH DETECTED] ✅ Match found for {coin.upper()} in row {rows_scanned} — alert triggered"
+                                        balance = None
+                                        if filename != "test_alerts.csv":
+                                            balance = fetch_live_balance(addr, coin)
+                                        log_msg = (
+                                            f"[{match_payload['timestamp']}] coin={coin} address={addr} "
+                                            f"balance={balance if balance is not None else 'unknown'} file={filename} row={rows_scanned}"
                                         )
-                                        logger.error(
-                                            f"✅ MATCH FOUND: {addr} ({coin}) | File: {filename} | Row: {rows_scanned}"
-                                        )
+                                        print(log_msg)
+                                        logger.info(log_msg)
+
+                                        if balance is not None:
+                                            match_payload["balance"] = balance
 
                                         if ENABLE_PGP:
                                             try:
@@ -273,21 +278,11 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                         else:
                                             alert_match(match_payload)
 
-                                        if filename != "test_alerts.csv":
-                                            bal = fetch_live_balance(addr, coin)
-                                            if bal is not None:
-                                                ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-                                                logger.error(
-                                                    f"🎯 Matched {coin.upper()} address {addr} – Current balance: {bal} {coin.upper()} (fetched at {ts})"
-                                                )
-                                            else:
-                                                logger.warning(f"⚠️ Could not fetch balance for {addr}")
-
                                         if normalized not in new_matches:
                                             new_matches.add(normalized)
                                             increment_metric("matched_keys", 1)
-                                            if filename != "test_alerts.csv":
-                                                increment_metric(f"matches_found_lifetime.{coin}", 1)
+                                            increment_metric(f"matches_found_today.{coin}", 1)
+                                            increment_metric(f"matches_found_lifetime.{coin}", 1)
                                             update_dashboard_stat("matches_found_lifetime", get_metric("matches_found_lifetime"))
                                         row_matches.append(addr)
                                         all_matches.append(match_payload)
