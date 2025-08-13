@@ -7,6 +7,8 @@ import smtplib
 import requests
 import threading
 import queue
+import subprocess
+import traceback
 try:
     from twilio.rest import Client
 except Exception:  # handle missing twilio dependency
@@ -29,7 +31,8 @@ from config.settings import (
     ENABLE_SMS_ALERT, ENABLE_PHONE_CALL_ALERT, TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_SMS, TWILIO_TO_CALL,
     ENABLE_DISCORD_ALERT, DISCORD_WEBHOOK_URL,
     ENABLE_HOME_ASSISTANT_ALERT, HOME_ASSISTANT_URL, HOME_ASSISTANT_TOKEN,
-    ENABLE_CLOUD_UPLOAD, PGP_PUBLIC_KEY_PATH, MATCH_LOG_DIR, ENABLE_PGP
+    ENABLE_CLOUD_UPLOAD, PGP_PUBLIC_KEY_PATH, MATCH_LOG_DIR, ENABLE_PGP,
+    ENABLE_PGP_ENCRYPTION, PGP_RECIPIENT, PGP_KEYRING_PATH
 )
 
 from core.logger import log_message
@@ -89,6 +92,71 @@ def _start_audio_worker():
         audio_thread.start()
 
 
+# ------------------------- PGP SUPPORT -------------------------
+_pgp_ok = False
+
+
+def init_pgp():
+    """Validate that a usable PGP key is available."""
+    global _pgp_ok
+    if not (ENABLE_PGP_ENCRYPTION and PGP_RECIPIENT):
+        log_message(
+            "PGP encryption disabled or recipient not set.",
+            "INFO",
+        )
+        return
+    cmd = ["gpg", "--list-keys", PGP_RECIPIENT]
+    if PGP_KEYRING_PATH:
+        cmd = ["gpg", "--keyring", PGP_KEYRING_PATH, "--list-keys", PGP_RECIPIENT]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0 or PGP_RECIPIENT not in res.stdout:
+        log_message(
+            "❌ PGP recipient key not found. To import a public key:\n  gpg --import publickey.asc\n  gpg --list-keys\nEnsure PGP_RECIPIENT matches the uid/email shown by --list-keys.",
+            "ERROR",
+        )
+        _pgp_ok = False
+        return
+    _pgp_ok = True
+    log_message(f"🔐 PGP encryption active for {PGP_RECIPIENT}", "INFO")
+
+
+def pgp_encrypt(text: str):
+    if not _pgp_ok:
+        return None
+    cmd = ["gpg", "--armor", "--encrypt", "-r", PGP_RECIPIENT]
+    if PGP_KEYRING_PATH:
+        cmd = ["gpg", "--keyring", PGP_KEYRING_PATH, "--armor", "--encrypt", "-r", PGP_RECIPIENT]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    out, err = proc.communicate(text)
+    if proc.returncode != 0:
+        log_message(f"❌ PGP encryption failed: {err}", "ERROR")
+        return None
+    return out
+
+
+init_pgp()
+
+
+def send_phone_call_alert(message: str):
+    """Send a Twilio phone call if enabled."""
+    if not (ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT") and Client):
+        return
+    try:
+        if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_CALL]):
+            raise ValueError("Missing Twilio call credentials")
+        client = Client(TWILIO_SID, TWILIO_TOKEN)
+        client.calls.create(
+            twiml=f'<Response><Say>{message}</Say></Response>',
+            from_=TWILIO_FROM,
+            to=TWILIO_TO_CALL,
+        )
+        log_message("📞 Phone call alert triggered.", "INFO")
+        increment_metric("alerts_sent_today.phone")
+        increment_metric("alerts_sent_lifetime.phone")
+    except Exception as exc:
+        log_message(f"❌ Phone call error: {exc}\n{traceback.format_exc()}", "ERROR")
+
+
 def set_alert_flag(name, value):
     """Update runtime alert flags and reflect changes in settings."""
     ALERT_FLAGS[name] = value
@@ -142,6 +210,16 @@ def alert_match(match_data, test_mode=False):
     match_text = f"[{timestamp}] {alert_type}!\nCoin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey}"
     log_message(f"🎯 Match found: {json.dumps(match_data)}", "INFO")
     log_message(f"🚨 {alert_type}: {address} (File: {csv_file})")
+    encrypted_blob = pgp_encrypt(match_text)
+    if encrypted_blob:
+        try:
+            ts = time.strftime('%Y-%m-%d_%H-%M-%S')
+            fname = os.path.join(MATCH_LOG_DIR, f"encrypted_match_{ts}.pgp")
+            with open(fname, "w") as ef:
+                ef.write(encrypted_blob)
+            log_message(f"☁ Encrypted match stored to: {os.path.basename(fname)}", "INFO")
+        except Exception as exc:
+            log_message(f"❌ Failed to store encrypted match: {exc}", "ERROR")
 
     # 🖥️ Desktop Window Alert
     if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT"):
@@ -236,22 +314,7 @@ def alert_match(match_data, test_mode=False):
         except Exception as e:
             log_message(f"❌ SMS alert error: {e}", "WARNING")
 
-    # 📞 Phone Call Alert
-    if ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT") and Client:
-        try:
-            if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_CALL]):
-                raise ValueError("Missing Twilio call credentials")
-            client = Client(TWILIO_SID, TWILIO_TOKEN)
-            client.calls.create(
-                url='http://demo.twilio.com/docs/voice.xml',
-                from_=TWILIO_FROM,
-                to=TWILIO_TO_CALL
-            )
-            log_message("📞 Phone call alert triggered.", "INFO")
-            increment_metric("alerts_sent_today.phone")
-            increment_metric("alerts_sent_lifetime.phone")
-        except Exception as e:
-            log_message(f"❌ Phone call error: {e}", "WARNING")
+    send_phone_call_alert(match_text)
 
     # 💬 Discord Alert
     if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):
@@ -380,3 +443,12 @@ def run_test_alerts_from_csv(csv_path=None):
 # Backwards compatibility
 def trigger_test_alerts():
     run_test_alerts_from_csv()
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test", action="store_true")
+    args = parser.parse_args()
+    if args.test:
+        run_test_alerts_from_csv()

@@ -461,12 +461,16 @@ STATS_TO_DISPLAY = {
     "backlog_avg_time": SHOW_AVERAGE_TIME_PER_BACKLOG_FILE,
     "backlog_current_file": SHOW_PROGRESS_BAR_CURRENT_BACKLOG_FILENAME_PROCESSING,
     "vanity_backlog_count": True,
-    "btc_ranges_download_size_bytes": True,
-    "btc_ranges_download_progress_bytes": True,
+    "new_btc_ranges_size_bytes": True,
+    "btc_ranges_progress": True,
+    "btc_ranges_last_updated": True,
     "btc_ranges_files_ready": True,
     "btc_ranges_updated_today": True,
     "btc_only_files_checked_today": True,
     "btc_only_matches_found_today": True,
+    "vanitysearch_current_mkeys": True,
+    "vanitysearch_backend": True,
+    "vanitysearch_device_name": True,
     "csv_checker": True,
     "gpu_stats": True,
     "gpu_assignments": True,
@@ -511,12 +515,16 @@ METRICS_LABEL_MAP = {
     "backlog_avg_time": "Avg. Backlog Time",
     "backlog_current_file": "Current Backlog File",
     "vanity_backlog_count": "Vanity Backlog",
-    "btc_ranges_download_size_bytes": "BTC Ranges Size (bytes)",
-    "btc_ranges_download_progress_bytes": "BTC Ranges Progress (bytes)",
+    "new_btc_ranges_size_bytes": "New BTC Ranges Size (bytes)",
+    "btc_ranges_progress": "BTC Ranges Progress",
+    "btc_ranges_last_updated": "BTC Ranges Last Updated",
     "btc_ranges_files_ready": "BTC Ranges Ready",
     "btc_ranges_updated_today": "BTC Ranges Updated",
     "btc_only_files_checked_today": "BTC Files Checked Today",
     "btc_only_matches_found_today": "BTC Matches Today",
+    "vanitysearch_current_mkeys": "VanitySearch MKeys/s",
+    "vanitysearch_backend": "VanitySearch Backend",
+    "vanitysearch_device_name": "VanitySearch Device",
     "csv_checker": "CSV Checker",
     "gpu_stats": "GPU Stats",
     "gpu_assignments": "GPU Assignments",
@@ -550,6 +558,8 @@ ALERT_CHECKBOXES = {
     "ALERT_EMAIL_ENABLED": ALERT_EMAIL_ENABLED,
     "ALERT_TELEGRAM_ENABLED": ALERT_TELEGRAM_ENABLED,
     "ALERT_SMS_ENABLED": ALERT_SMS_ENABLED,
+    "ENABLE_SMS_ALERT": ENABLE_SMS_ALERT,
+    "ENABLE_PHONE_CALL_ALERT": ENABLE_PHONE_CALL_ALERT,
     "ALERT_DISCORD_ENABLED": ALERT_DISCORD_ENABLED,
     "ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE": ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE,
     "ALERT_SAVE_MATCHES_TO_GOOGLE_DRIVE": ALERT_SAVE_MATCHES_TO_GOOGLE_DRIVE,
@@ -573,6 +583,18 @@ ALERT_CREDENTIAL_WARNINGS = {
         'TWILIO_TOKEN' in globals(),
         'TWILIO_FROM' in globals(),
         'TWILIO_TO_SMS' in globals()
+    ]),
+    "ENABLE_SMS_ALERT": not all([
+        'TWILIO_SID' in globals(),
+        'TWILIO_TOKEN' in globals(),
+        'TWILIO_FROM' in globals(),
+        'TWILIO_TO_SMS' in globals()
+    ]),
+    "ENABLE_PHONE_CALL_ALERT": not all([
+        'TWILIO_SID' in globals(),
+        'TWILIO_TOKEN' in globals(),
+        'TWILIO_FROM' in globals(),
+        'TWILIO_TO_CALL' in globals()
     ]),
     "ALERT_DISCORD_ENABLED": not ('DISCORD_WEBHOOK_URL' in globals()),
     "ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE": not all([
@@ -602,4 +624,24 @@ BUTTONS_ENABLED = {
     "csv_recheck": CSV_RECHECK_BUTTON_CONTROL,
     "alerts": ALERTS_BUTTON_CONTROL
 }
+
+# ===================== 🖥️ GPU/CPU BACKENDS ==========================
+# GPU/CPU selection & binaries
+GPU_BACKEND = "auto"        # "cuda" | "opencl" | "auto"
+VANITYSEARCH_BIN_CUDA = r"P:\\ALLINKEYS\\bin\\VanitySearch_cuda.exe"
+VANITYSEARCH_BIN_OPENCL = r"P:\\ALLINKEYS\\bin\\VanitySearch_opencl.exe"
+VANITYSEARCH_BIN_CPU = r"P:\\ALLINKEYS\\bin\\VanitySearch_cpu.exe"  # fallback only
+
+FORCE_CPU_FALLBACK = False  # If True, run CPU even if GPU available
+MIN_EXPECTED_GPU_MKEYS = 120.0  # GTX 1060 typical: 150–230 MKeys/s
+
+# Alerts – ensure Twilio CALL enabled
+ENABLE_SMS_ALERT = ENABLE_SMS_ALERT
+ENABLE_PHONE_CALL_ALERT = ENABLE_PHONE_CALL_ALERT
+
+# PGP
+ENABLE_PGP_ENCRYPTION = False
+PGP_RECIPIENT = ""          # key email or uid fragment
+PGP_KEYRING_PATH = r"P:\\ALLINKEYS\\pgp\\pubring.kbx"  # ok if empty; use default
+
 
