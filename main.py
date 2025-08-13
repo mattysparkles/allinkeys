@@ -469,7 +469,10 @@ def run_btc_only(args):
                         "backlog_resume",
                         f"Resumed keygen: backlog {backlog} ≤ {CHECKER_BACKLOG_PAUSE_THRESHOLD}",
                     )
-            process_pending_vanity_outputs_once(logger)
+            try:
+                process_pending_vanity_outputs_once(logger)
+            except Exception as e:
+                logger.warning(f"⚠️ btc_only processing tick encountered an error but will continue: {e}")
             time.sleep(2)
     except KeyboardInterrupt:
         log_message("Shutting down BTC-only mode", "INFO")
