@@ -4,7 +4,7 @@ import os
 import re
 import bisect
 import time
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 from config.settings import (
     VANITY_OUTPUT_DIR,
@@ -23,6 +23,7 @@ from core.btc_ranges import (
 )
 from core.logger import get_logger
 from core.utils.io_safety import safe_nonempty
+from core.sorter import sort_if_ready
 
 logger = get_logger(__name__)
 logger.info("Extractor auto-detect: PubAddr or raw-address mode.")
@@ -31,6 +32,45 @@ logger.info("Extractor auto-detect: PubAddr or raw-address mode.")
 USE_ALL = False
 FUNDed_SET = set()
 BOUNDARIES = []
+
+
+DEBOUNCE_SECONDS = 2  # avoid racing files that are still being written
+
+
+def ensure_sorted_or_skip(vanity_txt_path: str, logger) -> Optional[str]:
+    """
+    Return path to .sorted if it exists and is non-empty.
+    If absent, attempt to create it via sort_if_ready() when the source is ready.
+    Returns None if not available/ready; caller should skip without error.
+    """
+    sorted_path = vanity_txt_path + ".sorted"
+
+    # If .sorted is already present & non-empty, use it
+    if safe_nonempty(sorted_path, min_bytes=128):
+        return sorted_path
+
+    # Source must exist, be non-empty, and not too "fresh"
+    if not os.path.exists(vanity_txt_path):
+        return None
+    if not safe_nonempty(vanity_txt_path, min_bytes=128):
+        return None
+    try:
+        mtime = os.path.getmtime(vanity_txt_path)
+        if (time.time() - mtime) < DEBOUNCE_SECONDS:
+            # Too fresh; let writer/extractor finish
+            return None
+    except OSError:
+        return None
+
+    # Try to make .sorted on-demand (auto-detects PubAddr vs raw-address)
+    try:
+        created = sort_if_ready(vanity_txt_path, logger)
+        if created and safe_nonempty(created, min_bytes=128):
+            return created
+        return None
+    except Exception as e:
+        logger.warning(f"⚠️ On-demand sort failed for {os.path.basename(vanity_txt_path)}: {e}")
+        return None
 
 
 def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -> None:
@@ -171,77 +211,104 @@ def _is_file_stable(path: str, logger) -> bool:
         return False
 
 
-def check_vanity_file_against_ranges(sorted_vanity_txt: str, ranges_dir: str, logger) -> Tuple[int, int]:
-    """Check addresses against BTC ranges or funded set."""
-    original_path = sorted_vanity_txt[: -len(".sorted")]
-    triples, lines = _extract_pubaddr_blocks(original_path, logger)
-    addr_list = [addr for addr, _, _ in triples]
-    rows = matches = 0
-    with open(sorted_vanity_txt, "r", encoding="utf-8") as f:
-        for line in f:
-            addr = line.strip()
-            if not addr:
-                continue
-            rows += 1
-            matched = False
-            if USE_ALL:
-                idx = route_address_to_range(addr, BOUNDARIES)
-                range_file = os.path.join(ranges_dir, BTC_RANGE_FILE_PATTERN.format(idx))
-                matched = _binary_search_file(range_file, addr)
-            else:
-                matched = addr in FUNDed_SET
-            if matched:
-                matches += 1
-                i = bisect.bisect_left(addr_list, addr)
-                if i < len(triples) and triples[i][0] == addr:
-                    start, end = triples[i][1], triples[i][2]
-                    block_lines = lines[start : end + 1]
-                    matches_file = original_path + ".matches.txt"
-                    with open(matches_file, "a", encoding="utf-8") as mf:
-                        mf.writelines(block_lines)
-                        mf.write("---\n")
-                    logger.info(
-                        f"🎯 BTC match in {os.path.basename(original_path)} → wrote block to {os.path.basename(matches_file)}"
-                    )
-                try:
-                    from core.alerts import alert_match
-                    alert_match(
-                        {
-                            "coin": "BTC",
-                            "address": addr,
-                            "csv_file": os.path.basename(original_path),
-                        }
-                    )
-                except Exception as e:
-                    logger.warning(f"alert_match failed (non-fatal): {e}")
-    return rows, matches
+def check_vanity_file_against_ranges(sorted_vanity_txt: str, all_btc_dir: str, logger) -> Tuple[int, int]:
+    """
+    Open an already-sorted vanity text file and check addresses against funded ranges/lists.
+    Caller guarantees the file exists and is non-empty. This function should *not* do path existence checks,
+    but it *should* fail softly if the file disappears between checks.
+    """
+    rows = 0
+    matches = 0
+
+    try:
+        with open(sorted_vanity_txt, "r", encoding="utf-8") as f:
+            for line in f:
+                addr = line.strip()
+                if not addr:
+                    continue
+                rows += 1
+                matched = False
+                if USE_ALL:
+                    idx = route_address_to_range(addr, BOUNDARIES)
+                    range_file = os.path.join(all_btc_dir, BTC_RANGE_FILE_PATTERN.format(idx))
+                    matched = _binary_search_file(range_file, addr)
+                else:
+                    matched = addr in FUNDed_SET
+                if matched:
+                    matches += 1
+                    try:
+                        from core.alerts import alert_match
+                        alert_match({"coin": "BTC", "address": addr, "csv_file": os.path.basename(sorted_vanity_txt)})
+                    except Exception as e:
+                        logger.warning(f"alert_match failed (non-fatal): {e}")
+    except FileNotFoundError:
+        # Another process could have rotated/deleted the file—just log and skip.
+        logger.info(f"⏭️  sorted file vanished before reading: {os.path.basename(sorted_vanity_txt)}")
+        return (0, 0)
+
+    return (rows, matches)
 
 
-def process_pending_vanity_outputs_once(logger) -> int:
-    """Process pending VanitySearch output files once."""
-    processed = 0
-    files = [f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")]
-    for fname in files:
-        path = os.path.join(VANITY_OUTPUT_DIR, fname)
-        marker = path + ".btcchk"
+def process_pending_vanity_outputs_once(logger):
+    """
+    Enumerate vanity_output/*.txt, and for each, obtain a .sorted file safely.
+    Only call the range checker when a non-empty .sorted exists (or was created).
+    Never crash if .sorted is missing; just skip and continue.
+    """
+    vanity_dir = VANITY_OUTPUT_DIR
+    if not os.path.isdir(vanity_dir):
+        logger.info(f"ℹ️ vanity_output directory not found: {vanity_dir}")
+        return
+
+    entries = sorted(
+        [f for f in os.listdir(vanity_dir) if f.lower().endswith(".txt")],
+        key=lambda n: os.path.getmtime(os.path.join(vanity_dir, n))
+    )
+
+    if not entries:
+        logger.debug("🔍 No vanity .txt files to process this tick.")
+        return
+
+    for name in entries:
+        txt_path = os.path.join(vanity_dir, name)
+        marker = txt_path + ".btcchk"
         if os.path.exists(marker):
             continue
-        # Skip if not stable yet
-        if not _is_file_stable(path, logger):
-            increment_metric("vanity_unstable_skips", 1)
+
+        # Skip tiny or fresh files to avoid empty/not-ready churn
+        if not safe_nonempty(txt_path, min_bytes=128):
+            logger.info(f"⏭️  Skipping not-ready/empty file {name}")
             continue
-        sorted_path = path + ".sorted"
-        sort_addresses_in_file(path, sorted_path, logger)
+        try:
+            mtime = os.path.getmtime(txt_path)
+            if (time.time() - mtime) < DEBOUNCE_SECONDS:
+                logger.debug(f"⏳ Deferring fresh file {name} (debounce {DEBOUNCE_SECONDS}s)")
+                continue
+        except OSError:
+            continue
+
+        sorted_path = ensure_sorted_or_skip(txt_path, logger)
+        if not sorted_path:
+            logger.debug(f"⏭️  .sorted not available yet for {name}; will retry later.")
+            continue
+
+        # Guard: .sorted must be present & non-empty
+        if not safe_nonempty(sorted_path, min_bytes=128):
+            logger.info(f"⏭️  Skipping empty .sorted for {name}")
+            continue
+
         rows, matches = check_vanity_file_against_ranges(sorted_path, ALL_BTC_ADDRESSES_DIR, logger)
+        logger.info(f"📄 {os.path.basename(sorted_path)}: {rows:,} rows scanned | {matches:,} matches")
         increment_metric("btc_only_files_checked_today", 1)
         increment_metric("btc_only_matches_found_today", matches)
         increment_metric("addresses_checked_today.btc", rows)
         increment_metric("addresses_checked_lifetime.btc", rows)
         with open(marker, "w", encoding="utf-8") as m:
             m.write(f"checked={rows} matches={matches}\n")
-        os.remove(sorted_path)
-        processed += 1
-    return processed
+        try:
+            os.remove(sorted_path)
+        except OSError:
+            pass
 
 
 def get_vanity_backlog_count() -> int:

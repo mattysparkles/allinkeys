@@ -224,13 +224,6 @@ def run_vanitysearch(
         return False
 
     atomic_commit(tmp_path, output_path)
-    try:
-        from core.btc_only_checker import sort_addresses_in_file
-
-        sidecar = f"{output_path}.sorted"
-        sort_addresses_in_file(output_path, sidecar, logger)
-    except Exception:
-        logger.exception("Sorter failed for %s", output_path)
     return True
 
 
