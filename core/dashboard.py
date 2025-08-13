@@ -45,6 +45,21 @@ module_shutdown_events = {}
 
 # Module-level logger
 logger = get_logger(__name__)
+logger.info("Pause warnings are throttled to once/30s per event.")
+
+_WARN_THROTTLE: Dict[str, float] = {}
+
+
+def warn_throttled(event_name: str, message: str, interval_seconds: int = 30):
+    """
+    Logs a warning at most once per `interval_seconds` for the given event name.
+    Stores last-emitted timestamps in a module-level dict.
+    """
+    now = time.monotonic()
+    last = _WARN_THROTTLE.get(event_name, 0.0)
+    if now - last >= interval_seconds:
+        logger.warning(message)
+        _WARN_THROTTLE[event_name] = now
 
 
 class LoggedEvent:
@@ -52,12 +67,8 @@ class LoggedEvent:
 
     The GUI is the only component allowed to modify pause events. If any other
     module calls ``set()`` or ``clear()``, a warning is emitted so inadvertent
-    state changes can be detected quickly. Warnings are rate-limited so the log
-    is not spammed by repeated modifications.
+    state changes can be detected quickly.
     """
-
-    _last_warn_ts: Dict[str, float] = {}
-    _warn_interval = 30.0
 
     def __init__(self, name, ev):
         self._ev = ev
@@ -73,11 +84,10 @@ class LoggedEvent:
     def _warn_if_needed(self):
         if self._called_from_gui():
             return
-        now = time.monotonic()
-        last = self._last_warn_ts.get(self.name, 0.0)
-        if now - last >= self._warn_interval:
-            logger.warning(f"⚠️ Pause flag '{self.name}' modified outside GUI")
-            self._last_warn_ts[self.name] = now
+        warn_throttled(
+            f"pause_flag_{self.name}",
+            f"⚠️ Pause flag '{self.name}' modified outside GUI",
+        )
 
     def set(self):
         self._warn_if_needed()

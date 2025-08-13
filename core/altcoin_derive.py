@@ -57,6 +57,8 @@ from core.logger import log_message
 from core.dashboard import update_dashboard_stat, set_metric, get_metric, increment_metric
 import core.checkpoint as checkpoint
 from core.gpu_selector import get_altcoin_gpu_ids, list_gpus
+import config.settings as settings
+from core.utils.io_safety import safe_nonempty
 
 
 def safe_str(obj):
@@ -1023,6 +1025,9 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     """
 
     log_message("📦 Altcoin conversion loop (multi-process) started...", "INFO")
+    if getattr(settings, "BTC_ONLY_MODE", False):
+        log_message("BTC-only mode active; skipping altcoin derive loop.", "INFO")
+        return
 
     processed = set()
     queued = set()
@@ -1082,7 +1087,11 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
             all_txt = [
                 f
                 for f in os.listdir(VANITY_OUTPUT_DIR)
-                if f.endswith(".txt") and f not in processed and f not in queued
+                if f.endswith(".txt")
+                and f not in processed
+                and f not in queued
+                and ".tmp-" not in f
+                and safe_nonempty(os.path.join(VANITY_OUTPUT_DIR, f))
             ]
 
             safe_update_dashboard_stat("backlog_files_queued", len(all_txt) + len(queued))

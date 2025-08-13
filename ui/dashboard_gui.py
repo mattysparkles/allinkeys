@@ -64,12 +64,25 @@ class DashboardGUI:
         self.refresh_loop()
 
     def create_widgets(self):
+        """Create all dashboard widgets using a deterministic row counter."""
+        row = 0
+
+        def _next_row():
+            nonlocal row
+            r = row
+            row += 1
+            return r
+
+        self.master.rowconfigure(0, weight=1)
+        self.master.columnconfigure(0, weight=1)
+        self.master.columnconfigure(1, weight=0)
+
         # ----- Scrollable container -----
         self.canvas = tk.Canvas(self.master, borderwidth=0)
         self.scrollbar = ttk.Scrollbar(self.master, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.scrollbar.pack(side="right", fill="y")
-        self.canvas.pack(side="left", fill="both", expand=True)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
         self.container = ttk.Frame(self.canvas)
         self.container_window = self.canvas.create_window((0, 0), window=self.container, anchor="nw")
         self.container.bind(
@@ -160,7 +173,7 @@ class DashboardGUI:
         column_frames["CSV Checker"].grid(row=0, column=1, sticky="nsew", padx=5)
         column_frames["Backlog"].grid(row=0, column=2, sticky="nsew", padx=5)
 
-        for group, keys in grouped_keys.items():
+        for col, (group, keys) in enumerate(grouped_keys.items()):
             if not keys:
                 continue
             parent = column_frames[group]
@@ -217,7 +230,7 @@ class DashboardGUI:
                 )
                 self.metrics["backlog_progress"] = {}
 
-            row += 1
+            row = _next_row()
 
             if group == "Backlog":
                 backlog_col = col
