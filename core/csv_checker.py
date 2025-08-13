@@ -107,9 +107,10 @@ def update_csv_eta():
     """Estimate remaining time for CSV scanning and push to dashboard."""
     try:
         all_files = [
-            f for f in os.listdir(CSV_DIR)
+            f
+            for f in os.listdir(CSV_DIR)
             if f.endswith(".csv") and not f.endswith(".partial.csv")
-        ]
+        ]  # Do not process .partial.csv (in-progress) files; only finalized .csv
         remaining_files = [
             f for f in all_files
             if not has_been_checked(f, CHECKED_CSV_LOG) and not has_been_checked(f, RECHECKED_CSV_LOG)
@@ -378,6 +379,17 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
 
         logger.info(f"✅ {'Recheck' if recheck else 'Check'} complete: {len(new_matches)} matches found")
         logger.info(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s")
+        logger.info(
+            json.dumps(
+                {
+                    "event": "csv_checked",
+                    "file": filename,
+                    "rows": rows_scanned,
+                    "matches": len(new_matches),
+                    "seconds": round(duration_sec, 2),
+                }
+            )
+        )
 
         if state and completed and filename in state.get("files", {}):
             # [FIX PHASE 2] clear resume state only when file fully processed

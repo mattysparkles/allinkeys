@@ -4,6 +4,7 @@ import os
 import re
 import bisect
 import time
+import json
 from typing import Tuple, List, Optional
 
 from config.settings import (
@@ -35,6 +36,7 @@ BOUNDARIES = []
 
 
 DEBOUNCE_SECONDS = 2  # avoid racing files that are still being written
+PROCESSED_VANITY = set()  # track processed vanity outputs to avoid rechecks
 
 
 def ensure_sorted_or_skip(vanity_txt_path: str, logger) -> Optional[str]:
@@ -261,8 +263,12 @@ def process_pending_vanity_outputs_once(logger):
         return
 
     entries = sorted(
-        [f for f in os.listdir(vanity_dir) if f.lower().endswith(".txt")],
-        key=lambda n: os.path.getmtime(os.path.join(vanity_dir, n))
+        [
+            f
+            for f in os.listdir(vanity_dir)
+            if f.lower().endswith(".txt") and not f.lower().endswith(".part")
+        ],
+        key=lambda n: os.path.getmtime(os.path.join(vanity_dir, n)),
     )
 
     if not entries:
@@ -271,8 +277,7 @@ def process_pending_vanity_outputs_once(logger):
 
     for name in entries:
         txt_path = os.path.join(vanity_dir, name)
-        marker = txt_path + ".btcchk"
-        if os.path.exists(marker):
+        if name in PROCESSED_VANITY:
             continue
 
         # Skip tiny or fresh files to avoid empty/not-ready churn
@@ -298,13 +303,21 @@ def process_pending_vanity_outputs_once(logger):
             continue
 
         rows, matches = check_vanity_file_against_ranges(sorted_path, ALL_BTC_ADDRESSES_DIR, logger)
-        logger.info(f"📄 {os.path.basename(sorted_path)}: {rows:,} rows scanned | {matches:,} matches")
+        logger.info(
+            json.dumps(
+                {
+                    "event": "vanity_file_checked",
+                    "file": os.path.basename(sorted_path),
+                    "rows": rows,
+                    "matches": matches,
+                }
+            )
+        )
         increment_metric("btc_only_files_checked_today", 1)
         increment_metric("btc_only_matches_found_today", matches)
         increment_metric("addresses_checked_today.btc", rows)
         increment_metric("addresses_checked_lifetime.btc", rows)
-        with open(marker, "w", encoding="utf-8") as m:
-            m.write(f"checked={rows} matches={matches}\n")
+        PROCESSED_VANITY.add(name)
         try:
             os.remove(sorted_path)
         except OSError:
@@ -316,6 +329,8 @@ def get_vanity_backlog_count() -> int:
     return len([
         f
         for f in os.listdir(VANITY_OUTPUT_DIR)
-        if f.endswith(".txt") and not os.path.exists(os.path.join(VANITY_OUTPUT_DIR, f + ".btcchk"))
+        if f.endswith(".txt")
+        and not f.endswith(".part")
+        and f not in PROCESSED_VANITY
     ])
 

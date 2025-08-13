@@ -247,7 +247,7 @@ class DashboardGUI:
         swing_row = backlog_row if 'backlog_row' in locals() else 1
         self.swing_mode_button.grid(
             row=swing_row,
-            column=backlog_col if 'backlog_col' in locals() else 2,
+            column=1,  # Move to column 1 to avoid overlapping dashboard metrics
             padx=5,
             pady=(5, 10),
             sticky="w",
