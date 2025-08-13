@@ -69,6 +69,7 @@ from core.dashboard import (
     get_current_metrics,
     get_metric,
     set_metric,
+    warn_throttled,
 )
 import core.dashboard as dashboard_core
 from ui.dashboard_gui import start_dashboard
@@ -445,21 +446,28 @@ def run_btc_only(args):
         dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
         dashboard_thread.start()
 
+    above = below = 0
     try:
         while not shutdown_event.is_set():
             backlog = get_vanity_backlog_count()
             set_metric("vanity_backlog_count", backlog)
             if backlog > CHECKER_BACKLOG_PAUSE_THRESHOLD:
-                if not keygen_pause.is_set():
+                above += 1
+                below = 0
+                if above >= 2 and not keygen_pause.is_set():
                     keygen_pause.set()
-                    logger.info(
-                        f"Paused keygen: backlog {backlog} > {CHECKER_BACKLOG_PAUSE_THRESHOLD}"
+                    warn_throttled(
+                        "backlog_pause",
+                        f"Paused keygen: backlog {backlog} > {CHECKER_BACKLOG_PAUSE_THRESHOLD}",
                     )
             else:
-                if keygen_pause.is_set():
+                below += 1
+                above = 0
+                if below >= 2 and keygen_pause.is_set():
                     keygen_pause.clear()
-                    logger.info(
-                        f"Resumed keygen: backlog {backlog} ≤ {CHECKER_BACKLOG_PAUSE_THRESHOLD}"
+                    warn_throttled(
+                        "backlog_resume",
+                        f"Resumed keygen: backlog {backlog} ≤ {CHECKER_BACKLOG_PAUSE_THRESHOLD}",
                     )
             process_pending_vanity_outputs_once(logger)
             time.sleep(2)

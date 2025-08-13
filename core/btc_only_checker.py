@@ -21,6 +21,11 @@ from core.btc_ranges import (
     route_address_to_range,
     append_unique_sorted_to_range,
 )
+from core.logger import get_logger
+from core.utils.io_safety import safe_nonempty
+
+logger = get_logger(__name__)
+logger.info("Extractor auto-detect: PubAddr or raw-address mode.")
 
 # Runtime globals
 USE_ALL = False
@@ -87,17 +92,44 @@ def _extract_pubaddr_blocks(path: str, logger) -> Tuple[List[Tuple[str, int, int
 
 
 def sort_addresses_in_file(input_txt: str, output_txt: str, logger) -> None:
-    """Extract and sort BTC addresses, writing them to a sidecar file."""
-    triples, _ = _extract_pubaddr_blocks(input_txt, logger)
-    logger.info(f"🧩 Extracted {len(triples)} PubAddr blocks from {os.path.basename(input_txt)}")
+    """Extract BTC addresses from ``input_txt`` and write a sorted sidecar."""
+    if not safe_nonempty(input_txt):
+        logger.info(
+            f"Skipping extractor for empty/not-ready file {os.path.basename(input_txt)}"
+        )
+        return
+
+    with open(input_txt, "r", encoding="utf-8") as f:
+        lines = [ln.strip() for ln in f if ln.strip()]
+
+    marker_re = re.compile(r"^(?:PubAddr|PubAddress)\s*:\s*(\S+)", re.IGNORECASE)
+    addresses: List[str] = []
+    for ln in lines:
+        m = marker_re.match(ln)
+        if m:
+            addresses.append(m.group(1))
+
+    if not addresses:
+        raw_re = re.compile(
+            r"^(1[1-9A-HJ-NP-Za-km-z]{25,34}|3[1-9A-HJ-NP-Za-km-z]{25,34}|bc1[0-9ac-hj-np-z]{11,71})$"
+        )
+        for ln in lines:
+            if raw_re.match(ln):
+                addresses.append(ln)
+
+    if not addresses:
+        logger.info(
+            f"No addresses detected; skipping extractor for {os.path.basename(input_txt)}"
+        )
+        return
+
+    addresses.sort()
     with open(output_txt, "w", encoding="utf-8") as f:
-        for addr, _, _ in triples:
+        for addr in addresses:
             f.write(addr + "\n")
     logger.info(
-        f"✅ Sorted {len(triples)} BTC addresses to sidecar: {os.path.basename(output_txt)}"
+        f"✅ Sorted {len(addresses)} BTC addresses to sidecar: {os.path.basename(output_txt)}"
     )
-
-
 def _binary_search_file(file_path: str, target: str) -> bool:
     with open(file_path, "r", encoding="utf-8") as f:
         lines = f.readlines()

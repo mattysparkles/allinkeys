@@ -20,8 +20,10 @@ from config.settings import (
 )
 from core.logger import get_logger
 from core.dashboard import set_metric, update_dashboard_stat
+from core.utils.io_safety import atomic_open, atomic_commit
 
 logger = get_logger(__name__)
+logger.info("Atomic writes enabled for vanity outputs (temp → rename). Empty outputs are skipped.")
 
 # throttle warning frequency
 _LAST_WARN: Dict[str, float] = {}
@@ -143,47 +145,93 @@ def build_vanitysearch_args(hex_seed: str) -> List[Tuple[List[str], str]]:
     return jobs
 
 
-def run_vanitysearch(seed_args: List[str], output_path: str, device_id: Optional[int], backend: str,
-                     timeout: int = 60, pause_event=None, addr_mode: str = "p2pkh") -> bool:
-    """Execute VanitySearch with live speed parsing and output capture."""
+def run_vanitysearch(
+    seed_args: List[str],
+    output_path: str,
+    device_id: Optional[int],
+    backend: str,
+    timeout: int = 60,
+    pause_event=None,
+    addr_mode: str = "p2pkh",
+) -> bool:
+    """Execute VanitySearch with live speed parsing and atomic output handling."""
+    if pause_event and pause_event.is_set():
+        logger.info("Keygen paused; skipping VanitySearch job")
+        return False
+
     binary = resolve_vanitysearch_binary(backend)
-    cmd = [binary] + seed_args + ["-o", output_path]
+    cmd = [binary] + seed_args
     if backend in ("cuda", "opencl") and device_id is not None:
         cmd += ["-gpu", str(device_id)]
     update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
     logger.info(f"Executing: {' '.join(cmd)}")
 
+    tmp_path, tmp_handle = atomic_open(output_path)
+    buffer: List[str] = []
+    valid_lines = 0
+    addr_re = re.compile(
+        r"^(?:PubAddr|PubAddress)\s*:\s*(\S+)|"  # legacy marker
+        r"^(1[1-9A-HJ-NP-Za-km-z]{25,34}|3[1-9A-HJ-NP-Za-km-z]{25,34}|bc1[0-9ac-hj-np-z]{11,71})$",
+        re.IGNORECASE,
+    )
     try:
-        with open(output_path, "w", encoding="utf-8", buffering=1) as outfile:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            start = time.time()
-            for line in proc.stdout:
-                outfile.write(line)
-                m = re.search(r"([0-9.]+)\s*([MK])?Key/s", line, re.IGNORECASE)
-                if m:
-                    speed = float(m.group(1))
-                    if m.group(2) and m.group(2).upper() == "K":
-                        speed /= 1000.0
-                    update_dashboard_stat("vanitysearch_current_mkeys", round(speed, 2))
-                    if backend != "cpu" and speed < MIN_EXPECTED_GPU_MKEYS:
-                        _warn_once("low_speed", "Speed suggests CPU; check GPU selection")
-                if pause_event and pause_event.is_set():
-                    proc.terminate()
-                if timeout and time.time() - start > timeout:
-                    proc.terminate()
-                if os.path.exists(output_path) and os.path.getsize(output_path) >= MAX_OUTPUT_FILE_SIZE:
-                    proc.terminate()
-            proc.wait()
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        start = time.time()
+        for line in proc.stdout:
+            buffer.append(line)
+            m = re.search(r"([0-9.]+)\s*([MK])?Key/s", line, re.IGNORECASE)
+            if m:
+                speed = float(m.group(1))
+                if m.group(2) and m.group(2).upper() == "K":
+                    speed /= 1000.0
+                update_dashboard_stat("vanitysearch_current_mkeys", round(speed, 2))
+                if backend != "cpu" and speed < MIN_EXPECTED_GPU_MKEYS:
+                    _warn_once("low_speed", "Speed suggests CPU; check GPU selection")
+
+            if addr_re.match(line.strip()):
+                valid_lines += 1
+                if valid_lines == 1:
+                    tmp_handle.writelines(buffer)
+                else:
+                    tmp_handle.write(line)
+            elif valid_lines > 0:
+                tmp_handle.write(line)
+
+            if pause_event and pause_event.is_set():
+                proc.terminate()
+            if timeout and time.time() - start > timeout:
+                proc.terminate()
+            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) >= MAX_OUTPUT_FILE_SIZE:
+                proc.terminate()
+        proc.wait()
     except Exception:
         logger.exception("Failed to execute VanitySearch")
+        tmp_handle.close()
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
         return False
 
-    return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+    tmp_handle.close()
+    if valid_lines == 0:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        logger.info(f"No address lines emitted by VanitySearch for {addr_mode}")
+        return False
+
+    atomic_commit(tmp_path, output_path)
+    try:
+        from core.btc_only_checker import sort_addresses_in_file
+
+        sidecar = f"{output_path}.sorted"
+        sort_addresses_in_file(output_path, sidecar, logger)
+    except Exception:
+        logger.exception("Sorter failed for %s", output_path)
+    return True
 
 
 # Expose selected device info for callers
