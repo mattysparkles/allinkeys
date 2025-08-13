@@ -329,11 +329,13 @@ def _default_metrics():
         "batches_completed": 0,
         "keys_generated_today": 0,
         "addresses_generated_today": {
-            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
+            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
+            "p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0
         },
         "keys_generated_lifetime": 0,
         "addresses_generated_lifetime": {
-            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
+            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
+            "p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0
         },
         "csv_created_today": 0,
         "csv_created_lifetime": 0,
@@ -350,10 +352,12 @@ def _default_metrics():
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
         },
         "matches_found_today": {
-            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
+            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
+            "p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0
         },
         "matches_found_lifetime": {
-            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
+            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
+            "p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0
         },
         "lifetime_start_timestamp": datetime.utcnow().isoformat(),
         "avg_keygen_time": 0,

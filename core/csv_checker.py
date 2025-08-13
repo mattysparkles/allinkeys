@@ -17,6 +17,7 @@ from config.settings import (
     ENABLE_PGP,
     PGP_PUBLIC_KEY_PATH,
     LOG_LEVEL,
+    NORMALIZE_BECH32_LOWER,
 )
 from utils.file_utils import find_latest_funded_file
 from core.alerts import alert_match
@@ -25,6 +26,7 @@ from core.logger import get_logger
 from utils.pgp_utils import encrypt_with_pgp
 from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics, set_metric, get_metric
 from utils.balance_checker import fetch_live_balance
+from core.downloader import load_btc_funded_multi
 csv.field_size_limit(2**30)  # 1GB
 
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
@@ -66,24 +68,40 @@ def save_csv_state(state):
     except Exception:
         logger.exception("Failed to save CSV state")
 
-def normalize_address(addr: str) -> str:
-    """Return a normalized version of ``addr`` for matching.
-
-    Currently this strips the ``bitcoincash:`` prefix used by some BCH
-    addresses and trims surrounding whitespace. Additional normalization
-    rules can be added here as needed.
+def detect_btc_address_type(addr: str) -> str:
     """
+    Returns one of: 'p2pkh', 'p2sh', 'p2wpkh', 'taproot', 'p2wsh', or 'unknown'.
+    Normalizes bech32 to lowercase if settings.NORMALIZE_BECH32_LOWER.
+    """
+    a = addr.strip()
+    if not a:
+        return "unknown"
+    if a[0] == '1':
+        return 'p2pkh'
+    if a[0] == '3':
+        return 'p2sh'
+    al = a.lower()
+    if al.startswith('bc1'):
+        if NORMALIZE_BECH32_LOWER:
+            a = al
+        if al.startswith('bc1q'):
+            return 'p2wpkh'
+        if al.startswith('bc1p'):
+            return 'taproot'
+        return 'unknown'
+    return 'unknown'
+
+
+def normalize_address(addr: str) -> str:
+    """Normalize address for comparison: bech32 -> lowercase; others unchanged."""
     if not addr:
-        return ""
-    original = addr
-    addr = addr.strip()
-    if addr.lower().startswith("bitcoincash:"):
-        normalized = addr.split(":", 1)[1]
-        logger.warning(f"Normalized BCH address: {original} → {normalized}")
-        addr = normalized
-    elif original != addr:
-        logger.warning(f"Trimmed address: '{original}' → '{addr}'")
-    return addr
+        return addr
+    al = addr.strip()
+    if al.lower().startswith('bc1') and NORMALIZE_BECH32_LOWER:
+        return al.lower()
+    if al.lower().startswith("bitcoincash:"):
+        return al.split(":", 1)[1]
+    return al
 
 def update_csv_eta():
     """Estimate remaining time for CSV scanning and push to dashboard."""
@@ -157,6 +175,11 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
     set_metric("csv_checker.rows_checked", 0)
     set_metric("csv_checker.matches_found", 0)
 
+    funded_btc = address_sets.get('btc', {}) if isinstance(address_sets.get('btc'), dict) else {}
+    funded_p2pkh = funded_btc.get('p2pkh', set())
+    funded_p2sh = funded_btc.get('p2sh', set())
+    funded_bech32 = funded_btc.get('bech32', set())
+
     if filename.endswith(".partial.csv"):
         return [], True
     if not os.path.exists(csv_file) or os.path.getsize(csv_file) == 0:
@@ -229,15 +252,23 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                     row_matches = []
                     try:
                         for coin, columns in coin_columns.items():
-                            # Iterate through every address column so multiple
-                            # matches within a single row are all detected.
                             for col in columns:
                                 raw = row.get(col)
                                 addr = raw.strip() if raw else ""
                                 normalized = normalize_address(addr)
-                                # Addresses are normalized to ensure prefix or
-                                # whitespace differences do not prevent a match
-                                in_funded = normalized in address_sets.get(coin, set())
+                                if coin == 'btc':
+                                    atype = detect_btc_address_type(normalized)
+                                    if atype == 'p2pkh':
+                                        in_funded = normalized in funded_p2pkh
+                                    elif atype == 'p2sh':
+                                        in_funded = normalized in funded_p2sh
+                                    elif atype in ('p2wpkh', 'taproot'):
+                                        in_funded = normalized in funded_bech32
+                                    else:
+                                        in_funded = False
+                                else:
+                                    atype = 'unknown'
+                                    in_funded = normalized in address_sets.get(coin, set())
                                 logger.debug(
                                     f"[Checker] {coin.upper()} column '{col}' -> '{normalized}' : {'MATCH' if in_funded else 'miss'}"
                                 )
@@ -253,14 +284,24 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                             "index": row.get("index", "n/a"),
                                             "row_number": rows_scanned
                                         }
+                                        if coin == 'btc':
+                                            match_payload['addr_type'] = atype
+                                            match_payload['witness_ver'] = '1' if atype == 'taproot' else ('0' if atype == 'p2wpkh' else 'N/A')
 
                                         balance = None
                                         if filename != "test_alerts.csv":
                                             balance = fetch_live_balance(addr, coin)
-                                        log_msg = (
-                                            f"[{match_payload['timestamp']}] coin={coin} address={addr} "
-                                            f"balance={balance if balance is not None else 'unknown'} file={filename} row={rows_scanned}"
-                                        )
+                                        if coin == 'btc':
+                                            log_msg = (
+                                                f"[{match_payload['timestamp']}] coin=BTC addr={addr} addr_type={atype} "
+                                                f"witness_ver={match_payload['witness_ver']} balance={balance if balance is not None else 'unknown'} "
+                                                f"file={filename} row={rows_scanned}"
+                                            )
+                                        else:
+                                            log_msg = (
+                                                f"[{match_payload['timestamp']}] coin={coin} address={addr} "
+                                                f"balance={balance if balance is not None else 'unknown'} file={filename} row={rows_scanned}"
+                                            )
                                         print(log_msg)
                                         logger.info(log_msg)
 
@@ -283,11 +324,13 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                             increment_metric("matched_keys", 1)
                                             increment_metric(f"matches_found_today.{coin}", 1)
                                             increment_metric(f"matches_found_lifetime.{coin}", 1)
+                                            if coin == 'btc' and atype in {'p2pkh','p2sh','p2wpkh','taproot'}:
+                                                increment_metric(f"matches_found_today.{atype}", 1)
+                                                increment_metric(f"matches_found_lifetime.{atype}", 1)
                                             update_dashboard_stat("matches_found_lifetime", get_metric("matches_found_lifetime"))
                                         row_matches.append(addr)
                                         all_matches.append(match_payload)
                                         logger.debug("[STATUS] CSV Checker continuing without interruption")
-                                        # Continue scanning the row for additional matches
                                     except Exception as match_err:
                                         logger.exception(f"Match processing error for {addr}: {match_err}")
                                         continue
@@ -381,7 +424,10 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         full_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR, unique=False)
         if full_path:
             logger.info(f"🔎 Using funded list {os.path.basename(full_path)} for {coin.upper()}.")
-            address_sets[coin] = load_funded_addresses(full_path)
+            if coin == 'btc':
+                address_sets[coin] = load_btc_funded_multi(full_path)
+            else:
+                address_sets[coin] = load_funded_addresses(full_path)
         else:
             logger.warning(f"⚠️ No funded list found for {coin.upper()} in DOWNLOADS_DIR")
 
@@ -448,7 +494,10 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
         unique_path = find_latest_funded_file(coin, directory=DOWNLOADS_DIR, unique=True)
         if unique_path:
             logger.info(f"🔎 Using unique list {os.path.basename(unique_path)} for {coin.upper()}.")
-            address_sets[coin] = load_funded_addresses(unique_path)
+            if coin == 'btc':
+                address_sets[coin] = load_btc_funded_multi(unique_path)
+            else:
+                address_sets[coin] = load_funded_addresses(unique_path)
         else:
             logger.warning(f"⚠️ No unique list found for {coin.upper()} in DOWNLOADS_DIR")
 

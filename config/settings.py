@@ -137,7 +137,19 @@ COIN_DOWNLOAD_URLS = {
     "dash": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Dash/Latest_Dash_Addresses.tsv.gz"
 }
 MAX_DAILY_FILES_PER_COIN = 2
-FILTER_ONLY_P2PKH = True
+FILTER_ONLY_P2PKH = False
+
+# SegWit address generation toggles
+ENABLE_P2WPKH = True         # bc1q… (Bech32 v0)
+ENABLE_TAPROOT = True        # bc1p… (Bech32m v1)
+
+# GUI default patterns used when “All” selected
+DEFAULT_BTC_PATTERNS = ["1**"]                # legacy
+DEFAULT_BTC_PATTERNS_BECH32 = ["bc1q**"]      # v0
+DEFAULT_BTC_PATTERNS_BECH32M = ["bc1p**"]     # v1
+
+# Normalize bech32 case to lowercase (spec-compliant)
+NORMALIZE_BECH32_LOWER = True
 
 # ===================== 🔢 KEYGEN ==========================
 USE_GPU = True

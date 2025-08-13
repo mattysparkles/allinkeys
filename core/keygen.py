@@ -8,7 +8,6 @@ from datetime import datetime
 from collections import deque
 from config.settings import (
     VANITY_OUTPUT_DIR,
-    VANITY_PATTERN,
     BATCH_SIZE,
     ADDR_PER_FILE,
     CHECKPOINT_PATH,
@@ -23,6 +22,7 @@ from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
 from core.logger import get_logger
 from core import vanity_runner
+from core.csv_checker import detect_btc_address_type, normalize_address
 
 
 # Runtime trackers
@@ -97,45 +97,59 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         VANITY_OUTPUT_DIR,
         f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}.txt"
     )
-    last_output_file = current_output_path
-
-    seed_args = ["-s", hex_seed_full, "-u", VANITY_PATTERN]
     backend = vanity_runner.get_selected_backend()
     device_id = vanity_runner.get_selected_device_id()
-    success = vanity_runner.run_vanitysearch(
-        seed_args,
-        current_output_path,
-        device_id,
-        backend,
-        timeout=ROTATE_INTERVAL_SECONDS,
-        pause_event=pause_event,
-    )
-    if not success:
-        return False
-
-    if os.path.exists(current_output_path):
-        size = os.path.getsize(current_output_path)
-        if size == 0:
-            logger.warning(f"⚠️ Output file empty: {current_output_path}")
-            os.remove(current_output_path)
-            return False
-        try:
-            with open(current_output_path, 'r', encoding='utf-8') as f:
-                logger.info(f"Opened {current_output_path} for reading")
-                lines = sum(1 for _ in f)
-                total_keys_generated += lines
-                increment_metric("keys_generated_today", lines)
-                increment_metric("keys_generated_lifetime", lines)
-                from core.dashboard import update_dashboard_stat, get_metric
-                update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
-                update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
-                logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
-        return True
-    else:
-        logger.error(f"❌ Output file not created: {current_output_path}")
-        return False
+    jobs = vanity_runner.build_vanitysearch_args(hex_seed_full)
+    any_success = False
+    for args, mode in jobs:
+        current_output_path = os.path.join(
+            VANITY_OUTPUT_DIR,
+            f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}_{mode}.txt",
+        )
+        last_output_file = current_output_path
+        success = vanity_runner.run_vanitysearch(
+            args,
+            current_output_path,
+            device_id,
+            backend,
+            timeout=ROTATE_INTERVAL_SECONDS,
+            pause_event=pause_event,
+            addr_mode=mode,
+        )
+        if not success:
+            continue
+        any_success = True
+        if os.path.exists(current_output_path):
+            size = os.path.getsize(current_output_path)
+            if size == 0:
+                logger.warning(f"⚠️ Output file empty: {current_output_path}")
+                os.remove(current_output_path)
+                continue
+            try:
+                with open(current_output_path, 'r', encoding='utf-8') as f:
+                    logger.info(f"Opened {current_output_path} for reading")
+                    lines = 0
+                    for line in f:
+                        parts = line.strip().split()
+                        if not parts:
+                            continue
+                        addr = normalize_address(parts[0])
+                        atype = detect_btc_address_type(addr)
+                        increment_metric(f"addresses_generated_today.{atype}", 1)
+                        increment_metric(f"addresses_generated_lifetime.{atype}", 1)
+                        lines += 1
+                    total_keys_generated += lines
+                    increment_metric("keys_generated_today", lines)
+                    increment_metric("keys_generated_lifetime", lines)
+                    increment_metric("addresses_generated_today.btc", lines)
+                    increment_metric("addresses_generated_lifetime.btc", lines)
+                    from core.dashboard import update_dashboard_stat, get_metric
+                    update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
+                    update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
+                    logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
+    return any_success
 
 
 

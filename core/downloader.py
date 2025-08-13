@@ -18,6 +18,7 @@ from config.settings import (
 )
 from config.coin_definitions import coin_columns
 from core.logger import log_message
+from config.settings import NORMALIZE_BECH32_LOWER
 
 
 def parse_address_lines(file_obj):
@@ -39,6 +40,32 @@ def clean_address_file(file_path):
             f.write('\n'.join(addresses))
     except Exception as exc:
         log_message(f"⚠️ Failed to clean {file_path}: {exc}", "WARN")
+
+
+def load_btc_funded_multi(file_path):
+    """Load BTC funded addresses split by type.
+
+    Returns dict with keys 'p2pkh', 'p2sh', 'bech32'. Also returns the union
+    set for backward compatibility as the key 'all'.
+    """
+    sets = {"p2pkh": set(), "p2sh": set(), "bech32": set()}
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                addr = line.strip()
+                if not addr:
+                    continue
+                if addr.startswith('1'):
+                    sets['p2pkh'].add(addr)
+                elif addr.startswith('3'):
+                    sets['p2sh'].add(addr)
+                elif addr.lower().startswith('bc1'):
+                    addr = addr.lower() if NORMALIZE_BECH32_LOWER else addr
+                    sets['bech32'].add(addr)
+    except Exception as exc:
+        log_message(f"⚠️ Failed to load BTC funded addresses: {exc}", "WARN")
+    sets['all'] = sets['p2pkh'] | sets['p2sh'] | sets['bech32']
+    return sets
 
 
 def generate_test_csv():
@@ -147,10 +174,16 @@ def _download_single_coin(coin: str, url: str) -> None:
 
         if coin == "btc":
             with open(output_full, "r", encoding="utf-8") as f:
-                filtered = [line for line in f if line.startswith("1")]
+                lines = []
+                for line in f:
+                    addr = line.strip()
+                    if addr.startswith("1") or addr.startswith("3") or addr.lower().startswith("bc1"):
+                        if NORMALIZE_BECH32_LOWER and addr.lower().startswith("bc1"):
+                            addr = addr.lower()
+                        lines.append(addr + "\n")
             with open(output_full, "w", encoding="utf-8") as f:
-                f.writelines(filtered)
-            log_message(f"{coin.upper()}: Filtered for addresses starting with '1'")
+                f.writelines(lines)
+            log_message(f"{coin.upper()}: Filtered for addresses starting with '1','3','bc1'")
 
         clean_address_file(output_full)
 
