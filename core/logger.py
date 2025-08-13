@@ -114,7 +114,23 @@ def start_listener():
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(fmt)
 
-    handlers = [debug_handler, info_handler, warning_handler, error_handler]
+    # Dedicated vanity/keygen log handler to consolidate worker events
+    vanity_handler = SizeAndTimeRotatingFileHandler(
+        os.path.join(LOG_DIR, "vanity_worker.log"),
+        maxBytes=25 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    vanity_handler.setLevel(logging.INFO)
+    vanity_handler.setFormatter(fmt)
+    # Only capture logs from vanity-related modules
+    vanity_handler.addFilter(
+        lambda r: r.name.startswith(
+            ("core.keygen", "core.vanity_runner", "core.btc_only_checker", "core.altcoin_derive", "core.csv_checker")
+        )
+    )
+
+    handlers = [debug_handler, info_handler, warning_handler, error_handler, vanity_handler]
 
     if LOG_TO_CONSOLE:
         console_handler.setLevel(logging.DEBUG if LOG_LEVEL == "DEBUG" else logging.INFO)

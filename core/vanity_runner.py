@@ -2,16 +2,19 @@ import os
 import re
 import subprocess
 import time
+import json
 from typing import Dict, List, Tuple, Optional
 
 from config.settings import (
     GPU_BACKEND,
     FORCE_CPU_FALLBACK,
+    USE_CPU_FALLBACK,
     VANITYSEARCH_BIN_CUDA,
     VANITYSEARCH_BIN_OPENCL,
     VANITYSEARCH_BIN_CPU,
     MIN_EXPECTED_GPU_MKEYS,
     MAX_OUTPUT_FILE_SIZE,
+    MAX_OUTPUT_LINES,
     ENABLE_P2WPKH,
     ENABLE_TAPROOT,
     DEFAULT_BTC_PATTERNS,
@@ -20,10 +23,28 @@ from config.settings import (
 )
 from core.logger import get_logger
 from core.dashboard import set_metric, update_dashboard_stat
-from core.utils.io_safety import atomic_open, atomic_commit
 
 logger = get_logger(__name__)
-logger.info("Atomic writes enabled for vanity outputs (temp → rename). Empty outputs are skipped.")
+logger.info("Streaming vanity output via .part files → atomic rename enabled")
+
+# Optional Windows file locking to keep .part files visible and protected
+try:  # pragma: no cover - only effective on Windows
+    import msvcrt
+
+    def _lock_file(handle):
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+
+    def _unlock_file(handle):
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+except Exception:  # pragma: no cover - platform without msvcrt
+    def _lock_file(handle):
+        return None
+
+    def _unlock_file(handle):
+        return None
 
 # throttle warning frequency
 _LAST_WARN: Dict[str, float] = {}
@@ -43,6 +64,55 @@ def _run_binary(binary: str, args: List[str]) -> str:
     except Exception as exc:
         logger.debug(f"Device probe failed for {binary}: {exc}")
         return ""
+
+
+def probe_vanity_capabilities(vanity_path: str) -> dict:
+    """Run a quick capability check for VanitySearch to discover GPU usability.
+
+    Returns a dictionary with keys:
+        {
+          "binary_found": bool,
+          "gpu_supported": bool,
+          "gpu_vendor": "nvidia" | "amd" | None,
+          "version": str | None,
+          "raw_banner": str,
+        }
+    Strategy: invoke the binary with ``--help`` and parse banner lines for
+    CUDA/OpenCL hints.  Non-zero exit codes are treated as failure and the
+    full output is logged for troubleshooting.
+    """
+    info = {
+        "binary_found": False,
+        "gpu_supported": False,
+        "gpu_vendor": None,
+        "version": None,
+        "raw_banner": "",
+    }
+    if not vanity_path or not os.path.exists(vanity_path):
+        return info
+    info["binary_found"] = True
+    try:
+        proc = subprocess.run([vanity_path, "--help"], capture_output=True, text=True)
+        info["raw_banner"] = (proc.stdout or "") + (proc.stderr or "")
+        for line in info["raw_banner"].splitlines():
+            m = re.search(r"VanitySearch\s*v?([0-9.]+)", line, re.I)
+            if m:
+                info["version"] = m.group(1)
+            if "CUDA" in line.upper():
+                info["gpu_supported"] = True
+                info["gpu_vendor"] = "nvidia"
+            if "OPENCL" in line.upper():
+                info["gpu_supported"] = True
+                if info["gpu_vendor"] is None:
+                    info["gpu_vendor"] = "amd"
+        if proc.returncode != 0:
+            logger.error(
+                f"Capability probe failed for {vanity_path} (exit {proc.returncode})\n{info['raw_banner']}"
+            )
+            info["gpu_supported"] = False
+    except Exception as exc:  # pragma: no cover - unexpected failures
+        logger.error(f"Capability probe failed for {vanity_path}: {exc}", exc_info=True)
+    return info
 
 
 def list_devices() -> Dict[str, List[Tuple[int, str]]]:
@@ -116,6 +186,20 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
         device_name = "CPU"
         binary = resolve_vanitysearch_binary("cpu")
 
+    capabilities = probe_vanity_capabilities(binary)
+    if backend != "cpu" and not capabilities.get("gpu_supported"):
+        msg = "GPU not available or unsupported by vanitysearch binary"
+        if USE_CPU_FALLBACK:
+            logger.error(f"{msg} → switched to CPU; set USE_CPU_FALLBACK=False to disallow")
+            backend = "cpu"
+            device_id = None
+            device_name = "CPU"
+            binary = resolve_vanitysearch_binary("cpu")
+        else:
+            logger.error(f"{msg}; aborting vanity worker")
+            update_dashboard_stat("vanitysearch_backend", "unavailable")
+            raise RuntimeError(msg)
+
     if backend == "cpu" and GPU_BACKEND != "cpu":
         _warn_once("cpu_fallback", "GPU backend requested but CPU binary selected")
 
@@ -135,13 +219,36 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
 
 
 def build_vanitysearch_args(hex_seed: str) -> List[Tuple[List[str], str]]:
-    """Return a list of argument lists for each enabled address type."""
+    """Compose VanitySearch argument lists for each requested address family.
+
+    The binary's ``--help`` output is parsed at runtime to determine the
+    correct switches for legacy P2PKH, Bech32 (v0) and Bech32m (v1) so newer
+    builds do not break when flags change.  This ensures ``bc1`` support does
+    not disable classic ``1…`` generation.
+    """
+
+    binary = _SELECTED_BINARY or resolve_vanitysearch_binary(_SELECTED_BACKEND)
+    help_text = _run_binary(binary, ["--help"])
+
+    switches = {"p2pkh": "-1", "bech32": "-b", "bech32m": "-3"}
+    for line in help_text.splitlines():
+        line_l = line.lower()
+        m = re.search(r"-(\S+)", line)
+        flag = f"-{m.group(1)}" if m else None
+        if "p2pkh" in line_l or "legacy" in line_l:
+            switches["p2pkh"] = flag or switches["p2pkh"]
+        if "bech32m" in line_l or "taproot" in line_l:
+            switches["bech32m"] = flag or switches["bech32m"]
+        elif "bech32" in line_l:
+            switches["bech32"] = flag or switches["bech32"]
+
     jobs: List[Tuple[List[str], str]] = []
-    jobs.append((["-s", hex_seed, "-u", DEFAULT_BTC_PATTERNS[0]], "p2pkh"))
+    base = ["-s", hex_seed]
+    jobs.append((base + [switches["p2pkh"], DEFAULT_BTC_PATTERNS[0]], "p2pkh"))
     if ENABLE_P2WPKH:
-        jobs.append((["-s", hex_seed, "-u", DEFAULT_BTC_PATTERNS_BECH32[0]], "p2wpkh"))
+        jobs.append((base + [switches["bech32"], DEFAULT_BTC_PATTERNS_BECH32[0]], "p2wpkh"))
     if ENABLE_TAPROOT:
-        jobs.append((["-s", hex_seed, "-u", DEFAULT_BTC_PATTERNS_BECH32M[0]], "taproot"))
+        jobs.append((base + [switches["bech32m"], DEFAULT_BTC_PATTERNS_BECH32M[0]], "taproot"))
     return jobs
 
 
@@ -154,7 +261,13 @@ def run_vanitysearch(
     pause_event=None,
     addr_mode: str = "p2pkh",
 ) -> bool:
-    """Execute VanitySearch with live speed parsing and atomic output handling."""
+    """Execute VanitySearch streaming stdout to ``output_path``.
+
+    Data is written to ``output_path + '.part'`` while the process runs.  The
+    temporary file remains open (and locked on Windows) to avoid race conditions
+    with external cleaners.  When ``MAX_OUTPUT_LINES`` is reached or the process
+    exits, the file is flushed and atomically renamed to ``output_path``.
+    """
     if pause_event and pause_event.is_set():
         logger.info("Keygen paused; skipping VanitySearch job")
         return False
@@ -163,18 +276,34 @@ def run_vanitysearch(
     cmd = [binary] + seed_args
     if backend in ("cuda", "opencl") and device_id is not None:
         cmd += ["-gpu", str(device_id)]
-    update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
-    logger.info(f"Executing: {' '.join(cmd)}")
+    mode_name = {"cuda": "GPU-CUDA", "opencl": "GPU-OpenCL/AMD", "cpu": "CPU"}.get(backend, backend)
 
-    tmp_path, tmp_handle = atomic_open(output_path)
+    # Sanitize seed in logs
+    sanitized: List[str] = []
+    skip = False
+    for c in cmd:
+        if skip:
+            skip = False
+            continue
+        if c == "-s":
+            sanitized.extend(["-s", "<seed>"])
+            skip = True
+        else:
+            sanitized.append(c)
+    logger.info(f"Executing VanitySearch ({mode_name}): {' '.join(sanitized)}")
+    update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
+
+    part_path = output_path + ".part"
     buffer: List[str] = []
     valid_lines = 0
     addr_re = re.compile(
-        r"^(?:PubAddr|PubAddress)\s*:\s*(\S+)|"  # legacy marker
+        r"^(?:PubAddr|PubAddress)\s*:\s*(\S+)|"
         r"^(1[1-9A-HJ-NP-Za-km-z]{25,34}|3[1-9A-HJ-NP-Za-km-z]{25,34}|bc1[0-9ac-hj-np-z]{11,71})$",
         re.IGNORECASE,
     )
     try:
+        f = open(part_path, "w", encoding="utf-8")
+        _lock_file(f)
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -196,34 +325,52 @@ def run_vanitysearch(
             if addr_re.match(line.strip()):
                 valid_lines += 1
                 if valid_lines == 1:
-                    tmp_handle.writelines(buffer)
+                    f.writelines(buffer)
                 else:
-                    tmp_handle.write(line)
+                    f.write(line)
+                buffer.clear()
             elif valid_lines > 0:
-                tmp_handle.write(line)
+                f.write(line)
 
             if pause_event and pause_event.is_set():
                 proc.terminate()
             if timeout and time.time() - start > timeout:
                 proc.terminate()
-            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) >= MAX_OUTPUT_FILE_SIZE:
+            if os.path.getsize(part_path) >= MAX_OUTPUT_FILE_SIZE or valid_lines >= MAX_OUTPUT_LINES:
                 proc.terminate()
         proc.wait()
     except Exception:
         logger.exception("Failed to execute VanitySearch")
-        tmp_handle.close()
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        try:
+            f.close()
+            _unlock_file(f)
+        except Exception:
+            pass
+        if os.path.exists(part_path):
+            os.remove(part_path)
         return False
 
-    tmp_handle.close()
+    try:
+        _unlock_file(f)
+    except Exception:
+        pass
+    f.close()
     if valid_lines == 0:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        if os.path.exists(part_path):
+            os.remove(part_path)
         logger.info(f"No address lines emitted by VanitySearch for {addr_mode}")
         return False
 
-    atomic_commit(tmp_path, output_path)
+    os.replace(part_path, output_path)
+    logger.info(
+        json.dumps(
+            {
+                "event": "vanity_output_rotated",
+                "file": os.path.basename(output_path),
+                "lines": valid_lines,
+            }
+        )
+    )
     return True
 
 

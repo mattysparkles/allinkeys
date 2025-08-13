@@ -123,6 +123,22 @@ def get_file_size_mb(path):
     return os.path.getsize(path) / (1024 * 1024)
 
 
+def list_vanity_txt_files() -> list[str]:
+    """Enumerate finalized VanitySearch outputs.
+
+    Do not process ``.part`` (in-progress) files; only finalized ``.txt`` files
+    are returned so consumers never race with the writer.
+    """
+    try:
+        return [
+            f
+            for f in os.listdir(VANITY_OUTPUT_DIR)
+            if f.endswith(".txt") and not f.endswith(".part")
+        ]
+    except FileNotFoundError:
+        return []
+
+
 def open_new_csv_writer(index, base_name=None):
     """Create a new CSV writer to a temporary ``.partial.csv`` file.
 
@@ -1086,9 +1102,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
         try:
             all_txt = [
                 f
-                for f in os.listdir(VANITY_OUTPUT_DIR)
-                if f.endswith(".txt")
-                and f not in processed
+                for f in list_vanity_txt_files()
+                if f not in processed
                 and f not in queued
                 and ".tmp-" not in f
                 and safe_nonempty(os.path.join(VANITY_OUTPUT_DIR, f))

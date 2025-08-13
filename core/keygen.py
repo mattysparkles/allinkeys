@@ -182,10 +182,20 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     set_metric("vanity_progress_percent", 0)
     set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
 
-    backend, device_id, device_name, binary = vanity_runner.probe_device()
-    logger.info(
-        f"Startup selection → device: {device_name} | backend: {backend} | binary: {binary} | FORCE_CPU_FALLBACK={FORCE_CPU_FALLBACK}"
-    )
+    try:
+        backend, device_id, device_name, binary = vanity_runner.probe_device()
+        logger.info(
+            f"Startup selection → device: {device_name} | backend: {backend} | binary: {binary} | FORCE_CPU_FALLBACK={FORCE_CPU_FALLBACK}"
+        )
+    except RuntimeError as exc:
+        logger.error(f"GPU probe failed: {exc}")
+        from core.dashboard import set_metric, set_thread_health
+        set_metric("status.keygen", "Stopped")
+        try:
+            set_thread_health("keygen", False)
+        except Exception:
+            pass
+        return
 
     try:
         set_metric("status.keygen", "Running")
