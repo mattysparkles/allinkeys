@@ -36,6 +36,7 @@ from config.settings import (
     DELETE_CSV_CHECKING_LOGS,
     OPEN_CONFIG_FILE_FROM_DASHBOARD,
     GPU_STRATEGY,
+    ENABLE_P2PKH,
     ENABLE_P2WPKH,
     ENABLE_TAPROOT,
 )
@@ -109,12 +110,28 @@ class DashboardGUI:
         addr_frame.pack(fill="x", padx=10, pady=5)
         addr_frame.grid_columnconfigure(0, weight=1)
         addr_frame.grid_columnconfigure(1, weight=1)
+        addr_frame.grid_columnconfigure(2, weight=1)
+        self.p2pkh_var = tk.BooleanVar(value=ENABLE_P2PKH)
         self.p2wpkh_var = tk.BooleanVar(value=ENABLE_P2WPKH)
         self.taproot_var = tk.BooleanVar(value=ENABLE_TAPROOT)
-        ttk.Checkbutton(addr_frame, text="bc1q (P2WPKH)", variable=self.p2wpkh_var,
-                        command=lambda: setattr(settings, 'ENABLE_P2WPKH', self.p2wpkh_var.get())).grid(row=0, column=0, sticky="w")
-        ttk.Checkbutton(addr_frame, text="bc1p (Taproot)", variable=self.taproot_var,
-                        command=lambda: setattr(settings, 'ENABLE_TAPROOT', self.taproot_var.get())).grid(row=0, column=1, sticky="w")
+        ttk.Checkbutton(
+            addr_frame,
+            text="1 (P2PKH)",
+            variable=self.p2pkh_var,
+            command=lambda: setattr(settings, 'ENABLE_P2PKH', self.p2pkh_var.get()),
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(
+            addr_frame,
+            text="bc1q (P2WPKH)",
+            variable=self.p2wpkh_var,
+            command=lambda: setattr(settings, 'ENABLE_P2WPKH', self.p2wpkh_var.get()),
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Checkbutton(
+            addr_frame,
+            text="bc1p (Taproot)",
+            variable=self.taproot_var,
+            command=lambda: setattr(settings, 'ENABLE_TAPROOT', self.taproot_var.get()),
+        ).grid(row=0, column=2, sticky="w")
 
         # Metric Panels
         self.section_frame = ttk.Frame(self.container)
