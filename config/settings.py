@@ -142,8 +142,11 @@ FILTER_ONLY_P2PKH = False
 # Address generation toggles
 ENABLE_P2PKH = True          # legacy "1" prefix (P2PKH)
 # SegWit address generation toggles
-ENABLE_P2WPKH = True         # bc1q… (Bech32 v0)
-ENABLE_TAPROOT = True        # bc1p… (Bech32m v1)
+# Disabled by default for backwards compatibility.  Users can enable
+# bech32 modes via settings or ``--enable-bc1`` CLI flag.
+ENABLE_BECH32_DEFAULT = False
+ENABLE_P2WPKH = ENABLE_BECH32_DEFAULT         # bc1q… (Bech32 v0)
+ENABLE_TAPROOT = ENABLE_BECH32_DEFAULT        # bc1p… (Bech32m v1)
 
 # GUI default patterns used when “All” selected
 DEFAULT_BTC_PATTERNS = ["1**"]                # legacy

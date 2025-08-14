@@ -47,6 +47,7 @@ _backlog_processed = 0
 _backlog_last_ts = time.time()
 _last_csv_created = 0
 
+import config.settings as settings
 from config.settings import (
     ENABLE_CHECKPOINT_RESTORE, CHECKPOINT_INTERVAL_SECONDS,
     LOGO_ART, ENABLE_DAY_ONE_CHECK, ENABLE_UNIQUE_RECHECK,
@@ -399,6 +400,12 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 def run_btc_only(args):
     """Run BTC-only keygen and checker pipeline."""
     from multiprocessing import Process
+    # Allow command line toggle to enable bc1 address generation.  The
+    # settings module defines bech32 modes as disabled by default for
+    # backwards compatibility.
+    if getattr(args, "enable_bc1", False):
+        settings.ENABLE_P2WPKH = True
+        settings.ENABLE_TAPROOT = True
     from core.keygen import start_keygen_loop
     from core.btc_only_checker import (
         prepare_btc_only_mode,
@@ -490,6 +497,11 @@ def run_btc_only(args):
         stop_listener()
 
 def run_allinkeys(args):
+    # Enable bech32 modes when explicitly requested via CLI.  Settings
+    # default to legacy P2PKH only.
+    if getattr(args, "enable_bc1", False):
+        settings.ENABLE_P2WPKH = True
+        settings.ENABLE_TAPROOT = True
     if getattr(args, "only", None) == "btc":
         run_btc_only(args)
         return
@@ -605,6 +617,7 @@ if __name__ == "__main__":
     parser.add_argument("--skip-downloads", action="store_true", help="Skip downloading balance files")
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
+    parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
     parser.add_argument("-only", choices=["btc"], help="Restrict to a single coin flow.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("-all", action="store_true", help="Use 'all BTC addresses ever used' range mode")
