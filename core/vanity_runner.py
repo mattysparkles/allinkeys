@@ -15,6 +15,7 @@ from config.settings import (
     MIN_EXPECTED_GPU_MKEYS,
     MAX_OUTPUT_FILE_SIZE,
     MAX_OUTPUT_LINES,
+    ENABLE_P2PKH,
     ENABLE_P2WPKH,
     ENABLE_TAPROOT,
     DEFAULT_BTC_PATTERNS,
@@ -244,7 +245,12 @@ def build_vanitysearch_args(hex_seed: str) -> List[Tuple[List[str], str]]:
 
     jobs: List[Tuple[List[str], str]] = []
     base = ["-s", hex_seed]
-    jobs.append((base + [switches["p2pkh"], DEFAULT_BTC_PATTERNS[0]], "p2pkh"))
+
+    # Legacy P2PKH addresses are included unless explicitly disabled via
+    # ``ENABLE_P2PKH``.  This prevents accidental suppression when bc1 modes
+    # are enabled.
+    if ENABLE_P2PKH:
+        jobs.append((base + [switches["p2pkh"], DEFAULT_BTC_PATTERNS[0]], "p2pkh"))
     if ENABLE_P2WPKH:
         jobs.append((base + [switches["bech32"], DEFAULT_BTC_PATTERNS_BECH32[0]], "p2wpkh"))
     if ENABLE_TAPROOT:
@@ -301,6 +307,7 @@ def run_vanitysearch(
         r"^(1[1-9A-HJ-NP-Za-km-z]{25,34}|3[1-9A-HJ-NP-Za-km-z]{25,34}|bc1[0-9ac-hj-np-z]{11,71})$",
         re.IGNORECASE,
     )
+    rc = 0
     try:
         f = open(part_path, "w", encoding="utf-8")
         _lock_file(f)
@@ -309,6 +316,7 @@ def run_vanitysearch(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         start = time.time()
         for line in proc.stdout:
@@ -339,6 +347,7 @@ def run_vanitysearch(
             if os.path.getsize(part_path) >= MAX_OUTPUT_FILE_SIZE or valid_lines >= MAX_OUTPUT_LINES:
                 proc.terminate()
         proc.wait()
+        rc = proc.returncode
     except Exception:
         logger.exception("Failed to execute VanitySearch")
         try:
@@ -355,6 +364,11 @@ def run_vanitysearch(
     except Exception:
         pass
     f.close()
+    if rc != 0:
+        logger.error(f"VanitySearch exited with code {rc}")
+        if os.path.exists(part_path):
+            os.remove(part_path)
+        return False
     if valid_lines == 0:
         if os.path.exists(part_path):
             os.remove(part_path)

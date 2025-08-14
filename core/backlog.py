@@ -80,7 +80,11 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
             if get_shutdown_event() and get_shutdown_event().is_set():
                 break
             try:
-                files = [f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")]
+                files = [
+                    f
+                    for f in os.listdir(VANITY_OUTPUT_DIR)
+                    if f.endswith(".txt") and not f.endswith(".part")
+                ]  # Do not process .part files
                 update_dashboard_stat("backlog_files_queued", len(files))
                 futures = []
                 for file in files:

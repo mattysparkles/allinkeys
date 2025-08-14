@@ -27,7 +27,7 @@ from utils.pgp_utils import encrypt_with_pgp
 from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics, set_metric, get_metric
 from utils.balance_checker import fetch_live_balance
 from core.downloader import load_btc_funded_multi
-csv.field_size_limit(2**30)  # 1GB
+csv.field_size_limit(100 * 1024 * 1024)  # 100MB limit to prevent field errors
 
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
 os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
@@ -37,6 +37,10 @@ logger = get_logger(__name__)
 
 CHECK_TIME_HISTORY = []
 MAX_HISTORY_SIZE = 10
+
+# Track processed CSVs in-memory to avoid tiny marker files on disk
+CHECKED_CACHE = set()
+RECHECKED_CACHE = set()
 
 def load_csv_state():
     """Load CSV checkpoint state to resume partially processed files."""
@@ -131,32 +135,31 @@ def update_csv_eta():
         logger.exception("Failed to update CSV ETA")
 
 def mark_csv_as_checked(filename, log_file):
-    with open(log_file, "a") as f:
-        f.write(f"{filename}\n")
+    """Record the processed ``filename`` in-memory and emit a log event."""
+    cache = RECHECKED_CACHE if log_file == RECHECKED_CSV_LOG else CHECKED_CACHE
+    cache.add(filename)
+    logger.info(json.dumps({"event": "csv_checked_mark", "file": filename, "recheck": log_file == RECHECKED_CSV_LOG}))
+
 
 def has_been_checked(filename, log_file):
-    if not os.path.exists(log_file):
-        return False
-    with open(log_file, "r") as f:
-        return filename in f.read()
+    """Return True if ``filename`` was marked in this session."""
+    cache = RECHECKED_CACHE if log_file == RECHECKED_CSV_LOG else CHECKED_CACHE
+    return filename in cache
 
 def scan_csv_for_oversized_lines(csv_path, threshold=10_000_000):
-    """Scan a CSV file and report any lines exceeding the threshold size."""
+    """Scan a CSV file and report any lines exceeding ``threshold`` bytes."""
     try:
-        with open(csv_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(csv_path, "r", encoding="utf-8", errors="replace") as f:
             for i, line in enumerate(f):
                 if len(line) > threshold:
-                    print(
-                        f"\U0001F6A8 Line {i+1} in {csv_path} exceeds {threshold} bytes"
-                    )
+                    print(f"\U0001F6A8 Line {i+1} in {csv_path} exceeds {threshold} bytes")
     except Exception:
         logger.exception(f"Failed scanning {csv_path}")
 
 def load_funded_addresses(file_path):
-    """Load funded addresses from ``file_path`` applying ``normalize_address``
-    to each line so comparisons are consistent."""
-    with open(file_path, "r") as f:
-        return set(normalize_address(line.strip()) for line in f.readlines())
+    """Load funded addresses using UTF-8 decoding and normalize them."""
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        return {normalize_address(line.strip()) for line in f}
 
 def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False, pause_event=None, shutdown_event=None, start_row=0, state=None):
     """Scan ``csv_file`` for funded address matches.

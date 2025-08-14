@@ -139,6 +139,8 @@ COIN_DOWNLOAD_URLS = {
 MAX_DAILY_FILES_PER_COIN = 2
 FILTER_ONLY_P2PKH = False
 
+# Address generation toggles
+ENABLE_P2PKH = True          # legacy "1" prefix (P2PKH)
 # SegWit address generation toggles
 ENABLE_P2WPKH = True         # bc1q… (Bech32 v0)
 ENABLE_TAPROOT = True        # bc1p… (Bech32m v1)
