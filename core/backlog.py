@@ -59,16 +59,17 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
     Monitors VANITY_OUTPUT_DIR for .txt files and converts to .csv if ready.
     Skips files that are too small, locked, or recently modified.
     """
-    from core.dashboard import set_metric, init_shared_metrics, register_control_events
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
+    from core.dashboard import register_control_events
     try:
-        init_shared_metrics(shared_metrics)
+        ensure_metrics_ready()
         register_control_events(shutdown_event, pause_event, module="backlog")
     except Exception:
         pass
     from core.dashboard import set_thread_health
-    set_metric("status.backlog", "Running")
-    set_metric("backlog_files_queued", 0)
-    set_metric("backlog_files_completed", 0)
+    _safe_set_metric("status.backlog", "Running")
+    _safe_set_metric("backlog_files_queued", 0)
+    _safe_set_metric("backlog_files_completed", 0)
     set_thread_health("backlog", True)
     log_message("📦 Backlog converter started...", "INFO")
 
@@ -127,7 +128,7 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
                     except Exception as e:
                         log_message(f"❌ Backlog task error: {safe_str(e)}", "ERROR")
                     else:
-                        increment_metric("backlog_files_completed", 1)
+                        _safe_inc_metric("backlog_files_completed", 1)
 
             except Exception as e:
                 log_message(f"❌ Error in backlog conversion loop: {safe_str(e)}", "ERROR")
@@ -137,7 +138,7 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
                 continue
             time.sleep(10)
     finally:
-        set_metric("status.backlog", "Stopped")
+        _safe_set_metric("status.backlog", "Stopped")
         try:
             set_thread_health("backlog", False)
         except Exception:

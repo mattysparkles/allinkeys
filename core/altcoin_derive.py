@@ -54,7 +54,8 @@ from config.settings import (
     EXCLUDE_ETH_FROM_DERIVE,
 )
 from core.logger import log_message
-from core.dashboard import update_dashboard_stat, set_metric, get_metric, increment_metric
+from core.dashboard import update_dashboard_stat, get_metric
+from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 import core.checkpoint as checkpoint
 from core.gpu_selector import get_altcoin_gpu_ids, list_gpus
 import config.settings as settings
@@ -105,7 +106,7 @@ def safe_update_dashboard_stat(key, value=None):
 
 def safe_increment_metric(key, amount=1):
     try:
-        increment_metric(key, amount)
+        _safe_inc_metric(key, amount)
     except (KeyError, EOFError):
         log_message(f"⚠️ Metric update failed for {key}", "WARNING")
 
@@ -927,7 +928,7 @@ def convert_txt_to_csv(
         return 0
 
 
-from core.dashboard import init_shared_metrics, register_control_events
+
 
 
 def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q):
@@ -1018,20 +1019,21 @@ from core.logger import initialize_logging
 
 def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None, gpu_flag=None):
     initialize_logging(log_q)
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
-        init_shared_metrics(shared_metrics)
-        set_metric("status.altcoin", "Running")
-        set_metric("altcoin_files_converted", 0)
-        set_metric("derived_addresses_today", 0)
-        set_metric("backlog_files_completed", 0)
-        set_metric("backlog_progress", {})
-        from core.dashboard import set_thread_health
+        ensure_metrics_ready()
+        _safe_set_metric("status.altcoin", "Running")
+        _safe_set_metric("altcoin_files_converted", 0)
+        _safe_set_metric("derived_addresses_today", 0)
+        _safe_set_metric("backlog_files_completed", 0)
+        _safe_set_metric("backlog_progress", {})
+        from core.dashboard import set_thread_health, register_control_events
 
         set_thread_health("altcoin", True)
         register_control_events(shared_shutdown_event, pause_event, module="altcoin")
         log_message(f"Shared metrics initialized for {__name__}", "DEBUG")
     except Exception as e:
-        log_message(f"init_shared_metrics failed in {__name__}: {safe_str(e)}", "ERROR", exc_info=True)
+        log_message(f"ensure_metrics_ready failed in {__name__}: {safe_str(e)}", "ERROR", exc_info=True)
     """
     Monitors ``VANITY_OUTPUT_DIR`` for ``.txt`` files and converts them to CSV
     using GPU derivation.  Each GPU gets its own worker process and writes to a
@@ -1225,7 +1227,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
             log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR", exc_info=True)
 
     log_message("✅ Altcoin derive loop exited cleanly.", "INFO")
-    set_metric("status.altcoin", "Stopped")
+    _safe_set_metric("status.altcoin", "Stopped")
     try:
         from core.dashboard import set_thread_health
 

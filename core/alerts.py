@@ -36,7 +36,8 @@ from config.settings import (
 )
 
 from core.logger import log_message
-from core.dashboard import set_metric, increment_metric, get_metric
+from core.dashboard import get_metric
+from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 
 # runtime alert flags that can be toggled from the GUI
 ALERT_FLAGS = {
@@ -151,8 +152,8 @@ def send_phone_call_alert(message: str):
             to=TWILIO_TO_CALL,
         )
         log_message("📞 Phone call alert triggered.", "INFO")
-        increment_metric("alerts_sent_today.phone")
-        increment_metric("alerts_sent_lifetime.phone")
+        _safe_inc_metric("alerts_sent_today.phone")
+        _safe_inc_metric("alerts_sent_lifetime.phone")
     except Exception as exc:
         log_message(f"❌ Phone call error: {exc}\n{traceback.format_exc()}", "ERROR")
 
@@ -185,7 +186,7 @@ def alert_match(match_data, test_mode=False):
         return
 
     if get_metric("alerts_sent_today") is None:
-        set_metric("alerts_sent_today", {c: 0 for c in ALERT_CHANNELS})
+        _safe_set_metric("alerts_sent_today", {c: 0 for c in ALERT_CHANNELS})
 
     # Handle PGP-only encrypted blob
     if "encrypted" in match_data:
@@ -251,8 +252,8 @@ def alert_match(match_data, test_mode=False):
             flash()
             root.mainloop()
             log_message("✅ Desktop popup displayed.", "INFO")
-            increment_metric("alerts_sent_today.popup")
-            increment_metric("alerts_sent_lifetime.popup")
+            _safe_inc_metric("alerts_sent_today.popup")
+            _safe_inc_metric("alerts_sent_lifetime.popup")
         except Exception as e:
             log_message(f"❌ Desktop alert error: {e}", "ERROR")
 
@@ -262,8 +263,8 @@ def alert_match(match_data, test_mode=False):
         if os.path.exists(ALERT_SOUND_FILE):
             _start_audio_worker()
             audio_queue.put(ALERT_SOUND_FILE)
-            increment_metric("alerts_sent_today.popup")
-            increment_metric("alerts_sent_lifetime.popup")
+            _safe_inc_metric("alerts_sent_today.popup")
+            _safe_inc_metric("alerts_sent_lifetime.popup")
         else:
             log_message(f"❌ Sound file not found: {ALERT_SOUND_FILE}", "ERROR")
 
@@ -282,8 +283,8 @@ def alert_match(match_data, test_mode=False):
             server.send_message(msg)
             server.quit()
             log_message("[ALERT] ✉️ Email sent", "INFO")
-            increment_metric("alerts_sent_today.email")
-            increment_metric("alerts_sent_lifetime.email")
+            _safe_inc_metric("alerts_sent_today.email")
+            _safe_inc_metric("alerts_sent_lifetime.email")
         except Exception as e:
             log_message(f"❌ Email alert error: {e}", "WARNING")
 
@@ -294,8 +295,8 @@ def alert_match(match_data, test_mode=False):
             resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
             if resp.ok and resp.json().get("ok"):
                 log_message("[ALERT] 📟 Telegram sent", "INFO")
-                increment_metric("alerts_sent_today.telegram")
-                increment_metric("alerts_sent_lifetime.telegram")
+                _safe_inc_metric("alerts_sent_today.telegram")
+                _safe_inc_metric("alerts_sent_lifetime.telegram")
             else:
                 log_message(f"❌ Telegram alert failed: {resp.text}", "ERROR")
         except Exception as e:
@@ -309,8 +310,8 @@ def alert_match(match_data, test_mode=False):
             client = Client(TWILIO_SID, TWILIO_TOKEN)
             client.messages.create(body=match_text, from_=TWILIO_FROM, to=TWILIO_TO_SMS)
             log_message("📲 SMS alert sent.", "INFO")
-            increment_metric("alerts_sent_today.sms")
-            increment_metric("alerts_sent_lifetime.sms")
+            _safe_inc_metric("alerts_sent_today.sms")
+            _safe_inc_metric("alerts_sent_lifetime.sms")
         except Exception as e:
             log_message(f"❌ SMS alert error: {e}", "WARNING")
 
@@ -323,8 +324,8 @@ def alert_match(match_data, test_mode=False):
             resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
             if resp.ok:
                 log_message("💬 Discord alert sent.", "INFO")
-                increment_metric("alerts_sent_today.discord")
-                increment_metric("alerts_sent_lifetime.discord")
+                _safe_inc_metric("alerts_sent_today.discord")
+                _safe_inc_metric("alerts_sent_lifetime.discord")
             else:
                 log_message(f"❌ Discord alert failed: {resp.text}", "ERROR")
         except Exception as e:
@@ -341,8 +342,8 @@ def alert_match(match_data, test_mode=False):
             resp = requests.post(HOME_ASSISTANT_URL, headers=headers, json=payload, timeout=10)
             if resp.ok:
                 log_message("🏠 Home Assistant alert sent.", "INFO")
-                increment_metric("alerts_sent_today.home_assistant")
-                increment_metric("alerts_sent_lifetime.home_assistant")
+                _safe_inc_metric("alerts_sent_today.home_assistant")
+                _safe_inc_metric("alerts_sent_lifetime.home_assistant")
             else:
                 log_message(f"❌ Home Assistant alert failed: {resp.text}", "ERROR")
         except Exception as e:
@@ -361,8 +362,8 @@ def alert_match(match_data, test_mode=False):
             with open(full_path, 'w') as f:
                 f.write(b64_encrypted)
             log_message("☁ Encrypted match uploaded locally.", "INFO")
-            increment_metric("alerts_sent_today.cloud")
-            increment_metric("alerts_sent_lifetime.cloud")
+            _safe_inc_metric("alerts_sent_today.cloud")
+            _safe_inc_metric("alerts_sent_lifetime.cloud")
         except Exception as e:
             log_message(f"❌ PGP/cloud upload error: {e}", "ERROR")
 
@@ -374,8 +375,8 @@ def alert_match(match_data, test_mode=False):
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(match_data) + "\n")
         log_message("📝 Match written to local log.", "INFO")
-        increment_metric("alerts_sent_today.file")
-        increment_metric("alerts_sent_lifetime.file")
+        _safe_inc_metric("alerts_sent_today.file")
+        _safe_inc_metric("alerts_sent_lifetime.file")
     except Exception as e:
         log_message(f"❌ Local match logging error: {e}", "ERROR")
 
@@ -384,9 +385,9 @@ def trigger_startup_alerts(shared_metrics=None):
     """
     Sends startup alerts through configured channels.
     """
-    from core.dashboard import set_metric, init_shared_metrics
+    from core.worker_bootstrap import ensure_metrics_ready
     try:
-        init_shared_metrics(shared_metrics)
+        ensure_metrics_ready()
     except Exception:
         pass
     if not ENABLE_ALERTS:
@@ -394,16 +395,16 @@ def trigger_startup_alerts(shared_metrics=None):
         return
 
     # Ensure dashboard reflects that alerts are active on startup
-    set_metric("status.alerts", "Running")
-    set_metric("alerts_status", "Running")
+    _safe_set_metric("status.alerts", "Running")
+    _safe_set_metric("alerts_status", "Running")
     try:
         log_message("📣 Triggering startup alerts...", "INFO")
         # Extend to alert channels if needed
     except Exception as e:
         log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
     finally:
-        set_metric("status.alerts", "Stopped")
-        set_metric("alerts_status", "Stopped")
+        _safe_set_metric("status.alerts", "Stopped")
+        _safe_set_metric("alerts_status", "Stopped")
 
 
 def run_test_alerts_from_csv(csv_path=None):
