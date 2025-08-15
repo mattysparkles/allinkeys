@@ -27,7 +27,9 @@ FULL_DIR = os.path.join(DOWNLOADS_DIR, "full")
 UNIQUE_DIR = os.path.join(DOWNLOADS_DIR, "unique")
 # Where matches and encrypted alerts are archived
 MATCHES_DIR = os.path.join(BASE_DIR, "matches")
-VANITY_OUTPUT_DIR = os.path.join(BASE_DIR, "vanity_output")
+# VanitySearch text outputs
+VANITY_TXT_DIR = os.path.join(BASE_DIR, "output", "vanity_txt")
+VANITY_OUTPUT_DIR = VANITY_TXT_DIR  # legacy alias
 # Local audio clips for alerts
 SOUND_CLIPS_DIR = os.path.join(BASE_DIR, "alerts", "sounds")
 CHECKPOINT_PATH = os.path.join(LOG_DIR, "restore_checkpoint.json")
@@ -59,8 +61,10 @@ VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts
 VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")  # Adjust if renamed
 MAX_KEYS_PER_FILE = 100_000  #Deprecated
 # Output file rotation config (for VanitySearch stream)
-MAX_OUTPUT_FILE_SIZE = 250 * 1024 * 1024  # 250 MB default
-MAX_OUTPUT_LINES = 200_000              # 200,000 lines per file
+VANITY_ROTATE_LINES = 200_000
+VANITY_MAX_BYTES = 500 * 1024 * 1024
+MAX_OUTPUT_LINES = VANITY_ROTATE_LINES  # legacy alias
+MAX_OUTPUT_FILE_SIZE = VANITY_MAX_BYTES  # legacy alias
 USE_GPU = True
 ROTATE_INTERVAL_SECONDS = 60
 
@@ -141,12 +145,11 @@ FILTER_ONLY_P2PKH = False
 
 # Address generation toggles
 ENABLE_P2PKH = True          # legacy "1" prefix (P2PKH)
-# SegWit address generation toggles
-# Disabled by default for backwards compatibility.  Users can enable
-# bech32 modes via settings or ``--enable-bc1`` CLI flag.
-ENABLE_BECH32_DEFAULT = False
-ENABLE_P2WPKH = ENABLE_BECH32_DEFAULT         # bc1q… (Bech32 v0)
-ENABLE_TAPROOT = ENABLE_BECH32_DEFAULT        # bc1p… (Bech32m v1)
+# SegWit address generation toggles (bc1)
+ENABLE_BC1_DEFAULT = False
+ENABLE_BECH32_DEFAULT = ENABLE_BC1_DEFAULT  # deprecated alias
+ENABLE_P2WPKH = ENABLE_BC1_DEFAULT         # bc1q… (Bech32 v0)
+ENABLE_TAPROOT = ENABLE_BC1_DEFAULT        # bc1p… (Bech32m v1)
 
 # GUI default patterns used when “All” selected
 DEFAULT_BTC_PATTERNS = ["1**"]                # legacy
@@ -645,9 +648,9 @@ BUTTONS_ENABLED = {
 # ===================== 🖥️ GPU/CPU BACKENDS ==========================
 # GPU/CPU selection & binaries
 GPU_BACKEND = "auto"        # "cuda" | "opencl" | "auto"
-VANITYSEARCH_BIN_CUDA = r"P:\\ALLINKEYS\\bin\\VanitySearch_cuda.exe"
-VANITYSEARCH_BIN_OPENCL = r"P:\\ALLINKEYS\\bin\\VanitySearch_opencl.exe"
-VANITYSEARCH_BIN_CPU = r"P:\\ALLINKEYS\\bin\\VanitySearch_cpu.exe"  # fallback only
+VANITYSEARCH_BIN_CUDA = os.path.join(BASE_DIR, "bin", "vanitysearch_cuda.exe")
+VANITYSEARCH_BIN_OPENCL = os.path.join(BASE_DIR, "bin", "vanitysearch_opencl.exe")
+VANITYSEARCH_BIN_CPU = VANITYSEARCH_PATH  # fallback only
 
 FORCE_CPU_FALLBACK = False  # If True, run CPU even if GPU available
 MIN_EXPECTED_GPU_MKEYS = 120.0  # GTX 1060 typical: 150–230 MKeys/s

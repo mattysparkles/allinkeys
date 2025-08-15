@@ -166,8 +166,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     except Exception as e:
         logger.exception(f"ensure_metrics_ready failed in {__name__}: {e}")
     register_control_events(shutdown_event, pause_event, module="keygen")
-    if not os.path.exists(VANITY_OUTPUT_DIR):
-        os.makedirs(VANITY_OUTPUT_DIR)
+    os.makedirs(VANITY_OUTPUT_DIR, exist_ok=True)
 
     checkpoint = load_checkpoint()
     if checkpoint:
