@@ -3,27 +3,27 @@ import re
 import subprocess
 import time
 import json
+import shutil
 from typing import Dict, List, Tuple, Optional
 
 from config.settings import (
     GPU_BACKEND,
     FORCE_CPU_FALLBACK,
     USE_CPU_FALLBACK,
-    VANITYSEARCH_BIN_CUDA,
-    VANITYSEARCH_BIN_OPENCL,
-    VANITYSEARCH_BIN_CPU,
     MIN_EXPECTED_GPU_MKEYS,
-    MAX_OUTPUT_FILE_SIZE,
-    MAX_OUTPUT_LINES,
     ENABLE_P2PKH,
     ENABLE_P2WPKH,
     ENABLE_TAPROOT,
     DEFAULT_BTC_PATTERNS,
     DEFAULT_BTC_PATTERNS_BECH32,
     DEFAULT_BTC_PATTERNS_BECH32M,
+    VANITY_ROTATE_LINES,
+    VANITY_MAX_BYTES,
+    BASE_DIR,
 )
 from core.logger import get_logger
-from core.dashboard import set_metric, update_dashboard_stat
+from core.dashboard import update_dashboard_stat
+from core.vanity_io import RollingAtomicWriter
 
 logger = get_logger(__name__)
 logger.info("Streaming vanity output via .part files → atomic rename enabled")
@@ -144,12 +144,25 @@ _SELECTED_BINARY: str = VANITYSEARCH_BIN_CPU
 
 
 def resolve_vanitysearch_binary(backend: str) -> str:
-    """Return the VanitySearch binary path for ``backend``."""
+    """Resolve VanitySearch executable path for the requested ``backend``."""
+    bin_dir = os.path.join(BASE_DIR, "bin")
+    names = []
     if backend == "cuda":
-        return VANITYSEARCH_BIN_CUDA
-    if backend == "opencl":
-        return VANITYSEARCH_BIN_OPENCL
-    return VANITYSEARCH_BIN_CPU
+        names = ["vanitysearch_cuda.exe", "vanitysearch.exe"]
+    elif backend == "opencl":
+        names = ["vanitysearch_opencl.exe", "vanitysearch.exe"]
+    else:
+        names = ["vanitysearch.exe"]
+    for n in names:
+        candidate = os.path.join(bin_dir, n)
+        if os.path.exists(candidate):
+            return candidate
+    for n in names:
+        found = shutil.which(n)
+        if found:
+            return found
+    # Fallback to first candidate in bin_dir
+    return os.path.join(bin_dir, names[0])
 
 
 def probe_device() -> Tuple[str, Optional[int], str, str]:
@@ -267,125 +280,110 @@ def run_vanitysearch(
     pause_event=None,
     addr_mode: str = "p2pkh",
 ) -> bool:
-    """Execute VanitySearch streaming stdout to ``output_path``.
-
-    Data is written to ``output_path + '.part'`` while the process runs.  The
-    temporary file remains open (and locked on Windows) to avoid race conditions
-    with external cleaners.  When ``MAX_OUTPUT_LINES`` is reached or the process
-    exits, the file is flushed and atomically renamed to ``output_path``.
-    """
+    """Execute VanitySearch streaming stdout to ``output_path`` using a safe writer."""
     if pause_event and pause_event.is_set():
         logger.info("Keygen paused; skipping VanitySearch job")
         return False
 
-    binary = resolve_vanitysearch_binary(backend)
-    cmd = [binary] + seed_args
-    if backend in ("cuda", "opencl") and device_id is not None:
-        cmd += ["-gpu", str(device_id)]
-    mode_name = {"cuda": "GPU-CUDA", "opencl": "GPU-OpenCL/AMD", "cpu": "CPU"}.get(backend, backend)
+    enable_bc1 = ENABLE_P2WPKH or ENABLE_TAPROOT
 
-    # Sanitize seed in logs
-    sanitized: List[str] = []
-    skip = False
-    for c in cmd:
-        if skip:
-            skip = False
-            continue
-        if c == "-s":
-            sanitized.extend(["-s", "<seed>"])
-            skip = True
-        else:
-            sanitized.append(c)
-    logger.info(f"Executing VanitySearch ({mode_name}): {' '.join(sanitized)}")
-    update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
+    def _run_once(b: str) -> bool:
+        binary = resolve_vanitysearch_binary(b)
+        cmd = [binary] + seed_args
+        if b in ("cuda", "opencl") and device_id is not None:
+            cmd += ["-gpu", str(device_id)]
+        mode_name = {"cuda": "GPU-CUDA", "opencl": "GPU-OpenCL/AMD", "cpu": "CPU"}.get(b, b)
 
-    part_path = output_path + ".part"
-    buffer: List[str] = []
-    valid_lines = 0
-    addr_re = re.compile(
-        r"^(?:PubAddr|PubAddress)\s*:\s*(\S+)|"
-        r"^(1[1-9A-HJ-NP-Za-km-z]{25,34}|3[1-9A-HJ-NP-Za-km-z]{25,34}|bc1[0-9ac-hj-np-z]{11,71})$",
-        re.IGNORECASE,
-    )
-    rc = 0
-    try:
-        f = open(part_path, "w", encoding="utf-8")
-        _lock_file(f)
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        sanitized: List[str] = []
+        skip = False
+        for c in cmd:
+            if skip:
+                skip = False
+                continue
+            if c == "-s":
+                sanitized.extend(["-s", "<seed>"])
+                skip = True
+            else:
+                sanitized.append(c)
+        logger.info(f"Executing VanitySearch ({mode_name}): {' '.join(sanitized)}")
+        update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
+
+        writer = RollingAtomicWriter(output_path, VANITY_ROTATE_LINES, VANITY_MAX_BYTES)
+        addr_re = re.compile(
+            r"^(?:PubAddr|PubAddress)\s*:\s*(\S+)|"
+            r"^(1[1-9A-HJ-NP-Za-km-z]{25,34}|3[1-9A-HJ-NP-Za-km-z]{25,34}|bc1[0-9ac-hj-np-z]{11,71})$",
+            re.IGNORECASE,
         )
-        start = time.time()
-        for line in proc.stdout:
-            buffer.append(line)
-            m = re.search(r"([0-9.]+)\s*([MK])?Key/s", line, re.IGNORECASE)
-            if m:
-                speed = float(m.group(1))
-                if m.group(2) and m.group(2).upper() == "K":
-                    speed /= 1000.0
-                update_dashboard_stat("vanitysearch_current_mkeys", round(speed, 2))
-                if backend != "cpu" and speed < MIN_EXPECTED_GPU_MKEYS:
-                    _warn_once("low_speed", "Speed suggests CPU; check GPU selection")
-
-            if addr_re.match(line.strip()):
-                valid_lines += 1
-                if valid_lines == 1:
-                    f.writelines(buffer)
-                else:
-                    f.write(line)
-                buffer.clear()
-            elif valid_lines > 0:
-                f.write(line)
-
-            if pause_event and pause_event.is_set():
-                proc.terminate()
-            if timeout and time.time() - start > timeout:
-                proc.terminate()
-            if os.path.getsize(part_path) >= MAX_OUTPUT_FILE_SIZE or valid_lines >= MAX_OUTPUT_LINES:
-                proc.terminate()
-        proc.wait()
-        rc = proc.returncode
-    except Exception:
-        logger.exception("Failed to execute VanitySearch")
+        valid_lines = 0
         try:
-            f.close()
-            _unlock_file(f)
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            start = time.time()
+            for line in proc.stdout:
+                m = re.search(r"([0-9.]+)\s*([MK])?Key/s", line, re.IGNORECASE)
+                if m:
+                    speed = float(m.group(1))
+                    if m.group(2) and m.group(2).upper() == "K":
+                        speed /= 1000.0
+                    update_dashboard_stat("vanitysearch_current_mkeys", round(speed, 2))
+                    if b != "cpu" and speed < MIN_EXPECTED_GPU_MKEYS:
+                        _warn_once("low_speed", "Speed suggests CPU; check GPU selection")
+
+                stripped = line.strip()
+                if addr_re.match(stripped):
+                    addr = stripped.split()[0]
+                    if addr.lower().startswith("bc1") and not enable_bc1:
+                        continue
+                    valid_lines += 1
+                    if writer.write(line):
+                        proc.terminate()
+                elif valid_lines > 0:
+                    if writer.write(line):
+                        proc.terminate()
+
+                if pause_event and pause_event.is_set():
+                    proc.terminate()
+                if timeout and time.time() - start > timeout:
+                    proc.terminate()
+            proc.wait()
+            rc = proc.returncode
         except Exception:
-            pass
-        if os.path.exists(part_path):
-            os.remove(part_path)
-        return False
-
-    try:
-        _unlock_file(f)
-    except Exception:
-        pass
-    f.close()
-    if rc != 0:
-        logger.error(f"VanitySearch exited with code {rc}")
-        if os.path.exists(part_path):
-            os.remove(part_path)
-        return False
-    if valid_lines == 0:
-        if os.path.exists(part_path):
-            os.remove(part_path)
-        logger.info(f"No address lines emitted by VanitySearch for {addr_mode}")
-        return False
-
-    os.replace(part_path, output_path)
-    logger.info(
-        json.dumps(
-            {
-                "event": "vanity_output_rotated",
-                "file": os.path.basename(output_path),
-                "lines": valid_lines,
-            }
+            logger.exception("Failed to execute VanitySearch")
+            writer.abort()
+            return False
+        if rc != 0 or valid_lines == 0:
+            writer.abort()
+            if rc != 0:
+                logger.error(f"VanitySearch exited with code {rc}")
+            else:
+                logger.info(f"No address lines emitted by VanitySearch for {addr_mode}")
+            return False
+        writer.close()
+        logger.info(
+            json.dumps(
+                {
+                    "event": "vanity_output_rotated",
+                    "file": os.path.basename(output_path),
+                    "lines": valid_lines,
+                }
+            )
         )
-    )
-    return True
+        return True
+
+    order = [backend]
+    if backend == "cuda":
+        order = ["cuda", "opencl", "cpu"]
+    elif backend == "opencl":
+        order = ["opencl", "cpu"]
+    for b in order:
+        if _run_once(b):
+            return True
+    return False
 
 
 # Expose selected device info for callers
