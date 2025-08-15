@@ -24,7 +24,8 @@ from core.alerts import alert_match
 from config.coin_definitions import coin_columns
 from core.logger import get_logger
 from utils.pgp_utils import encrypt_with_pgp
-from core.dashboard import update_dashboard_stat, increment_metric, init_shared_metrics, set_metric, get_metric
+from core.dashboard import update_dashboard_stat, get_metric
+from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 from utils.balance_checker import fetch_live_balance
 from core.downloader import load_btc_funded_multi
 csv.field_size_limit(100 * 1024 * 1024)  # 100MB limit to prevent field errors
@@ -173,11 +174,11 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
     rows_scanned = 0
     start_time = time.perf_counter()
     completed = True  # [FIX PHASE 2] track if file processed fully
-    set_metric("csv_checker.last_file", filename)
-    set_metric("last_csv_checked_filename", filename)
-    set_metric("csv_checker.last_timestamp", datetime.utcnow().isoformat())
-    set_metric("csv_checker.rows_checked", 0)
-    set_metric("csv_checker.matches_found", 0)
+    _safe_set_metric("csv_checker.last_file", filename)
+    _safe_set_metric("last_csv_checked_filename", filename)
+    _safe_set_metric("csv_checker.last_timestamp", datetime.utcnow().isoformat())
+    _safe_set_metric("csv_checker.rows_checked", 0)
+    _safe_set_metric("csv_checker.matches_found", 0)
 
     funded_btc = address_sets.get('btc', {}) if isinstance(address_sets.get('btc'), dict) else {}
     funded_p2pkh = funded_btc.get('p2pkh', set())
@@ -244,8 +245,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                         if pause_event.is_set():
                             continue
                     rows_scanned = row_num
-                    increment_metric("csv_checker.rows_checked", 1)  # progress metric for dashboard
-                    set_metric("csv_checker.rows_checked", rows_scanned)
+                    _safe_inc_metric("csv_checker.rows_checked", 1)  # progress metric for dashboard
+                    _safe_set_metric("csv_checker.rows_checked", rows_scanned)
                     if state and row_num % 1000 == 0:
                         # [FIX PHASE 2] persist progress periodically for crash resume
                         state.setdefault("files", {})[filename] = row_num
@@ -325,12 +326,12 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
 
                                         if normalized not in new_matches:
                                             new_matches.add(normalized)
-                                            increment_metric("matched_keys", 1)
-                                            increment_metric(f"matches_found_today.{coin}", 1)
-                                            increment_metric(f"matches_found_lifetime.{coin}", 1)
+                                            _safe_inc_metric("matched_keys", 1)
+                                            _safe_inc_metric(f"matches_found_today.{coin}", 1)
+                                            _safe_inc_metric(f"matches_found_lifetime.{coin}", 1)
                                             if coin == 'btc' and atype in {'p2pkh','p2sh','p2wpkh','taproot'}:
-                                                increment_metric(f"matches_found_today.{atype}", 1)
-                                                increment_metric(f"matches_found_lifetime.{atype}", 1)
+                                                _safe_inc_metric(f"matches_found_today.{atype}", 1)
+                                                _safe_inc_metric(f"matches_found_lifetime.{atype}", 1)
                                             update_dashboard_stat("matches_found_lifetime", get_metric("matches_found_lifetime"))
                                         row_matches.append(addr)
                                         all_matches.append(match_payload)
@@ -345,8 +346,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                         )
                         continue
                     if row_matches:
-                        increment_metric("csv_checker.matches_found", len(row_matches))
-                        set_metric("csv_checker.matches_found", get_metric("csv_checker.matches_found"))
+                        _safe_inc_metric("csv_checker.matches_found", len(row_matches))
+                        _safe_set_metric("csv_checker.matches_found", get_metric("csv_checker.matches_found"))
             except csv.Error as e:
                 logger.error(f"❌ CSV parsing error in {filename}: {e}")
 
@@ -360,14 +361,14 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
 
         # Record that another CSV file has been processed both for the current
         # day and for lifetime statistics.
-        increment_metric("csv_checked_today", 1)
-        increment_metric("csv_checked_lifetime", 1)
+        _safe_inc_metric("csv_checked_today", 1)
+        _safe_inc_metric("csv_checked_lifetime", 1)
         update_dashboard_stat("csv_checked_today", get_metric("csv_checked_today"))
         update_dashboard_stat("csv_checked_lifetime", get_metric("csv_checked_lifetime"))
         logger.info(f"CSV files checked today: {get_metric('csv_checked_today')}")
         if recheck:
-            increment_metric("csv_rechecked_today", 1)
-            increment_metric("csv_rechecked_lifetime", 1)
+            _safe_inc_metric("csv_rechecked_today", 1)
+            _safe_inc_metric("csv_rechecked_lifetime", 1)
         update_dashboard_stat({
             "avg_check_time": avg_time,
             "last_check_duration": f"{duration_sec:.2f}s"
@@ -375,8 +376,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
         for coin in coin_columns:
             if address_sets.get(coin):
                 # Update per-coin address counters to track scanning volume
-                increment_metric(f"addresses_checked_today.{coin}", rows_scanned)
-                increment_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
+                _safe_inc_metric(f"addresses_checked_today.{coin}", rows_scanned)
+                _safe_inc_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
         update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
         update_dashboard_stat("addresses_checked_lifetime", get_metric("addresses_checked_lifetime"))
 
@@ -417,20 +418,21 @@ from core.logger import initialize_logging
 
 def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False, log_q=None):
     initialize_logging(log_q)
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
-        init_shared_metrics(shared_metrics)
+        ensure_metrics_ready()
         from core.dashboard import register_control_events
         register_control_events(shutdown_event, pause_event, module="csv_check")
-        set_metric("status.csv_check", "Running")
-        set_metric("csv_checked_today", 0)
-        set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
-        set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
+        _safe_set_metric("status.csv_check", "Running")
+        _safe_set_metric("csv_checked_today", 0)
+        _safe_set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
+        _safe_set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", True)
         logger.debug("🟢 CSV day-one checker started")
         logger.debug(f"Shared metrics initialized for {__name__}")
     except Exception as e:
-        logger.exception(f"init_shared_metrics failed in {__name__}: {e}")
+        logger.exception(f"ensure_metrics_ready failed in {__name__}: {e}")
 
     address_sets = {}
     state = load_csv_state()
@@ -478,7 +480,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
             break
 
     update_csv_eta()
-    set_metric("status.csv_check", "Stopped")
+    _safe_set_metric("status.csv_check", "Stopped")
     try:
         from core.dashboard import set_thread_health
         set_thread_health("csv_check", False)
@@ -488,20 +490,21 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
 
 def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False, log_q=None):
     initialize_logging(log_q)
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
-        init_shared_metrics(shared_metrics)
+        ensure_metrics_ready()
         from core.dashboard import register_control_events
         register_control_events(shutdown_event, pause_event, module="csv_recheck")
-        set_metric("status.csv_recheck", "Running")
-        set_metric("csv_rechecked_today", 0)
-        set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
-        set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
+        _safe_set_metric("status.csv_recheck", "Running")
+        _safe_set_metric("csv_rechecked_today", 0)
+        _safe_set_metric("addresses_checked_today", {c: 0 for c in coin_columns})
+        _safe_set_metric("csv_checker", {"rows_checked": 0, "matches_found": 0, "last_file": ""})
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", True)
         logger.debug("🟢 CSV recheck checker started")
         logger.debug(f"Shared metrics initialized for {__name__}")
     except Exception as e:
-        logger.exception(f"init_shared_metrics failed in {__name__}: {e}")
+        logger.exception(f"ensure_metrics_ready failed in {__name__}: {e}")
 
     address_sets = {}
     state = load_csv_state()
@@ -549,7 +552,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
             break
 
     update_csv_eta()
-    set_metric("status.csv_recheck", "Stopped")
+    _safe_set_metric("status.csv_recheck", "Stopped")
     try:
         from core.dashboard import set_thread_health
         set_thread_health("csv_recheck", False)

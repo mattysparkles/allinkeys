@@ -101,6 +101,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     device_id = vanity_runner.get_selected_device_id()
     jobs = vanity_runner.build_vanitysearch_args(hex_seed_full)
     any_success = False
+    from core.worker_bootstrap import _safe_inc_metric
     for args, mode in jobs:
         current_output_path = os.path.join(
             VANITY_OUTPUT_DIR,
@@ -135,14 +136,14 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                             continue
                         addr = normalize_address(parts[0])
                         atype = detect_btc_address_type(addr)
-                        increment_metric(f"addresses_generated_today.{atype}", 1)
-                        increment_metric(f"addresses_generated_lifetime.{atype}", 1)
+                        _safe_inc_metric(f"addresses_generated_today.{atype}", 1)
+                        _safe_inc_metric(f"addresses_generated_lifetime.{atype}", 1)
                         lines += 1
                     total_keys_generated += lines
-                    increment_metric("keys_generated_today", lines)
-                    increment_metric("keys_generated_lifetime", lines)
-                    increment_metric("addresses_generated_today.btc", lines)
-                    increment_metric("addresses_generated_lifetime.btc", lines)
+                    _safe_inc_metric("keys_generated_today", lines)
+                    _safe_inc_metric("keys_generated_lifetime", lines)
+                    _safe_inc_metric("addresses_generated_today.btc", lines)
+                    _safe_inc_metric("addresses_generated_lifetime.btc", lines)
                     from core.dashboard import update_dashboard_stat, get_metric
                     update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
                     update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
@@ -153,16 +154,17 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
 
 
-from core.dashboard import init_shared_metrics, set_metric, increment_metric, get_metric
+from core.dashboard import get_metric
 
 
 def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None, gpu_flag=None):
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric
+    from core.dashboard import register_control_events
     try:
-        init_shared_metrics(shared_metrics)
+        ensure_metrics_ready()
         logger.debug(f"Shared metrics initialized for {__name__}")
     except Exception as e:
-        logger.exception(f"init_shared_metrics failed in {__name__}: {e}")
-    from core.dashboard import register_control_events
+        logger.exception(f"ensure_metrics_ready failed in {__name__}: {e}")
     register_control_events(shutdown_event, pause_event, module="keygen")
     if not os.path.exists(VANITY_OUTPUT_DIR):
         os.makedirs(VANITY_OUTPUT_DIR)
@@ -178,9 +180,9 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         logger.info("🚀 No checkpoint found. Starting with randomized batch/index.")
 
     # Initialize dashboard metrics so the GUI never shows N/A
-    set_metric("keys_generated_today", 0)
-    set_metric("vanity_progress_percent", 0)
-    set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
+    _safe_set_metric("keys_generated_today", 0)
+    _safe_set_metric("vanity_progress_percent", 0)
+    _safe_set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
 
     try:
         backend, device_id, device_name, binary = vanity_runner.probe_device()
@@ -189,8 +191,8 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         )
     except RuntimeError as exc:
         logger.error(f"GPU probe failed: {exc}")
-        from core.dashboard import set_metric, set_thread_health
-        set_metric("status.keygen", "Stopped")
+        from core.dashboard import set_thread_health
+        _safe_set_metric("status.keygen", "Stopped")
         try:
             set_thread_health("keygen", False)
         except Exception:
@@ -198,7 +200,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         return
 
     try:
-        set_metric("status.keygen", "Running")
+        _safe_set_metric("status.keygen", "Running")
         from core.dashboard import (
             set_thread_health,
             get_shutdown_event,
@@ -241,7 +243,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                 kps = (current_keys - KPS_WINDOW[0][1]) / (now - KPS_WINDOW[0][0])
             else:
                 kps = 0
-            set_metric("keys_per_sec", round(kps, 2))
+            _safe_set_metric("keys_per_sec", round(kps, 2))
 
             batch_start = time.perf_counter()
             index = KEYGEN_STATE["index_within_batch"]
@@ -250,7 +252,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                     break
                 if pause_evt and pause_evt.is_set():
                     # Inner-loop pause check to halt new VanitySearch runs
-                    set_metric("keys_per_sec", 0)
+                    _safe_set_metric("keys_per_sec", 0)
                     time.sleep(1)
                     continue
 
@@ -258,9 +260,9 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
 
                 KEYGEN_STATE["index_within_batch"] = index
                 KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
-                set_metric("current_seed_index", index)
+                _safe_set_metric("current_seed_index", index)
                 progress = round((index / float(FILES_PER_BATCH)) * 100, 2)
-                set_metric("vanity_progress_percent", progress)
+                _safe_set_metric("vanity_progress_percent", progress)
 
                 success = run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index, pause_evt, gpu_flag)
                 if not success:
@@ -277,13 +279,13 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
             batch_end = time.perf_counter()
             batches_completed += 1
             total_time += batch_end - batch_start
-            set_metric("batches_completed", batches_completed)
-            set_metric("avg_keygen_time", round(total_time / batches_completed, 2))
+            _safe_set_metric("batches_completed", batches_completed)
+            _safe_set_metric("avg_keygen_time", round(total_time / batches_completed, 2))
             logger.info(f"Batch {KEYGEN_STATE['batch_id']} completed")
 
             KEYGEN_STATE["batch_id"] += 1
             KEYGEN_STATE["index_within_batch"] = 0
-            set_metric("vanity_progress_percent", 0)
+            _safe_set_metric("vanity_progress_percent", 0)
             # Record start of next batch so restarts begin at correct position
             save_checkpoint({
                 "batch_id": KEYGEN_STATE["batch_id"],
@@ -296,7 +298,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         # Log full stack trace for any unexpected failure
         logger.exception("❌ Unexpected error in keygen loop")
     finally:
-        set_metric("status.keygen", "Stopped")
+        _safe_set_metric("status.keygen", "Stopped")
         try:
             from core.dashboard import set_thread_health
             set_thread_health("keygen", False)

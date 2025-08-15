@@ -20,7 +20,6 @@ from config.settings import (
     VANITY_OUTPUT_DIR,
 )
 from core.logger import log_message
-from core.dashboard import set_metric, init_shared_metrics
 
 
 # Alias VanitySearch output directory as the input backlog for altcoin derive
@@ -70,8 +69,9 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
     shutdown_event : multiprocessing.Event
         Optional event to stop the loop.
     """
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric
     # Ensure dashboard helpers have access to the shared metrics dict
-    init_shared_metrics(shared_metrics)
+    ensure_metrics_ready()
 
     vendor, name = _detect_gpu_vendor()
     if name:
@@ -86,11 +86,11 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
         )
         vanity_flag.value = 0
         altcoin_flag.value = 0
-        set_metric("vanity_gpu_on", False)
-        set_metric("altcoin_gpu_on", False)
+        _safe_set_metric("vanity_gpu_on", False)
+        _safe_set_metric("altcoin_gpu_on", False)
 
     # Record the current scheduling strategy for the dashboard
-    set_metric("gpu_strategy", "swing" if SWING_MODE else "static")
+    _safe_set_metric("gpu_strategy", "swing" if SWING_MODE else "static")
 
     while shutdown_event is None or not shutdown_event.is_set():
         try:
@@ -106,7 +106,7 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
             except Exception:
                 backlog_files = []
             backlog_count = len(backlog_files)
-            set_metric("backlog_files_queued", backlog_count)
+            _safe_set_metric("backlog_files_queued", backlog_count)
 
             if backlog_count >= 100:
                 if vanity_flag.value or not altcoin_flag.value or assignment_flag.value != 1:
@@ -117,9 +117,9 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                         "[GPU Scheduler] 🚦 100+ backlog files — prioritizing altcoin derive on all GPUs...",
                         "INFO",
                     )
-                    set_metric("vanity_gpu_on", False)
-                    set_metric("altcoin_gpu_on", True)
-                    set_metric("gpu_assignment", "altcoin")
+                    _safe_set_metric("vanity_gpu_on", False)
+                    _safe_set_metric("altcoin_gpu_on", True)
+                    _safe_set_metric("gpu_assignment", "altcoin")
             else:
                 if not vanity_flag.value or altcoin_flag.value or assignment_flag.value != 0:
                     vanity_flag.value = 1
@@ -129,16 +129,16 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                         "[GPU Scheduler] ✅ Backlog under 100 files — resuming vanity GPU usage...",
                         "INFO",
                     )
-                    set_metric("vanity_gpu_on", True)
-                    set_metric("altcoin_gpu_on", False)
-                    set_metric("gpu_assignment", "vanity")
+                    _safe_set_metric("vanity_gpu_on", True)
+                    _safe_set_metric("altcoin_gpu_on", False)
+                    _safe_set_metric("gpu_assignment", "vanity")
         else:
             # Manual mode – respect dashboard assignments without forcing flags
             if assignment_flag.value != 2:
                 assignment_flag.value = 2
-            set_metric("gpu_assignment", "split")
-            set_metric("vanity_gpu_on", bool(vanity_flag.value))
-            set_metric("altcoin_gpu_on", bool(altcoin_flag.value))
+            _safe_set_metric("gpu_assignment", "split")
+            _safe_set_metric("vanity_gpu_on", bool(vanity_flag.value))
+            _safe_set_metric("altcoin_gpu_on", bool(altcoin_flag.value))
 
         time.sleep(2)
 

@@ -1,12 +1,5 @@
 # main.py
 
-if __name__ == "__main__":
-    import multiprocessing
-    try:
-        multiprocessing.set_start_method("spawn")
-    except RuntimeError:
-        pass  # Already set
-
 import os
 import io
 import time
@@ -109,11 +102,12 @@ from core.gpu_selector import (
 
 
 def metrics_updater(shared_metrics=None):
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
-        init_shared_metrics(shared_metrics)
+        ensure_metrics_ready()
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
-        print(f"[error] init_shared_metrics failed in {__name__}: {e}", flush=True)
+        print(f"[error] ensure_metrics_ready failed in {__name__}: {e}", flush=True)
     global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
     kps_start_time = time.time()
     kps_start_keys = get_metric('keys_generated_today', 0)
@@ -605,6 +599,12 @@ def run_allinkeys(args):
 
 
 if __name__ == "__main__":
+    import multiprocessing as mp
+    mp.freeze_support()
+    try:
+        mp.set_start_method("spawn")
+    except RuntimeError:
+        pass  # already set
 
     if not os.path.exists(VANITYSEARCH_PATH):
         raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")

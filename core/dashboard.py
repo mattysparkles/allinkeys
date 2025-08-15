@@ -169,6 +169,10 @@ def get_pause_event(module=None):
     return pause_event
 
 # Delayed initialization of Manager and Lock to avoid multiprocessing import issues on Windows
+_manager = None
+_metrics_lock = None
+_metrics = None
+# Backward-compatible aliases
 manager = None
 metrics_lock = None
 metrics = None
@@ -303,18 +307,16 @@ def init_dashboard_manager():
     This must be called from inside `if __name__ == "__main__"` block.
     """
     global manager, metrics, metrics_lock
-    if manager is None:
-        manager = multiprocessing.Manager()
-        metrics_lock = manager.Lock()
+    init_shared_metrics()
+    manager, metrics, metrics_lock = _manager, _metrics, _metrics_lock
+    if not metrics.keys():
         default_metrics = _default_metrics()
-        metrics = manager.dict()
-        metrics.update({k: (manager.dict(v) if isinstance(v, dict) else v)
+        metrics.update({k: (_manager.dict(v) if isinstance(v, dict) else v)
                         for k, v in default_metrics.items()})
-        # Load persisted lifetime values
         lifetime = load_lifetime_metrics()
         for k, v in lifetime.items():
             if isinstance(v, dict):
-                metrics[k] = manager.dict(v)
+                metrics[k] = _manager.dict(v)
             else:
                 metrics[k] = v
     return metrics
@@ -447,11 +449,23 @@ def _default_metrics():
     }
 
 
-def init_shared_metrics(shared_dict):
-    """Replace internal metrics dict with externally provided manager dict."""
-    global metrics
-    if shared_dict is not None:
-        metrics = shared_dict
+def init_shared_metrics(shared_dict=None):
+    """Idempotently initialize the multiprocessing Manager and shared metrics dict."""
+    global _manager, _metrics, _metrics_lock, manager, metrics, metrics_lock
+    if _manager is not None and _metrics is not None:
+        return
+    import multiprocessing as mp
+    _manager = mp.Manager()
+    _metrics_lock = _manager.RLock()
+    _metrics = shared_dict if shared_dict is not None else _manager.dict()
+    manager = _manager
+    metrics = _metrics
+    metrics_lock = _metrics_lock
+
+
+def _ensure_inited():
+    if _metrics is None:
+        init_shared_metrics()
 
 
 def update_dashboard_stat(key, value=None, retries=5, delay=0.5):
@@ -475,6 +489,7 @@ def update_dashboard_stat(key, value=None, retries=5, delay=0.5):
     """
 
     global metrics
+    _ensure_inited()
 
     for _ in range(retries):
         if metrics is not None:
@@ -547,6 +562,7 @@ def _update_stat_internal(key, value=None):
 
 def increment_metric(key, amount=1):
     """Increase a metric value in a process-safe manner."""
+    _ensure_inited()
     if metrics_lock:
         with metrics_lock:
             if "." in key:
@@ -573,6 +589,7 @@ def increment_metric(key, amount=1):
 
 def set_metric(key, value):
     """Convenience wrapper for updating a single metric key."""
+    _ensure_inited()
     if key in {
         "addresses_generated_lifetime",
         "addresses_checked_lifetime",
@@ -603,6 +620,7 @@ def set_metric(key, value):
 def get_metric(key, default=None):
     """Retrieve a metric value in a threadsafe way."""
     global metrics
+    _ensure_inited()
     if metrics is None:
         return default
     if metrics_lock:
