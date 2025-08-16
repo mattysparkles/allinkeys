@@ -5,7 +5,7 @@ from config.settings import (
     VANITY_TXT_DIR, VANITY_ROTATE_LINES, VANITY_MAX_BYTES, ENABLE_BC1_DEFAULT
 )
 from core.vanity_io import RollingAtomicWriter, ensure_dir
-from core.dashboard import log_message
+from core.logger import log_message
 
 
 def _bin_dir() -> str:
