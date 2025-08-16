@@ -1,13 +1,14 @@
 import time
 
+from core.logger import log_message
+
 try:
-    from core.dashboard import init_shared_metrics, set_metric, increment_metric, log_message
+    from core.dashboard import init_shared_metrics, set_metric, increment_metric
 except Exception:
     # Fallback shims if dashboard import fails very early
     def init_shared_metrics(): return None
     def set_metric(*_a, **_k): return None
     def increment_metric(*_a, **_k): return None
-    def log_message(msg, level="INFO"): print(f"[{level}] {msg}")
 
 _metrics_ready = {"ok": False}
 
