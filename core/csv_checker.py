@@ -420,7 +420,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
     initialize_logging(log_q)
     from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
-        ensure_metrics_ready()
+        ensure_metrics_ready(shared_metrics)
         from core.dashboard import register_control_events
         register_control_events(shutdown_event, pause_event, module="csv_check")
         _safe_set_metric("status.csv_check", "Running")
@@ -492,7 +492,7 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_
     initialize_logging(log_q)
     from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
-        ensure_metrics_ready()
+        ensure_metrics_ready(shared_metrics)
         from core.dashboard import register_control_events
         register_control_events(shutdown_event, pause_event, module="csv_recheck")
         _safe_set_metric("status.csv_recheck", "Running")

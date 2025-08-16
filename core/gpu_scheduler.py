@@ -71,7 +71,7 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
     """
     from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric
     # Ensure dashboard helpers have access to the shared metrics dict
-    ensure_metrics_ready()
+    ensure_metrics_ready(shared_metrics)
 
     vendor, name = _detect_gpu_vendor()
     if name:

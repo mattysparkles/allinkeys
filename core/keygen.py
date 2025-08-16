@@ -161,7 +161,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric
     from core.dashboard import register_control_events
     try:
-        ensure_metrics_ready()
+        ensure_metrics_ready(shared_metrics)
         logger.debug(f"Shared metrics initialized for {__name__}")
     except Exception as e:
         logger.exception(f"ensure_metrics_ready failed in {__name__}: {e}")

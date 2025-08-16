@@ -1021,7 +1021,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     initialize_logging(log_q)
     from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
-        ensure_metrics_ready()
+        ensure_metrics_ready(shared_metrics)
         _safe_set_metric("status.altcoin", "Running")
         _safe_set_metric("altcoin_files_converted", 0)
         _safe_set_metric("derived_addresses_today", 0)
