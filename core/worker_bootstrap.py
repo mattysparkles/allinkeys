@@ -12,12 +12,13 @@ except Exception:
 
 _metrics_ready = {"ok": False}
 
-def ensure_metrics_ready():
+
+def ensure_metrics_ready(shared_dict=None):
     """Idempotently initialize metrics in THIS process and write a heartbeat."""
     if _metrics_ready["ok"]:
         return True
     try:
-        init_shared_metrics()               # safe if already inited elsewhere
+        init_shared_metrics(shared_dict)  # safe if already inited elsewhere
         set_metric("_worker_heartbeat", int(time.time()))
         _metrics_ready["ok"] = True
         log_message("[worker_bootstrap] Shared metrics initialized", "DEBUG")

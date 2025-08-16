@@ -450,14 +450,27 @@ def _default_metrics():
 
 
 def init_shared_metrics(shared_dict=None):
-    """Idempotently initialize the multiprocessing Manager and shared metrics dict."""
+    """Idempotently initialize the metrics dictionary and synchronization primitives.
+
+    If ``shared_dict`` is provided, it is assumed to be a proxy object created
+    in the parent process via ``multiprocessing.Manager``.  In that case we
+    avoid spawning a new manager process (which would fail if this function is
+    invoked from a daemonic process) and simply create a local ``RLock`` for
+    synchronization.  Otherwise a new ``Manager`` is created to host the shared
+    dictionary.
+    """
     global _manager, _metrics, _metrics_lock, manager, metrics, metrics_lock
-    if _manager is not None and _metrics is not None:
+    if _metrics is not None:
         return
     import multiprocessing as mp
-    _manager = mp.Manager()
-    _metrics_lock = _manager.RLock()
-    _metrics = shared_dict if shared_dict is not None else _manager.dict()
+    if shared_dict is not None:
+        _manager = None
+        _metrics = shared_dict
+        _metrics_lock = mp.RLock()
+    else:
+        _manager = mp.Manager()
+        _metrics_lock = _manager.RLock()
+        _metrics = _manager.dict()
     manager = _manager
     metrics = _metrics
     metrics_lock = _metrics_lock

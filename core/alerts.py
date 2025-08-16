@@ -387,7 +387,7 @@ def trigger_startup_alerts(shared_metrics=None):
     """
     from core.worker_bootstrap import ensure_metrics_ready
     try:
-        ensure_metrics_ready()
+        ensure_metrics_ready(shared_metrics)
     except Exception:
         pass
     if not ENABLE_ALERTS:

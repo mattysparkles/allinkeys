@@ -62,7 +62,7 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
     from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     from core.dashboard import register_control_events
     try:
-        ensure_metrics_ready()
+        ensure_metrics_ready(shared_metrics)
         register_control_events(shutdown_event, pause_event, module="backlog")
     except Exception:
         pass

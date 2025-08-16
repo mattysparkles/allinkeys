@@ -104,7 +104,7 @@ from core.gpu_selector import (
 def metrics_updater(shared_metrics=None):
     from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
-        ensure_metrics_ready()
+        ensure_metrics_ready(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] ensure_metrics_ready failed in {__name__}: {e}", flush=True)
