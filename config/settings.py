@@ -58,8 +58,9 @@ BTC_MIN_FILE_AGE_SEC = 2.0            # ignore files newer than this
 
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
-VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")  # Adjust if renamed
-VANITYSEARCH_EXE_NAME = "vanitysearch.exe"
+# Single VanitySearch binary (CUDA only)
+VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "VanitySearch.exe")
+VANITYSEARCH_EXE_NAME = "VanitySearch.exe"
 MAX_KEYS_PER_FILE = 100_000  #Deprecated
 # Output file rotation config (for VanitySearch stream)
 VANITY_ROTATE_LINES = 200_000
@@ -648,10 +649,11 @@ BUTTONS_ENABLED = {
 
 # ===================== 🖥️ GPU/CPU BACKENDS ==========================
 # GPU/CPU selection & binaries
-GPU_BACKEND = "auto"        # "cuda" | "opencl" | "auto"
-VANITYSEARCH_BIN_CUDA = os.path.join(BASE_DIR, "bin", "vanitysearch_cuda.exe")
-VANITYSEARCH_BIN_OPENCL = os.path.join(BASE_DIR, "bin", "vanitysearch_opencl.exe")
-VANITYSEARCH_BIN_CPU = VANITYSEARCH_PATH  # fallback only
+# Only the CUDA-enabled VanitySearch binary is bundled.
+GPU_BACKEND = "cuda"        # CUDA is the only supported backend
+VANITYSEARCH_BIN_CUDA = VANITYSEARCH_PATH
+VANITYSEARCH_BIN_OPENCL = ""  # placeholder for future OpenCL support
+VANITYSEARCH_BIN_CPU = VANITYSEARCH_PATH  # CPU fallback shares the same binary
 
 FORCE_CPU_FALLBACK = False  # If True, run CPU even if GPU available
 MIN_EXPECTED_GPU_MKEYS = 120.0  # GTX 1060 typical: 150–230 MKeys/s
