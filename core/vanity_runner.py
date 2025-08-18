@@ -2,6 +2,8 @@ import os
 import re
 import subprocess
 import time
+import shutil
+import tempfile
 from typing import Dict, List, Tuple, Optional
 
 from config.settings import (
@@ -17,10 +19,16 @@ from config.settings import (
     DEFAULT_BTC_PATTERNS,
     DEFAULT_BTC_PATTERNS_BECH32,
     DEFAULT_BTC_PATTERNS_BECH32M,
+    VANITY_TXT_DIR,
+    VANITY_ROTATE_LINES,
+    VANITY_MAX_BYTES,
+    ENABLE_BC1_DEFAULT,
+    VANITY_MODE,
 )
-from core.logger import get_logger
+from core.logger import get_logger, log_message
 from core.dashboard import set_metric, update_dashboard_stat
 from core.utils.io_safety import atomic_open, atomic_commit
+from core.vanity_io import RollingAtomicWriter, ensure_dir
 
 logger = get_logger(__name__)
 logger.info("Atomic writes enabled for vanity outputs (temp → rename). Empty outputs are skipped.")
@@ -137,11 +145,18 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
 def build_vanitysearch_args(hex_seed: str) -> List[Tuple[List[str], str]]:
     """Return a list of argument lists for each enabled address type."""
     jobs: List[Tuple[List[str], str]] = []
-    jobs.append((["-s", hex_seed, "-u", DEFAULT_BTC_PATTERNS[0]], "p2pkh"))
+
+    def _job(pattern: str) -> List[str]:
+        args = ["-s", hex_seed]
+        _apply_mode_flags(args)
+        args.append(pattern)
+        return args
+
+    jobs.append((_job(DEFAULT_BTC_PATTERNS[0]), "p2pkh"))
     if ENABLE_P2WPKH:
-        jobs.append((["-s", hex_seed, "-u", DEFAULT_BTC_PATTERNS_BECH32[0]], "p2wpkh"))
+        jobs.append((_job(DEFAULT_BTC_PATTERNS_BECH32[0]), "p2wpkh"))
     if ENABLE_TAPROOT:
-        jobs.append((["-s", hex_seed, "-u", DEFAULT_BTC_PATTERNS_BECH32M[0]], "taproot"))
+        jobs.append((_job(DEFAULT_BTC_PATTERNS_BECH32M[0]), "taproot"))
     return jobs
 
 
@@ -231,3 +246,184 @@ def run_vanitysearch(
 get_selected_backend = lambda: _SELECTED_BACKEND
 get_selected_device_id = lambda: _SELECTED_DEVICE_ID
 get_selected_device_name = lambda: _SELECTED_DEVICE_NAME
+
+
+# --- New unified generator --------------------------------------------------
+def _bin_dir() -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "bin")
+
+
+def _which(p: str) -> Optional[str]:
+    if os.path.isabs(p) and os.path.isfile(p):
+        return p
+    f = shutil.which(p)
+    return f if f else (p if os.path.isfile(p) else None)
+
+
+def _resolve_exe() -> Optional[str]:
+    bin_dir = _bin_dir()
+    for cand in (
+        os.path.join(bin_dir, "vanitysearch.exe"),
+        os.path.join(bin_dir, "vanitysearch_cuda.exe"),
+        "vanitysearch.exe",
+        "vanitysearch_cuda.exe",
+    ):
+        path = _which(cand)
+        if path:
+            return path
+    return None
+
+
+def _normalize_seed(seed_val: int) -> str:
+    # VanitySearch allows decimal; keep it simple/stable.
+    try:
+        return str(int(seed_val))
+    except Exception:
+        return "0"
+
+
+def _filter_patterns(pats: List[str]) -> List[str]:
+    out = []
+    for p in (pats or []):
+        if not p or not isinstance(p, str):
+            continue
+        if p.lower().startswith("bc1") and not ENABLE_BC1_DEFAULT:
+            continue
+        out.append(p.strip())
+    return out
+
+
+def _apply_mode_flags(args: List[str]) -> None:
+    mode = (VANITY_MODE or "both").lower()
+    if mode == "both":
+        args.append("-b")            # both compressed & uncompressed
+    elif mode == "uncompressed":
+        args.append("-u")            # uncompressed only
+    else:
+        pass                         # compressed-only (no flag)
+
+
+def _popen_stream(args: List[str]) -> subprocess.Popen:
+    return subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+        universal_newlines=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) -> int:
+    """
+    Runs VanitySearch with correct CLI layout:
+      - -b/-u are flags (no value)
+      - Single prefix -> final positional arg
+      - Multiple prefixes -> write to temp file and pass -i <file>
+    Streams stdout into RollingAtomicWriter with atomic rotation.
+    """
+    out_dir = ensure_dir(VANITY_TXT_DIR)
+    exe = _resolve_exe()
+    if not exe:
+        log_message("❌ VanitySearch binary not found (vanitysearch.exe).", "ERROR")
+        return 0
+
+    seed = _normalize_seed(seed_start)
+    pats = _filter_patterns(patterns)
+    if not pats:
+        pats = ["1**"]  # safe default
+
+    base = [exe, "-s", seed, "-q"]
+    _apply_mode_flags(base)
+
+    # We will not use -o because of prior Windows path issues; capture stdout instead.
+    modes = [
+        ("GPU", ["-gpu"]),
+        ("OPENCL", ["-opencl"]),
+        ("CPU", ["-cpu"]),
+    ]
+
+    # Build single- or multi-pattern invocation:
+    tmpfile = None
+    try:
+        if len(pats) == 1:
+            single_suffix = [pats[0]]  # final positional argument
+            multi_suffix: List[str] = []
+        else:
+            fd, tmpfile = tempfile.mkstemp(prefix="vanity_prefixes_", suffix=".txt", dir=out_dir)
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("\n".join(pats) + "\n")
+            single_suffix = []
+            multi_suffix = ["-i", tmpfile]
+
+        writer = RollingAtomicWriter(
+            out_dir, rotate_lines=VANITY_ROTATE_LINES, max_bytes=VANITY_MAX_BYTES, prefix="vanity"
+        )
+        total_lines = 0
+
+        for mode_name, mode_flag in modes:
+            args = base + mode_flag + multi_suffix + single_suffix
+            try:
+                log_message(f"🧪 VanitySearch ({mode_name}): {' '.join(args)}", "INFO")
+                proc = _popen_stream(args)
+                last_line_ts = time.time()
+
+                while True:
+                    if stop_event and stop_event.is_set():
+                        proc.terminate()
+                        break
+
+                    line = proc.stdout.readline()
+                    if not line:
+                        if proc.poll() is not None:
+                            break
+                        if time.time() - last_line_ts > 5:
+                            log_message("⏳ VanitySearch running (no output yet)...", "DEBUG")
+                            last_line_ts = time.time()
+                        time.sleep(0.05)
+                        continue
+
+                    last_line_ts = time.time()
+
+                    # VanitySearch prints result lines like:
+                    #   1ABC...:privkey
+                    #   bc1q...:privkey
+                    # We persist the raw line to avoid accidental filtering.
+                    striped = line.rstrip("\n")
+                    if striped:
+                        writer.write_line(striped)
+                        # Heuristically count “result-looking” lines for metrics
+                        if ":" in striped and (striped.startswith("1") or striped.startswith("3") or striped.startswith("bc1")):
+                            total_lines += 1
+
+                rc = proc.wait(timeout=10)
+                if rc == 0 and total_lines > 0:
+                    log_message(f"✅ VanitySearch finished ({mode_name}) with {total_lines} matches.", "SUCCESS")
+                    writer.close()
+                    return total_lines
+                else:
+                    log_message(f"⚠️ VanitySearch exited rc={rc}, matches={total_lines}. Trying next mode...", "WARNING")
+            except Exception as e:
+                log_message(f"⚠️ VanitySearch {mode_name} failed: {e}", "WARNING")
+                continue
+
+        # If we captured any output but no mode returned cleanly, finalize the partial
+        if total_lines > 0:
+            writer.close()
+            log_message(f"✅ Finalized partial output with {total_lines} matches after fallbacks.", "INFO")
+            return total_lines
+
+        try:
+            writer.close()
+        except Exception:
+            pass
+        log_message("❌ VanitySearch produced no output in any mode.", "ERROR")
+        return 0
+
+    finally:
+        if tmpfile:
+            try:
+                os.remove(tmpfile)
+            except Exception:
+                pass

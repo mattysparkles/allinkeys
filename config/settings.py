@@ -59,8 +59,8 @@ BTC_MIN_FILE_AGE_SEC = 2.0            # ignore files newer than this
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
 # Single VanitySearch binary (CUDA only)
-VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "VanitySearch.exe")
-VANITYSEARCH_EXE_NAME = "VanitySearch.exe"
+VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")
+VANITYSEARCH_EXE_NAME = "vanitysearch.exe"
 MAX_KEYS_PER_FILE = 100_000  #Deprecated
 # Output file rotation config (for VanitySearch stream)
 VANITY_ROTATE_LINES = 200_000
@@ -69,6 +69,7 @@ MAX_OUTPUT_LINES = VANITY_ROTATE_LINES  # legacy alias
 MAX_OUTPUT_FILE_SIZE = VANITY_MAX_BYTES  # legacy alias
 USE_GPU = True
 ROTATE_INTERVAL_SECONDS = 60
+VANITY_MODE = "both"  # 'both' -> -b, 'uncompressed' -> -u, 'compressed' -> (no flag)
 
 # ===================== ✅ ENABLED FEATURES ==========================
 ENABLE_CHECKPOINT_RESTORE = True
