@@ -337,7 +337,8 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
     base = [exe, "-s", seed, "-q"]
     _apply_mode_flags(base)
 
-    # We will not use -o because of prior Windows path issues; capture stdout instead.
+    # Use temporary output files with the -o flag so results are captured
+    # reliably even if VanitySearch alters its stdout behaviour.
     modes = [
         ("GPU", ["-gpu"]),
         ("OPENCL", ["-opencl"]),
@@ -364,9 +365,13 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
 
         for mode_name, mode_flag in modes:
             args = base + mode_flag + multi_suffix + single_suffix
+            tmp_out = None
             try:
-                log_message(f"🧪 VanitySearch ({mode_name}): {' '.join(args)}", "INFO")
-                proc = _popen_stream(args)
+                fd, tmp_out = tempfile.mkstemp(prefix="vanity_tmp_", suffix=".txt", dir=out_dir)
+                os.close(fd)
+                args_with_out = args + ["-o", tmp_out]
+                log_message(f"🧪 VanitySearch ({mode_name}): {' '.join(args_with_out)}", "INFO")
+                proc = _popen_stream(args_with_out)
                 last_line_ts = time.time()
 
                 while True:
@@ -386,38 +391,51 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
 
                     last_line_ts = time.time()
 
-                    # VanitySearch prints result lines like:
-                    #   1ABC...:privkey
-                    #   bc1q...:privkey
-                    # We persist the raw line to avoid accidental filtering.
-                    striped = line.rstrip("\n")
-                    if striped:
-                        writer.write_line(striped)
-                        # Heuristically count “result-looking” lines for metrics
-                        if ":" in striped and (striped.startswith("1") or striped.startswith("3") or striped.startswith("bc1")):
-                            total_lines += 1
-
                 rc = proc.wait(timeout=10)
+                if os.path.exists(tmp_out):
+                    with open(tmp_out, "r", encoding="utf-8", errors="replace") as fh:
+                        for out_line in fh:
+                            striped = out_line.rstrip("\n")
+                            if striped:
+                                writer.write_line(striped)
+                                if ":" in striped and (
+                                    striped.startswith("1")
+                                    or striped.startswith("3")
+                                    or striped.startswith("bc1")
+                                ):
+                                    total_lines += 1
+                    os.remove(tmp_out)
+
                 if rc == 0 and total_lines > 0:
-                    log_message(f"✅ VanitySearch finished ({mode_name}) with {total_lines} matches.", "SUCCESS")
+                    log_message(
+                        f"✅ VanitySearch finished ({mode_name}) with {total_lines} matches.",
+                        "SUCCESS",
+                    )
                     writer.close()
                     return total_lines
                 else:
-                    log_message(f"⚠️ VanitySearch exited rc={rc}, matches={total_lines}. Trying next mode...", "WARNING")
+                    log_message(
+                        f"⚠️ VanitySearch exited rc={rc}, matches={total_lines}. Trying next mode...",
+                        "WARNING",
+                    )
             except Exception as e:
                 log_message(f"⚠️ VanitySearch {mode_name} failed: {e}", "WARNING")
+                if tmp_out and os.path.exists(tmp_out):
+                    try:
+                        os.remove(tmp_out)
+                    except Exception:
+                        pass
                 continue
 
-        # If we captured any output but no mode returned cleanly, finalize the partial
         if total_lines > 0:
             writer.close()
-            log_message(f"✅ Finalized partial output with {total_lines} matches after fallbacks.", "INFO")
+            log_message(
+                f"✅ Finalized partial output with {total_lines} matches after fallbacks.",
+                "INFO",
+            )
             return total_lines
 
-        try:
-            writer.close()
-        except Exception:
-            pass
+        writer.abort()
         log_message("❌ VanitySearch produced no output in any mode.", "ERROR")
         return 0
 
