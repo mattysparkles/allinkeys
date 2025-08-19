@@ -362,6 +362,13 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
             out_dir, rotate_lines=VANITY_ROTATE_LINES, max_bytes=VANITY_MAX_BYTES, prefix="vanity"
         )
         total_lines = 0
+        addr_re = re.compile(
+            r"^(?:PubAddr(?:ess)?\s*:\s*)?"  # optional "PubAddress:" prefix
+            r"(1[1-9A-HJ-NP-Za-km-z]{25,34}|"  # legacy Base58 addresses
+            r"3[1-9A-HJ-NP-Za-km-z]{25,34}|"  # P2SH addresses
+            r"bc1[0-9ac-hj-np-z]{11,71})",    # Bech32 addresses
+            re.IGNORECASE,
+        )
 
         for mode_name, mode_flag in modes:
             args = base + mode_flag + multi_suffix + single_suffix
@@ -398,11 +405,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                             striped = out_line.rstrip("\n")
                             if striped:
                                 writer.write_line(striped)
-                                if ":" in striped and (
-                                    striped.startswith("1")
-                                    or striped.startswith("3")
-                                    or striped.startswith("bc1")
-                                ):
+                                if addr_re.match(striped):
                                     total_lines += 1
                     os.remove(tmp_out)
 
