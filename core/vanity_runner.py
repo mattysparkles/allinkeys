@@ -336,8 +336,6 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
 
     base = [exe, "-s", seed, "-q"]
     _apply_mode_flags(base)
-
-    # We will not use -o because of prior Windows path issues; capture stdout instead.
     modes = [
         ("GPU", ["-gpu"]),
         ("OPENCL", ["-opencl"]),
@@ -385,7 +383,6 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                         continue
 
                     last_line_ts = time.time()
-
                     # VanitySearch prints result lines like:
                     #   1ABC...:privkey
                     #   bc1q...:privkey
