@@ -524,6 +524,46 @@ def derive_addresses_gpu(hex_keys, context=None):
     return results
 
 
+def hash160_prefix_gpu(pubkeys, prefix, context=None):
+    """Return match flags for HASH160(prefix) using the GPU.
+
+    This helper dispatches the optional ``hash160_prefix`` kernel in
+    ``core/hash160.cl``.  It computes HASH160 for each public key and writes a
+    ``1`` to the matches array when the resulting digest begins with
+    ``prefix``.  This avoids storing full 20-byte hashes when only a prefix
+    comparison is needed.
+    """
+
+    if context is None:
+        context, device = get_gpu_context_for_altcoin()
+    else:
+        device = context.devices[0]
+
+    queue = cl.CommandQueue(context)
+    source = load_kernel_source(device)
+    program = cl.Program(context, source).build()
+    kernel = cl.Kernel(program, "hash160_prefix")
+
+    count = len(pubkeys)
+    if not count:
+        return []
+
+    input_size = len(pubkeys[0])
+    mf = cl.mem_flags
+
+    in_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=b"".join(pubkeys))
+    prefix_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=prefix)
+    match_buf = cl.Buffer(context, mf.WRITE_ONLY, 4 * count)
+
+    kernel.set_args(in_buf, np.uint32(input_size), prefix_buf, np.uint32(len(prefix)), match_buf)
+    cl.enqueue_nd_range_kernel(queue, kernel, (count,), None)
+
+    matches = np.empty(count, dtype=np.uint32)
+    cl.enqueue_copy(queue, matches, match_buf)
+    queue.finish()
+    return matches.tolist()
+
+
 def derive_addresses_cpu(hex_keys):
     """Derive addresses purely with Python when no GPU is available."""
     global _cpu_logged_once, cpu_fallback_active
