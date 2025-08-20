@@ -144,7 +144,7 @@ PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "sparkles_public_key.asc")
 # ===================== 🎧 ALERT SETTINGS ==========================
 ALERT_PHRASE = "The Beacons Have Been Lit, Gondor Calls for Aid!"
 ENABLE_AUDIO_ALERT_LOCAL = True
-ALERT_SOUND_FILE = os.path.join(SOUND_CLIPS_DIR, "gondor_alert.wav")
+ALERT_SOUND_FILE = os.path.join(SOUND_CLIPS_DIR, "gondor-calls-for-aid.mp3")
 ENABLE_DESKTOP_WINDOW_ALERT = True
 ALERT_POPUP_COLOR_1 = "#FF0000"
 ALERT_POPUP_COLOR_2 = "#000000"
@@ -182,7 +182,7 @@ NORMALIZE_BECH32_LOWER = True
 
 # ===================== 🔢 KEYGEN ==========================
 USE_GPU = True
-USE_CPU_FALLBACK = True
+USE_CPU_FALLBACK = False
 ROTATE_AT_MB = 100
 ROTATE_AT_LINES = 200000
 MAX_BATCH_SIZE = 100000
@@ -196,6 +196,7 @@ VANITYSEARCH_GPU_INDEX = [0]
 VANITY_GPU_INDEX = [0]
 
 # ===================== GPU SCHEDULER ==========================
+
 # These settings only apply when running the full `main.py` pipeline.
 GPU_STRATEGY = "vanity_priority"  # Options: "vanity_priority", "csv_priority", "swing"
 MAX_BACKLOG_THRESHOLD = 10  # backlog size to trigger GPU reassignment
@@ -384,7 +385,7 @@ ALERT_EMAIL_RECIPIENTS = os.getenv("ALERT_EMAIL_RECIPIENTS", "").split(",") if o
 EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER", "smtp.gmail.com")
 EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", 587))
 INCLUDE_MATCH_INFO = True
-ENCRYPTED_MESSAGE = True
+ENCRYPTED_MESSAGE = False
 # SMTP Credentials (required if ALERT_EMAIL_ENABLED is True)
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")           # Or use your provider's SMTP host
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))                          # TLS port (use 465 for SSL)
