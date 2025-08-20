@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Optional, TextIO
+from typing import Optional, BinaryIO
 
 
 def ensure_dir(path: str) -> str:
@@ -24,7 +24,8 @@ class RollingAtomicWriter:
         self.max_bytes = max_bytes
         self.prefix = prefix
         self._counter = 0
-        self._fh: Optional[TextIO] = None
+        # Open files in binary mode so byte counting matches on all platforms
+        self._fh: Optional[BinaryIO] = None
         self._lines = 0
         self._bytes = 0
         self._open_new_file()
@@ -39,7 +40,9 @@ class RollingAtomicWriter:
     def _open_new_file(self) -> None:
         self.final_path = self._next_filename()
         self.temp_path = self.final_path + ".part"
-        self._fh = open(self.temp_path, "w", encoding="utf-8")
+        # Binary mode avoids newline translation which can throw off size
+        # calculations, especially on Windows.
+        self._fh = open(self.temp_path, "wb")
         self._lines = 0
         self._bytes = 0
 
@@ -57,9 +60,10 @@ class RollingAtomicWriter:
         """Legacy write that accepts a full line (with newline)."""
         if not self._fh:
             return False
-        self._fh.write(text)
+        data = text.encode("utf-8")
+        self._fh.write(data)
         self._lines += 1
-        self._bytes += len(text.encode("utf-8"))
+        self._bytes += len(data)
         rotated = self._lines >= self.rotate_lines or self._bytes >= self.max_bytes
         if rotated:
             self._commit()
