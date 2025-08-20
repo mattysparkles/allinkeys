@@ -27,7 +27,13 @@ from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keyg
 from core.logger import get_logger
 from core.gpu_selector import get_vanitysearch_gpu_ids
 from core.csv_checker import detect_btc_address_type, normalize_address
-from core.dashboard import init_shared_metrics, set_metric, increment_metric, get_metric
+from core.dashboard import (
+    init_shared_metrics,
+    set_metric,
+    increment_metric,
+    get_metric,
+    update_dashboard_stat,
+)
 
 
 # Runtime trackers
@@ -117,8 +123,17 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
     except Exception:
         selected_gpu_ids = []
+
+    if use_gpu and not selected_gpu_ids:
+        if not FORCE_CPU_FALLBACK:
+            logger.error("GPU requested for VanitySearch but no GPUs are assigned. Aborting.")
+            update_dashboard_stat("vanitysearch_backend", "gpu-missing")
+            update_dashboard_stat("vanitysearch_device_name", "None")
+            return False
+        use_gpu = False
+
     gpu_env = {}
-    if gpu_vendor != "amd" and selected_gpu_ids:
+    if gpu_vendor != "amd" and use_gpu and selected_gpu_ids:
         gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(map(str, selected_gpu_ids))}
 
     # Seed formatting for vanitysearch
@@ -144,13 +159,19 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
             VANITY_PATTERN,
         ]
         backend_desc = "OpenCL/AMD"
+        update_dashboard_stat("vanitysearch_backend", "gpu")
+        update_dashboard_stat("vanitysearch_device_name", backend_desc)
     else:
         cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full, "-o", current_output_path, "-u", VANITY_PATTERN]
         if use_gpu and selected_gpu_ids:
             cmd.insert(1, "-gpu")
             backend_desc = f"GPU:{','.join(map(str, selected_gpu_ids))}"
+            update_dashboard_stat("vanitysearch_backend", "gpu")
+            update_dashboard_stat("vanitysearch_device_name", backend_desc)
         else:
             backend_desc = "CPU"
+            update_dashboard_stat("vanitysearch_backend", "cpu")
+            update_dashboard_stat("vanitysearch_device_name", "CPU")
 
     logger.info(
         "🧬 Starting VanitySearch\n"
