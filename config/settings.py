@@ -75,6 +75,10 @@ VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts
 # Single VanitySearch binary (CUDA only)
 VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")
 VANITYSEARCH_EXE_NAME = "vanitysearch.exe"
+# OpenCL/AMD variants from Vanitygen++
+OCLVANITYGEN_PATH = os.path.join(BASE_DIR, "bin", "oclvanitygen.exe")
+OCLVANITYMINER_PATH = os.path.join(BASE_DIR, "bin", "oclvanityminer.exe")
+KEYCONV_PATH = os.path.join(BASE_DIR, "bin", "keyconv.exe")
 MAX_KEYS_PER_FILE = 100_000  #Deprecated
 # Output file rotation config (for VanitySearch stream)
 VANITY_ROTATE_LINES = 200_000
@@ -192,9 +196,11 @@ VANITYSEARCH_GPU_INDEX = [0]
 VANITY_GPU_INDEX = [0]
 
 # ===================== GPU SCHEDULER ==========================
+
+# These settings only apply when running the full `main.py` pipeline.
 GPU_STRATEGY = "vanity_priority"  # Options: "vanity_priority", "csv_priority", "swing"
 MAX_BACKLOG_THRESHOLD = 10  # backlog size to trigger GPU reassignment
-MIN_BACKLOG_THRESHOLD = 1  # backlog size to resume vanity GPU keygen
+MIN_BACKLOG_THRESHOLD = 1   # backlog size to resume vanity GPU keygen
 GPU_VENDOR = "auto"  # "nvidia", "amd", or "auto"
 
 # ===================== ALTCOIN ==========================

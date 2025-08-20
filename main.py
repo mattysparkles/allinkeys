@@ -109,8 +109,7 @@ def metrics_updater(shared_metrics=None):
     except Exception as e:
         print(f"[error] ensure_metrics_ready failed in {__name__}: {e}", flush=True)
     global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
-    kps_start_time = time.time()
-    kps_start_keys = get_metric('keys_generated_today', 0)
+    last_kps = 0.0
     while True:
         try:
             from core.dashboard import reset_daily_metrics_if_needed
@@ -223,10 +222,17 @@ def metrics_updater(shared_metrics=None):
             prog = keygen_progress()
             curr_today = get_metric('keys_generated_today', 0)
             curr_lifetime = get_metric('keys_generated_lifetime', 0)
-            elapsed = max(1, now - kps_start_time)
-            keys_per_sec = (curr_today - kps_start_keys) / elapsed
+            current_kps = get_metric('keys_per_sec', 0)
+            if current_kps > 0:
+                last_kps = current_kps
+            else:
+                status = get_metric('status', {}).get('keygen', 'Stopped')
+                if status == 'Running':
+                    current_kps = last_kps
+                else:
+                    last_kps = 0.0
             stats['keys_generated_lifetime'] = curr_lifetime
-            stats['keys_per_sec'] = round(keys_per_sec, 2)
+            stats['keys_per_sec'] = round(current_kps, 2)
             stats['uptime'] = prog['elapsed_time']
             stats['last_updated'] = datetime.utcnow().strftime('%H:%M:%S')
             try:
