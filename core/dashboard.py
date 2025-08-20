@@ -20,6 +20,7 @@ from config.settings import (
     ENABLE_AUTO_TIMEZONE_SETTING,
     MANUAL_TIME_ZONE_OVERRIDE,
     GPU_STRATEGY,
+    PAUSE_WARNING_RATELIMIT_SECONDS,
 )
 try:
     from multiprocessing.managers import DictProxy
@@ -45,21 +46,25 @@ module_shutdown_events = {}
 
 # Module-level logger
 logger = get_logger(__name__)
-logger.info("Pause warnings are throttled to once/30s per event.")
+logger.info(
+    f"Pause warnings are throttled to once/{PAUSE_WARNING_RATELIMIT_SECONDS}s per event."
+)
 
-_WARN_THROTTLE: Dict[str, float] = {}
+_last_warn_at: Dict[str, float] = {}
 
 
-def warn_throttled(event_name: str, message: str, interval_seconds: int = 30):
-    """
-    Logs a warning at most once per `interval_seconds` for the given event name.
-    Stores last-emitted timestamps in a module-level dict.
-    """
-    now = time.monotonic()
-    last = _WARN_THROTTLE.get(event_name, 0.0)
-    if now - last >= interval_seconds:
+def warn_rate_limited(event_name: str, message: str) -> None:
+    """Log ``message`` once per ``PAUSE_WARNING_RATELIMIT_SECONDS`` for ``event_name``."""
+    now = time.time()
+    last = _last_warn_at.get(event_name, 0.0)
+    if now - last >= PAUSE_WARNING_RATELIMIT_SECONDS:
         logger.warning(message)
-        _WARN_THROTTLE[event_name] = now
+        _last_warn_at[event_name] = now
+
+
+def warn_throttled(event_name: str, message: str, interval_seconds: int = PAUSE_WARNING_RATELIMIT_SECONDS):
+    """Backward-compatible wrapper for ``warn_rate_limited``."""
+    warn_rate_limited(event_name, message)
 
 
 class LoggedEvent:

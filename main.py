@@ -47,7 +47,7 @@ from config.settings import (
     ENABLE_DASHBOARD, ENABLE_KEYGEN, ENABLE_ALERTS,
     ENABLE_BACKLOG_CONVERSION, LOG_DIR, CONFIG_FILE_PATH,
     CSV_DIR, VANITYSEARCH_PATH, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
-    CHECKER_BACKLOG_PAUSE_THRESHOLD
+    BACKLOG_PAUSE_THRESHOLD, BACKLOG_RESUME_THRESHOLD
 )
 
 from core.logger import log_message, start_listener, stop_listener, get_logger
@@ -63,7 +63,7 @@ from core.dashboard import (
     get_current_metrics,
     get_metric,
     set_metric,
-    warn_throttled,
+    warn_rate_limited,
 )
 import core.dashboard as dashboard_core
 from ui.dashboard_gui import start_dashboard
@@ -448,27 +448,35 @@ def run_btc_only(args):
         dashboard_thread.start()
 
     above = below = 0
+    mode = "btc-only"
     try:
         while not shutdown_event.is_set():
             backlog = get_vanity_backlog_count()
             set_metric("vanity_backlog_count", backlog)
-            if backlog > CHECKER_BACKLOG_PAUSE_THRESHOLD:
+            if backlog >= BACKLOG_PAUSE_THRESHOLD:
                 above += 1
                 below = 0
                 if above >= 2 and not keygen_pause.is_set():
-                    keygen_pause.set()
-                    warn_throttled(
-                        "backlog_pause",
-                        f"Paused keygen: backlog {backlog} > {CHECKER_BACKLOG_PAUSE_THRESHOLD}",
+                    logger.info(
+                        f"Backlog gate → module=keygen mode={mode} backlog={backlog} "
+                        f"(pause>={BACKLOG_PAUSE_THRESHOLD}, resume<={BACKLOG_RESUME_THRESHOLD}) action=PAUSE"
                     )
-            else:
+                    keygen_pause.set()
+                    warn_rate_limited(
+                        "pause.keygen.backlog",
+                        f"⏸️ Pausing keygen: backlog={backlog} ≥ {BACKLOG_PAUSE_THRESHOLD}",
+                    )
+            elif backlog <= BACKLOG_RESUME_THRESHOLD:
                 below += 1
                 above = 0
                 if below >= 2 and keygen_pause.is_set():
+                    logger.info(
+                        f"Backlog gate → module=keygen mode={mode} backlog={backlog} "
+                        f"(pause>={BACKLOG_PAUSE_THRESHOLD}, resume<={BACKLOG_RESUME_THRESHOLD}) action=RESUME"
+                    )
                     keygen_pause.clear()
-                    warn_throttled(
-                        "backlog_resume",
-                        f"Resumed keygen: backlog {backlog} ≤ {CHECKER_BACKLOG_PAUSE_THRESHOLD}",
+                    logger.info(
+                        f"▶️ Resuming keygen: backlog={backlog} ≤ {BACKLOG_RESUME_THRESHOLD}"
                     )
             try:
                 process_pending_vanity_outputs_once(logger)
