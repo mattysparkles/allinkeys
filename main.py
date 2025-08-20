@@ -47,7 +47,7 @@ from config.settings import (
     ENABLE_DASHBOARD, ENABLE_KEYGEN, ENABLE_ALERTS,
     ENABLE_BACKLOG_CONVERSION, LOG_DIR, CONFIG_FILE_PATH,
     CSV_DIR, VANITYSEARCH_PATH, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
-    CHECKER_BACKLOG_PAUSE_THRESHOLD
+    BACKLOG_PAUSE_THRESHOLD, BACKLOG_RESUME_THRESHOLD
 )
 
 from core.logger import log_message, start_listener, stop_listener, get_logger
@@ -63,7 +63,7 @@ from core.dashboard import (
     get_current_metrics,
     get_metric,
     set_metric,
-    warn_throttled,
+    warn_rate_limited,
 )
 import core.dashboard as dashboard_core
 from ui.dashboard_gui import start_dashboard
@@ -109,8 +109,7 @@ def metrics_updater(shared_metrics=None):
     except Exception as e:
         print(f"[error] ensure_metrics_ready failed in {__name__}: {e}", flush=True)
     global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
-    kps_start_time = time.time()
-    kps_start_keys = get_metric('keys_generated_today', 0)
+    last_kps = 0.0
     while True:
         try:
             from core.dashboard import reset_daily_metrics_if_needed
@@ -223,10 +222,17 @@ def metrics_updater(shared_metrics=None):
             prog = keygen_progress()
             curr_today = get_metric('keys_generated_today', 0)
             curr_lifetime = get_metric('keys_generated_lifetime', 0)
-            elapsed = max(1, now - kps_start_time)
-            keys_per_sec = (curr_today - kps_start_keys) / elapsed
+            current_kps = get_metric('keys_per_sec', 0)
+            if current_kps > 0:
+                last_kps = current_kps
+            else:
+                status = get_metric('status', {}).get('keygen', 'Stopped')
+                if status == 'Running':
+                    current_kps = last_kps
+                else:
+                    last_kps = 0.0
             stats['keys_generated_lifetime'] = curr_lifetime
-            stats['keys_per_sec'] = round(keys_per_sec, 2)
+            stats['keys_per_sec'] = round(current_kps, 2)
             stats['uptime'] = prog['elapsed_time']
             stats['last_updated'] = datetime.utcnow().strftime('%H:%M:%S')
             try:
@@ -448,27 +454,35 @@ def run_btc_only(args):
         dashboard_thread.start()
 
     above = below = 0
+    mode = "btc-only"
     try:
         while not shutdown_event.is_set():
             backlog = get_vanity_backlog_count()
             set_metric("vanity_backlog_count", backlog)
-            if backlog > CHECKER_BACKLOG_PAUSE_THRESHOLD:
+            if backlog >= BACKLOG_PAUSE_THRESHOLD:
                 above += 1
                 below = 0
                 if above >= 2 and not keygen_pause.is_set():
-                    keygen_pause.set()
-                    warn_throttled(
-                        "backlog_pause",
-                        f"Paused keygen: backlog {backlog} > {CHECKER_BACKLOG_PAUSE_THRESHOLD}",
+                    logger.info(
+                        f"Backlog gate → module=keygen mode={mode} backlog={backlog} "
+                        f"(pause>={BACKLOG_PAUSE_THRESHOLD}, resume<={BACKLOG_RESUME_THRESHOLD}) action=PAUSE"
                     )
-            else:
+                    keygen_pause.set()
+                    warn_rate_limited(
+                        "pause.keygen.backlog",
+                        f"⏸️ Pausing keygen: backlog={backlog} ≥ {BACKLOG_PAUSE_THRESHOLD}",
+                    )
+            elif backlog <= BACKLOG_RESUME_THRESHOLD:
                 below += 1
                 above = 0
                 if below >= 2 and keygen_pause.is_set():
+                    logger.info(
+                        f"Backlog gate → module=keygen mode={mode} backlog={backlog} "
+                        f"(pause>={BACKLOG_PAUSE_THRESHOLD}, resume<={BACKLOG_RESUME_THRESHOLD}) action=RESUME"
+                    )
                     keygen_pause.clear()
-                    warn_throttled(
-                        "backlog_resume",
-                        f"Resumed keygen: backlog {backlog} ≤ {CHECKER_BACKLOG_PAUSE_THRESHOLD}",
+                    logger.info(
+                        f"▶️ Resuming keygen: backlog={backlog} ≤ {BACKLOG_RESUME_THRESHOLD}"
                     )
             try:
                 process_pending_vanity_outputs_once(logger)

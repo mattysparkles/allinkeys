@@ -8,6 +8,8 @@ from datetime import datetime
 from collections import deque
 from config.settings import (
     VANITYSEARCH_PATH,
+    OCLVANITYGEN_PATH,
+    GPU_VENDOR,
     VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
     BATCH_SIZE,
@@ -17,7 +19,7 @@ from config.settings import (
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
     FILES_PER_BATCH,
-    FORCE_CPU_FALLBACK
+    FORCE_CPU_FALLBACK,
 )
 
 from config.constants import SECP256K1_ORDER
@@ -109,12 +111,15 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     if FORCE_CPU_FALLBACK:
         use_gpu = False
 
-    # Select NVIDIA GPUs if allowed, otherwise CPU
+    # Select GPUs based on vendor for backend selection
+    gpu_vendor = GPU_VENDOR.lower()
     try:
         selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
     except Exception:
         selected_gpu_ids = []
-    gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(map(str, selected_gpu_ids))} if selected_gpu_ids else {}
+    gpu_env = {}
+    if gpu_vendor != "amd" and selected_gpu_ids:
+        gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(map(str, selected_gpu_ids))}
 
     # Seed formatting for vanitysearch
     hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
@@ -127,16 +132,31 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     )
     last_output_file = current_output_path
 
-    # Build command
-    cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full, "-o", current_output_path, "-u", VANITY_PATTERN]
-    if use_gpu and selected_gpu_ids:
-        cmd.insert(1, "-gpu")
+    # Build command for appropriate backend
+    if gpu_vendor == "amd":
+        cmd = [
+            OCLVANITYGEN_PATH,
+            "-k",
+            "-o",
+            current_output_path,
+            "-s",
+            hex_seed_full,
+            VANITY_PATTERN,
+        ]
+        backend_desc = "OpenCL/AMD"
+    else:
+        cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full, "-o", current_output_path, "-u", VANITY_PATTERN]
+        if use_gpu and selected_gpu_ids:
+            cmd.insert(1, "-gpu")
+            backend_desc = f"GPU:{','.join(map(str, selected_gpu_ids))}"
+        else:
+            backend_desc = "CPU"
 
     logger.info(
         "🧬 Starting VanitySearch\n"
         f"   Seed:    {hex_seed_full}\n"
         f"   Output:  {current_output_path}\n"
-        f"   Backend: {'GPU:'+','.join(map(str, selected_gpu_ids)) if (use_gpu and selected_gpu_ids) else 'CPU'}\n"
+        f"   Backend: {backend_desc}\n"
         f"   Command: {' '.join(cmd)}"
     )
 

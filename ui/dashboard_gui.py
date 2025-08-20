@@ -261,10 +261,10 @@ class DashboardGUI:
             variable=self.gpu_swing_mode_enabled,
             command=self.toggle_swing_mode,
         )
-        swing_row = backlog_row if 'backlog_row' in locals() else 1
+        swing_row = (backlog_row + 1) if 'backlog_row' in locals() else row
         self.swing_mode_button.grid(
             row=swing_row,
-            column=1,  # Move to column 1 to avoid overlapping dashboard metrics
+            column=2,  # place under backlog stats column
             padx=5,
             pady=(5, 10),
             sticky="w",

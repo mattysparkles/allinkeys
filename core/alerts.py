@@ -402,9 +402,6 @@ def trigger_startup_alerts(shared_metrics=None):
         # Extend to alert channels if needed
     except Exception as e:
         log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
-    finally:
-        _safe_set_metric("status.alerts", "Stopped")
-        _safe_set_metric("alerts_status", "Stopped")
 
 
 def run_test_alerts_from_csv(csv_path=None):

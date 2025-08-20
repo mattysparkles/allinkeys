@@ -16,3 +16,13 @@ The included binary was **not compiled by the authors of this project**. It was 
 
 ### MIT License (VanitySearch)
 
+## Vanitygen++ Binaries (MIT License)
+
+This project bundles precompiled binaries from the [Vanitygen++](https://github.com/phracker/Vanitygen-plusplus) project to provide OpenCL/AMD GPU support:
+
+- `oclvanitygen.exe`
+- `oclvanityminer.exe`
+- `keyconv.exe`
+
+These binaries are distributed under the MIT License. They are included solely for convenience; the project authors do not claim authorship or provide any warranty.
+

@@ -48,7 +48,21 @@ ALL_BTC_ADDRESSES_DIR = os.path.join(BASE_DIR, "all_btc_addresses")
 ALL_BTC_RANGES_COUNT = 20
 ALL_BTC_GZ_LOCAL = os.path.join(ALL_BTC_ADDRESSES_DIR, "all_Bitcoin_addresses_ever_used_sorted.txt.gz")
 BTC_RANGE_FILE_PATTERN = "btc_range_{:02d}.txt"  # 00..19
-CHECKER_BACKLOG_PAUSE_THRESHOLD = 20
+
+# Backlog pause control (creation vs. consumption)
+BACKLOG_PAUSE_THRESHOLD = int(
+    os.getenv("BACKLOG_PAUSE_THRESHOLD", os.getenv("CHECKER_BACKLOG_PAUSE_THRESHOLD", "20000"))
+)
+BACKLOG_RESUME_THRESHOLD = int(
+    os.getenv("BACKLOG_RESUME_THRESHOLD", "18000")
+)
+# Warning rate-limit (seconds), per event name
+PAUSE_WARNING_RATELIMIT_SECONDS = int(
+    os.getenv("PAUSE_WARNING_RATELIMIT_SECONDS", "30")
+)
+
+# Legacy alias for backward compatibility
+CHECKER_BACKLOG_PAUSE_THRESHOLD = BACKLOG_PAUSE_THRESHOLD
 
 # BTC-only processing stability settings
 BTC_FILE_STABILITY_WINDOW_SEC = 3.0   # how long size must remain unchanged
@@ -61,6 +75,10 @@ VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts
 # Single VanitySearch binary (CUDA only)
 VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")
 VANITYSEARCH_EXE_NAME = "vanitysearch.exe"
+# OpenCL/AMD variants from Vanitygen++
+OCLVANITYGEN_PATH = os.path.join(BASE_DIR, "bin", "oclvanitygen.exe")
+OCLVANITYMINER_PATH = os.path.join(BASE_DIR, "bin", "oclvanityminer.exe")
+KEYCONV_PATH = os.path.join(BASE_DIR, "bin", "keyconv.exe")
 MAX_KEYS_PER_FILE = 100_000  #Deprecated
 # Output file rotation config (for VanitySearch stream)
 VANITY_ROTATE_LINES = 200_000
@@ -98,7 +116,7 @@ ENABLE_UNIQUE_RECHECK = ENABLE_DAILY_UNIQUE_RECHECK # Alias do not change
 ENABLE_ALTCOIN_DERIVATION = True
 ENABLE_SEED_VERIFICATION = False
 # Encrypt matches using PGP
-ENABLE_PGP = True
+ENABLE_PGP = False
 # Auto resume on crash/startup
 ENABLE_AUTO_RESUME_DEPENDENCIES = True
 
@@ -178,9 +196,10 @@ VANITYSEARCH_GPU_INDEX = [0]
 VANITY_GPU_INDEX = [0]
 
 # ===================== GPU SCHEDULER ==========================
-GPU_STRATEGY = "swing"  # Options: "vanity_priority", "csv_priority", "swing"
-MAX_BACKLOG_THRESHOLD = 3  # backlog size to trigger GPU reassignment
-MIN_BACKLOG_THRESHOLD = 1  # backlog size to resume vanity GPU keygen
+# These settings only apply when running the full `main.py` pipeline.
+GPU_STRATEGY = "vanity_priority"  # Options: "vanity_priority", "csv_priority", "swing"
+MAX_BACKLOG_THRESHOLD = 10  # backlog size to trigger GPU reassignment
+MIN_BACKLOG_THRESHOLD = 1   # backlog size to resume vanity GPU keygen
 GPU_VENDOR = "auto"  # "nvidia", "amd", or "auto"
 
 # ===================== ALTCOIN ==========================
@@ -354,7 +373,7 @@ ALERT_POPUP_COLOR_2 = "#000000"  # Second flash color
 ALERT_PHRASE = "The Beacons Have Been Lit, Gondor Calls for Aid!"  # Message shown in window
 
 # === PGP ENCRYPTED MATCH ALERT OUTPUT ===
-ENABLE_PGP = True
+ENABLE_PGP = False
 PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "Sparkles-allinkeys_0x3A94D30E_public.asc")  # Must be a valid ASCII armored key file
 
 # === EMAIL ALERT CONFIGURATION ===
