@@ -1,6 +1,39 @@
-// hash160.cl - Compute SHA256 then RIPEMD160 for public keys
+/*
+ * hash160.cl - AMD-optimized HASH160 (SHA-256 + RIPEMD-160) kernels.
+ *
+ * Kernels provided:
+ *   hash160        - compute HASH160 for each input public key and write
+ *                    20-byte digests to the output buffer.
+ *   hash160_prefix - compute HASH160 and compare the first prefix_len bytes
+ *                    against a supplied prefix; writes 0/1 match flags.
+ *
+ * Highlights:
+ *   - Specialised fast paths for 33-byte (compressed) and 65-byte
+ *     (uncompressed) secp256k1 public keys with direct register assembly.
+ *   - SHA-256 schedule uses a 16-word circular buffer (W[t & 15]); no
+ *     msg[128] or W[64] arrays.  Greatly reduces VGPR usage on RDNA.
+ *   - Vectorised global I/O via vload4/vstore4 where alignment permits.
+ *   - Targeted unrolling (#pragma unroll 8 for SHA, 5 for RIPEMD) and
+ *     rotate() builtin on AMD for RIPEMD rounds.
+ *   - NVIDIA users continue to use core/hash160_nvidia.cl; host code selects
+ *     kernel based on device vendor.
+ *
+ * Buffer layout:
+ *   inputs  - input_size bytes per work-item.
+ *   outputs - 20 bytes per work-item (hash160 digest) for hash160.
+ *   prefix  - byte prefix to match for hash160_prefix.
+ *   matches - uint per work-item (0/1) for hash160_prefix.
+ */
+
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
 
+#if defined(cl_amd_media_ops) || defined(__AMD__)
+#define AMD_PATH 1
+#else
+#define AMD_PATH 0
+#endif
+
+/* --- SHA-256 constants and helpers --- */
 __constant uint k[64] = {
   0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
   0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
@@ -12,15 +45,21 @@ __constant uint k[64] = {
   0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
 };
 
-uint ROTR(uint x,uint n){return (x>>n)|(x<<(32-n));}
-uint Ch(uint x,uint y,uint z){return (x&y)^(~x&z);} 
-uint Maj(uint x,uint y,uint z){return (x&y)^(x&z)^(y&z);} 
-uint Sigma0(uint x){return ROTR(x,2)^ROTR(x,13)^ROTR(x,22);} 
-uint Sigma1(uint x){return ROTR(x,6)^ROTR(x,11)^ROTR(x,25);} 
-uint sigma0(uint x){return ROTR(x,7)^ROTR(x,18)^(x>>3);} 
-uint sigma1(uint x){return ROTR(x,17)^ROTR(x,19)^(x>>10);} 
+inline uint ROTR(uint x,uint n){return (x>>n)|(x<<(32-n));}
+inline uint Ch(uint x,uint y,uint z){return (x&y)^(~x&z);} 
+inline uint Maj(uint x,uint y,uint z){return (x&y)^(x&z)^(y&z);} 
+inline uint Sigma0(uint x){return ROTR(x,2)^ROTR(x,13)^ROTR(x,22);} 
+inline uint Sigma1(uint x){return ROTR(x,6)^ROTR(x,11)^ROTR(x,25);} 
+inline uint sigma0(uint x){return ROTR(x,7)^ROTR(x,18)^(x>>3);} 
+inline uint sigma1(uint x){return ROTR(x,17)^ROTR(x,19)^(x>>10);} 
+inline uint bswap32(uint x){return rotate(x,8)&0x00FF00FF | rotate(x,24)&0xFF00FF00;}
 
-inline uint rol(uint x, uint n){return (x<<n)|(x>>(32-n));}
+/* --- RIPEMD-160 constants and helpers --- */
+#if AMD_PATH
+#define ROL(x,n) rotate((uint)(x),(uint)(n))
+#else
+inline uint ROL(uint x,uint n){return (x<<n)|(x>>(32-n));}
+#endif
 inline uint f1(uint x,uint y,uint z){return x^y^z;}
 inline uint f2(uint x,uint y,uint z){return (x&y)|(~x&z);} 
 inline uint f3(uint x,uint y,uint z){return (x|~y)^z;} 
@@ -58,89 +97,119 @@ __constant uchar S2[80]={
 __constant uint K1[5]={0x00000000,0x5A827999,0x6ED9EBA1,0x8F1BBCDC,0xA953FD4E};
 __constant uint K2[5]={0x50A28BE6,0x5C4DD124,0x6D703EF3,0x7A6D76E9,0x00000000};
 
-__kernel void hash160(__global const uchar *inputs, __global uchar *outputs, const uint input_size){
-    const uint gid=get_global_id(0);
-    __global const uchar *in=inputs+gid*input_size;
-
-    // ---- SHA256 ----
-    uchar msg[128];
-    uint len=input_size;
-    int i;
-    for(i=0;i<len;i++) msg[i]=in[i];
-    msg[len]=0x80;
-    uint total=((len+9+63)/64)*64;
-    for(i=len+1;i<total;i++) msg[i]=0;
-    ulong bitlen=(ulong)len*8UL;
-    for(i=0;i<8;i++) msg[total-1-i]=(uchar)(bitlen>>(8*i));
-
-    uint h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a,
-         h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;
-    uint w[64];
-    for(uint block=0;block<total;block+=64){
-        for(i=0;i<16;i++){
-            int j=block+i*4;
-            w[i]=((uint)msg[j]<<24)|((uint)msg[j+1]<<16)|((uint)msg[j+2]<<8)|((uint)msg[j+3]);
+/* --- SHA-256 block compression with circular schedule --- */
+inline void sha256_compress(uint W[16], uint h[8]){
+    uint a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],hh=h[7];
+    #pragma unroll 8
+    for(uint t=0;t<64;++t){
+        uint Wt;
+        if(t<16) Wt=W[t];
+        else{
+            uint s0=sigma0(W[(t-15)&15]);
+            uint s1=sigma1(W[(t-2)&15]);
+            Wt=W[(t-16)&15]+s0+W[(t-7)&15]+s1;
+            W[t&15]=Wt;
         }
-        for(i=16;i<64;i++) w[i]=sigma1(w[i-2])+w[i-7]+sigma0(w[i-15])+w[i-16];
-        uint a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;
-        for(i=0;i<64;i++){
-            uint t1=h+Sigma1(e)+Ch(e,f,g)+k[i]+w[i];
-            uint t2=Sigma0(a)+Maj(a,b,c);
-            h=g;g=f;f=e;e=d+t1;d=c;c=b;b=a;a=t1+t2;
-        }
-        h0+=a;h1+=b;h2+=c;h3+=d;h4+=e;h5+=f;h6+=g;h7+=h;
+        uint T1=hh+Sigma1(e)+Ch(e,f,g)+k[t]+Wt;
+        uint T2=Sigma0(a)+Maj(a,b,c);
+        hh=g; g=f; f=e; e=d+T1; d=c; c=b; b=a; a=T1+T2;
     }
-    uchar sha_out[32];
-    uint hs[8]={h0,h1,h2,h3,h4,h5,h6,h7};
-    for(i=0;i<8;i++){sha_out[i*4]=(uchar)(hs[i]>>24);sha_out[i*4+1]=(uchar)(hs[i]>>16);sha_out[i*4+2]=(uchar)(hs[i]>>8);sha_out[i*4+3]=(uchar)hs[i];}
+    h[0]+=a;h[1]+=b;h[2]+=c;h[3]+=d;h[4]+=e;h[5]+=f;h[6]+=g;h[7]+=hh;
+}
 
-    // ---- RIPEMD160 ----
-    uchar m2[64];
-    for(i=0;i<32;i++) m2[i]=sha_out[i];
-    m2[32]=0x80; for(i=33;i<56;i++) m2[i]=0;
-    ulong bl2=256UL;
-    for(i=0;i<8;i++) m2[63-i]=(uchar)(bl2>>(8*i));
-
+/* --- HASH160 core: SHA-256 followed by RIPEMD-160 --- */
+inline void hash160_core(__global const uchar *in, uint len, uint digest[5]){
+    uint h[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    uint W[16];
+    if(len==33){
+        uint4 v0=vload4(0,(__global const uint*)in);
+        uint4 v1=vload4(1,(__global const uint*)in);
+        W[0]=bswap32(v0.s0); W[1]=bswap32(v0.s1); W[2]=bswap32(v0.s2); W[3]=bswap32(v0.s3);
+        W[4]=bswap32(v1.s0); W[5]=bswap32(v1.s1); W[6]=bswap32(v1.s2); W[7]=bswap32(v1.s3);
+        W[8]=((uint)in[32]<<24)|0x800000u;
+        for(int i=9;i<15;i++) W[i]=0;
+        W[15]=len*8u;
+        sha256_compress(W,h);
+    }else if(len==65){
+        const __global uint* ptr=(const __global uint*)in;
+        for(int i=0;i<16;i+=4){
+            uint4 vv=vload4(i/4,ptr);
+            W[i]=bswap32(vv.s0); W[i+1]=bswap32(vv.s1);
+            W[i+2]=bswap32(vv.s2); W[i+3]=bswap32(vv.s3);
+        }
+        sha256_compress(W,h);
+        W[0]=((uint)in[64]<<24)|0x800000u;
+        for(int i=1;i<15;i++) W[i]=0;
+        W[15]=len*8u;
+        sha256_compress(W,h);
+    }else{
+        ulong bitlen=(ulong)len*8UL;
+        uint blocks=((len+9+63)>>6);
+        for(uint b=0;b<blocks;++b){
+            for(uint i=0;i<16;++i){
+                uint j=b*64+i*4; uint w=0; 
+                for(int k=0;k<4;++k){
+                    uint idx=j+k; uint c=0;
+                    if(idx<len) c=in[idx];
+                    else if(idx==len) c=0x80;
+                    else if(idx>=blocks*64-8) c=(uint)(bitlen>>((blocks*64-1-idx)*8));
+                    w=(w<<8)|c;
+                }
+                W[i]=w;
+            }
+            sha256_compress(W,h);
+        }
+    }
     uint X[16];
-    for(i=0;i<16;i++){
-        int j=i*4; X[i]=((uint)m2[j])|((uint)m2[j+1]<<8)|((uint)m2[j+2]<<16)|((uint)m2[j+3]<<24);
-    }
-
+    for(int i=0;i<8;i++) X[i]=bswap32(h[i]);
+    X[8]=0x00000080u; for(int i=9;i<14;i++) X[i]=0; X[14]=256; X[15]=0;
     uint al=0x67452301,bl=0xEFCDAB89,cl=0x98BADCFE,dl=0x10325476,el=0xC3D2E1F0;
     uint ar=0x76543210,br=0xFEDCBA98,cr=0x89ABCDEF,dr=0x01234567,er=0x3C2D1E0F;
-
-    for(i=0;i<80;i++){
-        uint tl,tr;
-        uint rl=R1[i],sl=S1[i];
-        if(i<16){tl=rol(al+f1(bl,cl,dl)+X[rl]+K1[0],sl)+el;}
-        else if(i<32){tl=rol(al+f2(bl,cl,dl)+X[rl]+K1[1],sl)+el;}
-        else if(i<48){tl=rol(al+f3(bl,cl,dl)+X[rl]+K1[2],sl)+el;}
-        else if(i<64){tl=rol(al+f4(bl,cl,dl)+X[rl]+K1[3],sl)+el;}
-        else{tl=rol(al+f5(bl,cl,dl)+X[rl]+K1[4],sl)+el;}
-        al=el;el=dl;dl=rol(cl,10);cl=bl;bl=tl;
-
-        rl=R2[i];sl=S2[i];
-        if(i<16){tr=rol(ar+f5(br,cr,dr)+X[rl]+K2[0],sl)+er;}
-        else if(i<32){tr=rol(ar+f4(br,cr,dr)+X[rl]+K2[1],sl)+er;}
-        else if(i<48){tr=rol(ar+f3(br,cr,dr)+X[rl]+K2[2],sl)+er;}
-        else if(i<64){tr=rol(ar+f2(br,cr,dr)+X[rl]+K2[3],sl)+er;}
-        else{tr=rol(ar+f1(br,cr,dr)+X[rl]+K2[4],sl)+er;}
-        ar=er;er=dr;dr=rol(cr,10);cr=br;br=tr;
+    #pragma unroll 5
+    for(uint i=0;i<80;i++){
+        uint rl=R1[i],sl=S1[i],tl;
+        if(i<16) tl=ROL(al+f1(bl,cl,dl)+X[rl]+K1[0],sl)+el;
+        else if(i<32) tl=ROL(al+f2(bl,cl,dl)+X[rl]+K1[1],sl)+el;
+        else if(i<48) tl=ROL(al+f3(bl,cl,dl)+X[rl]+K1[2],sl)+el;
+        else if(i<64) tl=ROL(al+f4(bl,cl,dl)+X[rl]+K1[3],sl)+el;
+        else tl=ROL(al+f5(bl,cl,dl)+X[rl]+K1[4],sl)+el;
+        al=el; el=dl; dl=ROL(cl,10); cl=bl; bl=tl;
+        uint rr=R2[i],sr=S2[i],tr;
+        if(i<16) tr=ROL(ar+f5(br,cr,dr)+X[rr]+K2[0],sr)+er;
+        else if(i<32) tr=ROL(ar+f4(br,cr,dr)+X[rr]+K2[1],sr)+er;
+        else if(i<48) tr=ROL(ar+f3(br,cr,dr)+X[rr]+K2[2],sr)+er;
+        else if(i<64) tr=ROL(ar+f2(br,cr,dr)+X[rr]+K2[3],sr)+er;
+        else tr=ROL(ar+f1(br,cr,dr)+X[rr]+K2[4],sr)+er;
+        ar=er; er=dr; dr=ROL(cr,10); cr=br; br=tr;
     }
-    uint h0r=0x67452301,h1r=0xEFCDAB89,h2r=0x98BADCFE,h3r=0x10325476,h4r=0xC3D2E1F0;
-    uint T=h1r+cl+dr;
-    h1r=h2r+dl+er;
-    h2r=h3r+el+ar;
-    h3r=h4r+al+br;
-    h4r=h0r+bl+cr;
-    h0r=T;
-
-    __global uchar *out=outputs+gid*20;
-    uint hh[5]={h0r,h1r,h2r,h3r,h4r};
-    for(i=0;i<5;i++){
-        out[i*4]=(uchar)(hh[i]);
-        out[i*4+1]=(uchar)(hh[i]>>8);
-        out[i*4+2]=(uchar)(hh[i]>>16);
-        out[i*4+3]=(uchar)(hh[i]>>24);
-    }
+    uint h0=0x67452301,h1=0xEFCDAB89,h2=0x98BADCFE,h3=0x10325476,h4=0xC3D2E1F0;
+    uint T=h1+cl+dr; h1=h2+dl+er; h2=h3+el+ar; h3=h4+al+br; h4=h0+bl+cr; h0=T;
+    digest[0]=h0; digest[1]=h1; digest[2]=h2; digest[3]=h3; digest[4]=h4;
 }
+
+/* --- Kernels --- */
+__kernel void hash160(__global const uchar* inputs, __global uchar* outputs, const uint input_size){
+    uint gid=get_global_id(0);
+    __global const uchar* in=inputs+gid*input_size;
+    uint d[5];
+    hash160_core(in,input_size,d);
+    __global uchar* out=outputs+gid*20;
+    vstore4((uint4)(d[0],d[1],d[2],d[3]),0,(__global uint*)out);
+    ((__global uint*)out)[4]=d[4];
+}
+
+__kernel void hash160_prefix(__global const uchar* inputs, uint input_size,
+                             __global const uchar* prefix, uint prefix_len,
+                             __global uint* matches){
+    uint gid=get_global_id(0);
+    __global const uchar* in=inputs+gid*input_size;
+    uint d[5];
+    hash160_core(in,input_size,d);
+    __private uchar dig[20];
+    vstore4((uint4)(d[0],d[1],d[2],d[3]),0,(__private uint*)dig);
+    *((__private uint*)(dig+16))=d[4];
+    uint m=1;
+    for(uint i=0;i<prefix_len;i++) if(dig[i]!=prefix[i]){m=0;break;}
+    matches[gid]=m;
+}
+
