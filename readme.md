@@ -1,6 +1,6 @@
 # 🧠 AllInKeys — Modular Key Discovery System
 
-AllInKeys is a Python toolkit for discovering and monitoring cryptocurrency keys and addresses. It wraps GPU-accelerated tools like VanitySearch and adds a modular pipeline for downloading balance lists, deriving altcoin addresses, checking matches, and notifying you via encrypted alerts or a live dashboard.
+AllInKeys is a Python toolkit for discovering and monitoring cryptocurrency keys and addresses. It wraps GPU-accelerated tools like VanitySearch (CUDA/NVIDIA) and Vanitygen++ (OpenCL/AMD) and adds a modular pipeline for downloading balance lists, deriving altcoin addresses, checking matches, and notifying you via encrypted alerts or a live dashboard.
 
 ## 🚧 Project Status
 
@@ -33,7 +33,7 @@ Copy `.env.example` to `.env` and fill in any credentials needed for alert chann
 ```
 allinkeys/
 ├── alerts/                  # Alert sounds and assets
-├── bin/                     # Third‑party binaries (VanitySearch)
+├── bin/                     # Third‑party binaries (VanitySearch, Vanitygen++)
 ├── config/
 │   ├── settings.py          # Master configuration
 │   ├── constants.py         # Shared constants
