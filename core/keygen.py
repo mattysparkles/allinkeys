@@ -1,39 +1,35 @@
 # core/keygen.py
 
+"""Key generation loop and VanitySearch runner."""
+
 import os
+import sys
 import time
+import subprocess
+import threading
 import logging
 import secrets
 from datetime import datetime
 from collections import deque
 from config.settings import (
     VANITYSEARCH_PATH,
-    OCLVANITYGEN_PATH,
-    GPU_VENDOR,
     VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
     BATCH_SIZE,
     ADDR_PER_FILE,
+    LOGGING_ENABLED,
     CHECKPOINT_PATH,
     MAX_OUTPUT_FILE_SIZE,
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
-    FILES_PER_BATCH,
-    FORCE_CPU_FALLBACK,
+    FILES_PER_BATCH
+
 )
 
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
+from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 from core.logger import get_logger
-from core.gpu_selector import get_vanitysearch_gpu_ids, get_vanitysearch_gpus
-from core.csv_checker import detect_btc_address_type, normalize_address
-from core.dashboard import (
-    init_shared_metrics,
-    set_metric,
-    increment_metric,
-    get_metric,
-    update_dashboard_stat,
-)
 
 
 # Runtime trackers
@@ -93,273 +89,126 @@ def generate_random_seed(min_bits=128):
     return secrets.randbelow(range_span) + min_val
 
 
-def run_vanitysearch_stream(
-    initial_seed_int,
-    batch_id,
-    index_within_batch,
-    pause_event=None,
-    gpu_flag=None,
-    backend=None,
-    gpu_ids=None,
-    output_suffix="",
-):
-    """
-    Launch VanitySearch once, stream stdout directly to a uniquely named file,
-    and rotate by time/size. On completion, update all metrics and per-type
-    address counts. Returns ``True`` if the process completed and produced an
-    output file (even if it contained no addresses) and ``False`` only when the
-    subprocess failed entirely.
+def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None):
+    """Run VanitySearch once and return when the output file is rotated.
 
-    Preserves the proven behavior from the older working keygen while
-    maintaining the newer centralized metrics/dashboard logic.
+    Returns ``True`` if the file was generated successfully, ``False`` if the
+    process was interrupted (e.g. via the pause button).
     """
-    import subprocess
-    import threading
-
     global total_keys_generated, last_output_file
 
-    # Resolve GPU usage: FORCE_CPU_FALLBACK overrides UI flag.
-    use_gpu = True
-    if gpu_flag is not None:
-        try:
-            use_gpu = bool(gpu_flag.value)
-        except Exception:
-            use_gpu = True
-    if FORCE_CPU_FALLBACK:
-        use_gpu = False
+    # ``gpu_flag`` allows the GUI to toggle GPU usage at runtime. When False we
+    # skip setting ``CUDA_VISIBLE_DEVICES`` so VanitySearch runs on CPU only.
+    use_gpu = True if gpu_flag is None else bool(gpu_flag.value)
+    selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
+    gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
 
-    gpu_vendor = (backend or GPU_VENDOR).lower()
-
-    try:
-        selected_gpu_ids = (
-            gpu_ids if gpu_ids is not None else (get_vanitysearch_gpu_ids() if use_gpu else [])
-        )
-    except Exception:
-        selected_gpu_ids = []
-
-    if gpu_vendor != "amd" and use_gpu and not selected_gpu_ids:
-        if not FORCE_CPU_FALLBACK:
-            logger.error("GPU requested for VanitySearch but no GPUs are assigned. Aborting.")
-            update_dashboard_stat("vanitysearch_backend", "gpu-missing")
-            update_dashboard_stat("vanitysearch_device_name", "None")
-            return False
-        use_gpu = False
-
-    if gpu_vendor == "amd" and not use_gpu:
-        logger.info("GPU usage disabled; skipping AMD vanity search")
-        update_dashboard_stat("vanitysearch_backend", "gpu-disabled")
-        update_dashboard_stat("vanitysearch_device_name", "AMD")
-        return False
-
-    gpu_env = {}
-    if gpu_vendor != "amd" and use_gpu and selected_gpu_ids:
-        gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(map(str, selected_gpu_ids))}
-
-    # Seed formatting for vanitysearch
     hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
     hex_seed_short = hex(initial_seed_int)[2:].lstrip("0")[:8] or "00000000"
 
-    # Output path
     current_output_path = os.path.join(
         VANITY_OUTPUT_DIR,
-        f"batch_{batch_id}_part_{index_within_batch}{output_suffix}_seed_{hex_seed_short}.txt"
+        f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}.txt"
     )
     last_output_file = current_output_path
 
-    # Build command for appropriate backend
-    if gpu_vendor == "amd":
-        cmd = [
-            OCLVANITYGEN_PATH,
-            "-k",
-            "-o",
-            current_output_path,
-            "-s",
-            hex_seed_full,
-            VANITY_PATTERN,
-        ]
-        backend_desc = "OpenCL/AMD"
-        update_dashboard_stat("vanitysearch_backend", "gpu")
-        update_dashboard_stat("vanitysearch_device_name", backend_desc)
-    else:
-        cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full, "-o", current_output_path, "-u", VANITY_PATTERN]
-        if use_gpu and selected_gpu_ids:
-            cmd.insert(1, "-gpu")
-            backend_desc = f"GPU:{','.join(map(str, selected_gpu_ids))}"
-            update_dashboard_stat("vanitysearch_backend", "gpu")
-            update_dashboard_stat("vanitysearch_device_name", backend_desc)
-        else:
-            backend_desc = "CPU"
-            update_dashboard_stat("vanitysearch_backend", "cpu")
-            update_dashboard_stat("vanitysearch_device_name", "CPU")
-
+    cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full]
+    if use_gpu:
+        cmd.append("-gpu")  # Enable CUDA acceleration
+    cmd.extend(["-o", current_output_path, "-u", VANITY_PATTERN])
     logger.info(
-        "🧬 Starting VanitySearch\n"
-        f"   Seed:    {hex_seed_full}\n"
-        f"   Output:  {current_output_path}\n"
-        f"   Backend: {backend_desc}\n"
-        f"   Command: {' '.join(cmd)}"
+        f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'CPU'}"
     )
-
-    # Respect pending pause
+    logger.info(f"🚀 Running command: {' '.join(cmd)}")
     if pause_event and pause_event.is_set():
         logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
         return False
 
-    # Launch and monitor
     try:
         with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
-            logger.debug(f"Opened {current_output_path} for writing")
+            logger.info(f"Opened {current_output_path} for writing")
+            # Launch VanitySearch as a subprocess and stream output to the file
             proc = subprocess.Popen(
                 cmd,
                 stdout=outfile,
                 stderr=subprocess.STDOUT,
                 env={**os.environ, **gpu_env},
             )
-            logger.info(f"Spawned VanitySearch PID {proc.pid}")
+            logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd}")
 
             def monitor_process(p, path):
-                start_ts = time.time()
+                """Monitor file size and pause requests while VanitySearch runs."""
+                start = time.time()
                 while p.poll() is None:
-                    # Pause handling
                     if pause_event and pause_event.is_set():
-                        logger.info("⏸️ Pause requested. Terminating VanitySearch for clean rotation...")
+                        logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
                         p.terminate()
                         break
-
-                    # Time-based rotation
-                    if ROTATE_INTERVAL_SECONDS and (time.time() - start_ts >= ROTATE_INTERVAL_SECONDS):
-                        logger.info("⏱️ Rotation interval reached. Terminating for rotation.")
+                    if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                        # Periodically rotate output files so they don't grow without bound
+                        logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
                         p.terminate()
                         break
-
-                    # Size-based rotation
                     try:
-                        if MAX_OUTPUT_FILE_SIZE and os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
-                            logger.info(f"📏 Max size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating.")
+                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
+                            logger.info(
+                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {os.path.basename(path)}"
+                            )
                             p.terminate()
                             break
                     except FileNotFoundError:
-                        pass
-
+                        # File might not exist yet; log at debug and retry
+                        logger.debug("Output file not yet created during monitoring")
                     time.sleep(1)
 
-            def ensure_terminated(p):
-                """Wait for process to exit after termination, force kill if needed."""
-                try:
-                    p.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    logger.warning("Force killing unresponsive VanitySearch process")
-                    p.kill()
-                    p.wait()
-
-            watcher = threading.Thread(target=monitor_process, args=(proc, current_output_path), daemon=True)
-            watcher.start()
-            # Wait until process exits or watcher signals termination
-            while proc.poll() is None and watcher.is_alive():
-                time.sleep(0.5)
-            watcher.join()
-            # If process still running after watcher finished, force terminate
-            if proc.poll() is None:
-                ensure_terminated(proc)
-            else:
-                # Ensure exit status collected
-                proc.wait()
-
+            timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
+            timer_thread.start()
+            proc.wait()
+            timer_thread.join()
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
-        try:
-            if os.path.exists(current_output_path) and os.path.getsize(current_output_path) == 0:
-                os.remove(current_output_path)
-        except Exception:
-            pass
         return False
 
-    # Post-run checks
-    if not os.path.exists(current_output_path):
+    if os.path.exists(current_output_path):
+        size = os.path.getsize(current_output_path)
+        if size == 0:
+            logger.warning(f"⚠️ Output file empty: {current_output_path}")
+            os.remove(current_output_path)
+            return False
+        try:
+            with open(current_output_path, 'r', encoding='utf-8') as f:
+                logger.info(f"Opened {current_output_path} for reading")
+                lines = sum(1 for _ in f)
+                total_keys_generated += lines
+                increment_metric("keys_generated_today", lines)
+                increment_metric("keys_generated_lifetime", lines)
+                from core.dashboard import update_dashboard_stat, get_metric
+                update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
+                update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
+                logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
+        return True
+    else:
         logger.error(f"❌ Output file not created: {current_output_path}")
         return False
 
-    size = os.path.getsize(current_output_path)
-    if size == 0:
-        # VanitySearch iterates through sequential seeds and typically prints
-        # legacy addresses beginning with "1" for every seed. An empty file is
-        # unexpected, so treat it as a completed rotation and move on rather
-        # than retrying the same seed indefinitely.
-        logger.warning(f"⚠️ Output file empty: {current_output_path}")
-        return True
 
-    # Count lines + update metrics (per-type + aggregate)
-    lines = 0
-    try:
-        try:
-            from core.worker_bootstrap import _safe_inc_metric as inc_m
-        except Exception:
-            inc_m = increment_metric
 
-        with open(current_output_path, "r", encoding="utf-8") as f:
-            for raw in f:
-                s = raw.strip()
-                if not s:
-                    continue
-                addr = normalize_address(s.split()[0])
-                atype = detect_btc_address_type(addr)
-                inc_m(f"addresses_generated_today.{atype}", 1)
-                inc_m(f"addresses_generated_lifetime.{atype}", 1)
-                inc_m("addresses_generated_today.btc", 1)
-                inc_m("addresses_generated_lifetime.btc", 1)
-                lines += 1
-
-        total_keys_generated += lines
-        inc_m("keys_generated_today", lines)
-        inc_m("keys_generated_lifetime", lines)
-
-        try:
-            update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
-            update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
-        except Exception:
-            pass
-
-        logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
-
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to post-process {current_output_path}: {e}")
-
-    return True
-
+from core.dashboard import init_shared_metrics, set_metric, increment_metric, get_metric
 
 
 def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None, gpu_flag=None):
-    """
-    Main key generation loop. Keeps all dashboard/metrics/pause logic intact,
-    removes hard dependency on GPU probing (CPU fallback is automatic), and
-    preserves checkpointing across batches and files.
-    """
-    # Prefer safe worker bootstrap helpers, fallback to dashboard init
     try:
-        from core.worker_bootstrap import ensure_metrics_ready as _ensure_ready, _safe_set_metric as set_m
-        _ensure_ready(shared_metrics)
+        init_shared_metrics(shared_metrics)
         logger.debug(f"Shared metrics initialized for {__name__}")
-    except Exception:
-        try:
-            init_shared_metrics(shared_metrics)
-            logger.debug(f"Shared metrics initialized (fallback) for {__name__}")
-        except Exception as e:
-            logger.exception(f"Failed to initialize shared metrics in {__name__}: {e}")
-        def set_m(k, v):
-            try:
-                set_metric(k, v)
-            except Exception:
-                pass
-
-    from core.dashboard import register_control_events, set_thread_health, get_shutdown_event, get_pause_event
+    except Exception as e:
+        logger.exception(f"init_shared_metrics failed in {__name__}: {e}")
+    from core.dashboard import register_control_events
     register_control_events(shutdown_event, pause_event, module="keygen")
-    os.makedirs(VANITY_OUTPUT_DIR, exist_ok=True)
+    if not os.path.exists(VANITY_OUTPUT_DIR):
+        os.makedirs(VANITY_OUTPUT_DIR)
 
-    vs_gpus = get_vanitysearch_gpus()
-    nvidia_ids = [g.get("id") for g in vs_gpus if g.get("type") == "nvidia"]
-    has_amd = any(g.get("type") == "amd" for g in vs_gpus)
-
-    # Load or init checkpoint
     checkpoint = load_checkpoint()
     if checkpoint:
         KEYGEN_STATE["batch_id"] = checkpoint.get("batch_id", 0)
@@ -370,19 +219,20 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         KEYGEN_STATE["index_within_batch"] = secrets.randbelow(FILES_PER_BATCH)
         logger.info("🚀 No checkpoint found. Starting with randomized batch/index.")
 
-    # Initialize UI metrics
-    set_m("keys_generated_today", 0)
-    set_m("vanity_progress_percent", 0)
-    set_m("current_seed_index", KEYGEN_STATE["index_within_batch"])
+    # Initialize dashboard metrics so the GUI never shows N/A
+    set_metric("keys_generated_today", 0)
+    set_metric("vanity_progress_percent", 0)
+    set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
 
-    # Mark running
     try:
-        set_m("status.keygen", "Running")
+        set_metric("status.keygen", "Running")
+        from core.dashboard import (
+            set_thread_health,
+            get_shutdown_event,
+            get_pause_event,
+        )
         set_thread_health("keygen", True)
-    except Exception:
-        pass
 
-    try:
         shutdown_evt = get_shutdown_event("keygen")
         pause_evt = get_pause_event("keygen")
 
@@ -395,8 +245,9 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
             if shutdown_evt and shutdown_evt.is_set():
                 break
 
-            # Pause heartbeat (rate-limited)
             if pause_evt and pause_evt.is_set():
+                # Emit a heartbeat log every 5s while paused so the user knows
+                # the key generator is still alive.
                 if (not pause_logged) or (time.time() - pause_log_ts > 5):
                     logger.info("⏸️ Keygen paused. Waiting to resume...")
                     pause_logged = True
@@ -407,90 +258,41 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                 logger.info("▶️ Keygen resumed.")
                 pause_logged = False
 
-            # Update keys/sec (5s window)
+            # update keys/sec using a moving window of the last 5 seconds
             now = time.time()
-            try:
-                current_keys = get_metric("keys_generated_today", 0)
-            except Exception:
-                current_keys = 0
+            current_keys = get_metric("keys_generated_today", 0)
             KPS_WINDOW.append((now, current_keys))
             while KPS_WINDOW and now - KPS_WINDOW[0][0] > 5:
                 KPS_WINDOW.popleft()
             if len(KPS_WINDOW) >= 2:
-                kps = (current_keys - KPS_WINDOW[0][1]) / max(1e-6, (now - KPS_WINDOW[0][0]))
+                kps = (current_keys - KPS_WINDOW[0][1]) / (now - KPS_WINDOW[0][0])
             else:
                 kps = 0
-            set_m("keys_per_sec", round(kps, 2))
+            set_metric("keys_per_sec", round(kps, 2))
 
-            # Batch loop
             batch_start = time.perf_counter()
             index = KEYGEN_STATE["index_within_batch"]
-
             while index < FILES_PER_BATCH:
                 if shutdown_evt and shutdown_evt.is_set():
                     break
                 if pause_evt and pause_evt.is_set():
-                    set_m("keys_per_sec", 0)
+                    # Inner-loop pause check to halt new VanitySearch runs
+                    set_metric("keys_per_sec", 0)
                     time.sleep(1)
                     continue
 
+                seed = generate_random_seed()
+
                 KEYGEN_STATE["index_within_batch"] = index
-                set_m("current_seed_index", index)
-
+                KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
+                set_metric("current_seed_index", index)
                 progress = round((index / float(FILES_PER_BATCH)) * 100, 2)
-                set_m("vanity_progress_percent", progress)
+                set_metric("vanity_progress_percent", progress)
 
-                use_gpu = True
-                if gpu_flag is not None:
-                    try:
-                        use_gpu = bool(gpu_flag.value)
-                    except Exception:
-                        use_gpu = True
-
-                if not use_gpu:
-                    seed = generate_random_seed()
-                    KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
-                    ok = run_vanitysearch_stream(
-                        seed,
-                        KEYGEN_STATE["batch_id"],
-                        index,
-                        pause_evt,
-                        gpu_flag,
-                    )
-                    if not ok:
-                        time.sleep(1)
-                        continue
-                else:
-                    ok_n = ok_a = False
-                    if nvidia_ids:
-                        seed_n = generate_random_seed()
-                        KEYGEN_STATE["last_seed"] = hex(seed_n)[2:].rjust(64, "0")
-                        ok_n = run_vanitysearch_stream(
-                            seed_n,
-                            KEYGEN_STATE["batch_id"],
-                            index,
-                            pause_evt,
-                            gpu_flag,
-                            backend="nvidia",
-                            gpu_ids=nvidia_ids,
-                            output_suffix="_nvidia",
-                        )
-                    if has_amd:
-                        seed_a = generate_random_seed()
-                        if not nvidia_ids:
-                            KEYGEN_STATE["last_seed"] = hex(seed_a)[2:].rjust(64, "0")
-                        ok_a = run_vanitysearch_stream(
-                            seed_a,
-                            KEYGEN_STATE["batch_id"],
-                            index,
-                            pause_evt,
-                            gpu_flag,
-                            backend="amd",
-                            output_suffix="_amd",
-                        )
-                    if not (ok_n or ok_a):
-                        time.sleep(1)
-                        continue
+                success = run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index, pause_evt, gpu_flag)
+                if not success:
+                    time.sleep(1)
+                    continue
 
                 # Save after each file so progress can resume mid-batch
                 save_checkpoint({
@@ -499,19 +301,17 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                 })
                 index += 1
 
-            # Batch done → update timing/averages
             batch_end = time.perf_counter()
             batches_completed += 1
-            total_time += (batch_end - batch_start)
-            set_m("batches_completed", batches_completed)
-            set_m("avg_keygen_time", round(total_time / max(1, batches_completed), 2))
+            total_time += batch_end - batch_start
+            set_metric("batches_completed", batches_completed)
+            set_metric("avg_keygen_time", round(total_time / batches_completed, 2))
             logger.info(f"Batch {KEYGEN_STATE['batch_id']} completed")
 
-            # Next batch
             KEYGEN_STATE["batch_id"] += 1
             KEYGEN_STATE["index_within_batch"] = 0
-            set_m("vanity_progress_percent", 0)
-
+            set_metric("vanity_progress_percent", 0)
+            # Record start of next batch so restarts begin at correct position
             save_checkpoint({
                 "batch_id": KEYGEN_STATE["batch_id"],
                 "index_within_batch": 0,
@@ -519,14 +319,16 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
 
     except KeyboardInterrupt:
         logger.info("🛑 Keygen loop interrupted by user. Exiting cleanly.")
-    except Exception:
+    except Exception as e:
+        # Log full stack trace for any unexpected failure
         logger.exception("❌ Unexpected error in keygen loop")
     finally:
+        set_metric("status.keygen", "Stopped")
         try:
-            set_m("status.keygen", "Stopped")
+            from core.dashboard import set_thread_health
             set_thread_health("keygen", False)
         except Exception:
-            pass
+            logger.warning("Failed to update keygen thread health", exc_info=True)
 
 
 # 🧪 One-time run (for debugging only)
@@ -534,3 +336,4 @@ if __name__ == "__main__":
     print("🧪 Running one-shot VanitySearch test with random seed...")
     test_seed = generate_random_seed()
     run_vanitysearch_stream(test_seed, 999, 0, None)
+
