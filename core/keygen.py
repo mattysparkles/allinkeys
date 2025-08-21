@@ -106,7 +106,9 @@ def run_vanitysearch_stream(
     """
     Launch VanitySearch once, stream stdout directly to a uniquely named file,
     and rotate by time/size. On completion, update all metrics and per-type
-    address counts. Returns True if a non-empty file was produced; False otherwise.
+    address counts. Returns ``True`` if the process completed and produced an
+    output file (even if it contained no addresses) and ``False`` only when the
+    subprocess failed entirely.
 
     Preserves the proven behavior from the older working keygen while
     maintaining the newer centralized metrics/dashboard logic.
@@ -279,12 +281,12 @@ def run_vanitysearch_stream(
 
     size = os.path.getsize(current_output_path)
     if size == 0:
+        # VanitySearch iterates through sequential seeds and typically prints
+        # legacy addresses beginning with "1" for every seed. An empty file is
+        # unexpected, so treat it as a completed rotation and move on rather
+        # than retrying the same seed indefinitely.
         logger.warning(f"⚠️ Output file empty: {current_output_path}")
-        try:
-            os.remove(current_output_path)
-        except Exception:
-            pass
-        return False
+        return True
 
     # Count lines + update metrics (per-type + aggregate)
     lines = 0
