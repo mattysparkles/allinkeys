@@ -2,6 +2,8 @@
 
 AllInKeys is a Python toolkit for discovering and monitoring cryptocurrency keys and addresses. It wraps GPU-accelerated tools like VanitySearch (CUDA/NVIDIA) and Vanitygen++ (OpenCL/AMD) and adds a modular pipeline for downloading balance lists, deriving altcoin addresses, checking matches, and notifying you via encrypted alerts or a live dashboard.
 
+The key generator can run NVIDIA and AMD GPUs in parallel, producing separate output files for each backend so that one workflow can continue even if the other encounters an error.
+
 ## 🚧 Project Status
 
 This repository was recently opened to the public and remains a work in progress. Modules are actively being refactored and new features are added frequently.

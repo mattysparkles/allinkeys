@@ -25,7 +25,7 @@ from config.settings import (
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
 from core.logger import get_logger
-from core.gpu_selector import get_vanitysearch_gpu_ids
+from core.gpu_selector import get_vanitysearch_gpu_ids, get_vanitysearch_gpus
 from core.csv_checker import detect_btc_address_type, normalize_address
 from core.dashboard import (
     init_shared_metrics,
@@ -93,7 +93,16 @@ def generate_random_seed(min_bits=128):
     return secrets.randbelow(range_span) + min_val
 
 
-def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None):
+def run_vanitysearch_stream(
+    initial_seed_int,
+    batch_id,
+    index_within_batch,
+    pause_event=None,
+    gpu_flag=None,
+    backend=None,
+    gpu_ids=None,
+    output_suffix="",
+):
     """
     Launch VanitySearch once, stream stdout directly to a uniquely named file,
     and rotate by time/size. On completion, update all metrics and per-type
@@ -117,20 +126,28 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     if FORCE_CPU_FALLBACK:
         use_gpu = False
 
-    # Select GPUs based on vendor for backend selection
-    gpu_vendor = GPU_VENDOR.lower()
+    gpu_vendor = (backend or GPU_VENDOR).lower()
+
     try:
-        selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
+        selected_gpu_ids = (
+            gpu_ids if gpu_ids is not None else (get_vanitysearch_gpu_ids() if use_gpu else [])
+        )
     except Exception:
         selected_gpu_ids = []
 
-    if use_gpu and not selected_gpu_ids:
+    if gpu_vendor != "amd" and use_gpu and not selected_gpu_ids:
         if not FORCE_CPU_FALLBACK:
             logger.error("GPU requested for VanitySearch but no GPUs are assigned. Aborting.")
             update_dashboard_stat("vanitysearch_backend", "gpu-missing")
             update_dashboard_stat("vanitysearch_device_name", "None")
             return False
         use_gpu = False
+
+    if gpu_vendor == "amd" and not use_gpu:
+        logger.info("GPU usage disabled; skipping AMD vanity search")
+        update_dashboard_stat("vanitysearch_backend", "gpu-disabled")
+        update_dashboard_stat("vanitysearch_device_name", "AMD")
+        return False
 
     gpu_env = {}
     if gpu_vendor != "amd" and use_gpu and selected_gpu_ids:
@@ -143,7 +160,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     # Output path
     current_output_path = os.path.join(
         VANITY_OUTPUT_DIR,
-        f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}.txt"
+        f"batch_{batch_id}_part_{index_within_batch}{output_suffix}_seed_{hex_seed_short}.txt"
     )
     last_output_file = current_output_path
 
@@ -336,6 +353,10 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     register_control_events(shutdown_event, pause_event, module="keygen")
     os.makedirs(VANITY_OUTPUT_DIR, exist_ok=True)
 
+    vs_gpus = get_vanitysearch_gpus()
+    nvidia_ids = [g.get("id") for g in vs_gpus if g.get("type") == "nvidia"]
+    has_amd = any(g.get("type") == "amd" for g in vs_gpus)
+
     # Load or init checkpoint
     checkpoint = load_checkpoint()
     if checkpoint:
@@ -411,20 +432,63 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                     time.sleep(1)
                     continue
 
-                # Random seed (swap to generate_seed_from_batch() if deterministic is desired)
-                seed = generate_random_seed()
-
                 KEYGEN_STATE["index_within_batch"] = index
-                KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
                 set_m("current_seed_index", index)
 
                 progress = round((index / float(FILES_PER_BATCH)) * 100, 2)
                 set_m("vanity_progress_percent", progress)
 
-                ok = run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index, pause_evt, gpu_flag)
-                if not ok:
-                    time.sleep(1)
-                    continue
+                use_gpu = True
+                if gpu_flag is not None:
+                    try:
+                        use_gpu = bool(gpu_flag.value)
+                    except Exception:
+                        use_gpu = True
+
+                if not use_gpu:
+                    seed = generate_random_seed()
+                    KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
+                    ok = run_vanitysearch_stream(
+                        seed,
+                        KEYGEN_STATE["batch_id"],
+                        index,
+                        pause_evt,
+                        gpu_flag,
+                    )
+                    if not ok:
+                        time.sleep(1)
+                        continue
+                else:
+                    ok_n = ok_a = False
+                    if nvidia_ids:
+                        seed_n = generate_random_seed()
+                        KEYGEN_STATE["last_seed"] = hex(seed_n)[2:].rjust(64, "0")
+                        ok_n = run_vanitysearch_stream(
+                            seed_n,
+                            KEYGEN_STATE["batch_id"],
+                            index,
+                            pause_evt,
+                            gpu_flag,
+                            backend="nvidia",
+                            gpu_ids=nvidia_ids,
+                            output_suffix="_nvidia",
+                        )
+                    if has_amd:
+                        seed_a = generate_random_seed()
+                        if not nvidia_ids:
+                            KEYGEN_STATE["last_seed"] = hex(seed_a)[2:].rjust(64, "0")
+                        ok_a = run_vanitysearch_stream(
+                            seed_a,
+                            KEYGEN_STATE["batch_id"],
+                            index,
+                            pause_evt,
+                            gpu_flag,
+                            backend="amd",
+                            output_suffix="_amd",
+                        )
+                    if not (ok_n or ok_a):
+                        time.sleep(1)
+                        continue
 
                 # Save after each file so progress can resume mid-batch
                 save_checkpoint({
