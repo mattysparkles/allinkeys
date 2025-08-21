@@ -191,6 +191,11 @@ def get_vanitysearch_gpu_ids():
     return [g["id"] for g in assigned_gpus.get("vanitysearch", [])]
 
 
+def get_vanitysearch_gpus():
+    load_gpu_assignments()
+    return assigned_gpus.get("vanitysearch", [])
+
+
 def get_altcoin_gpu_ids():
     load_gpu_assignments()
     return [g["id"] for g in assigned_gpus.get("altcoin_derive", [])]
