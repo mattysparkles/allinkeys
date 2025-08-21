@@ -224,10 +224,27 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
                     time.sleep(1)
 
+            def ensure_terminated(p):
+                """Wait for process to exit after termination, force kill if needed."""
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.warning("Force killing unresponsive VanitySearch process")
+                    p.kill()
+                    p.wait()
+
             watcher = threading.Thread(target=monitor_process, args=(proc, current_output_path), daemon=True)
             watcher.start()
-            proc.wait()
+            # Wait until process exits or watcher signals termination
+            while proc.poll() is None and watcher.is_alive():
+                time.sleep(0.5)
             watcher.join()
+            # If process still running after watcher finished, force terminate
+            if proc.poll() is None:
+                ensure_terminated(proc)
+            else:
+                # Ensure exit status collected
+                proc.wait()
 
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
