@@ -26,7 +26,6 @@ from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
 from core.logger import get_logger
 from core.gpu_selector import get_vanitysearch_gpu_ids
-from core.csv_checker import detect_btc_address_type, normalize_address
 from core.dashboard import (
     init_shared_metrics,
     set_metric,
@@ -269,30 +268,15 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
             pass
         return False
 
-    # Count lines + update metrics (per-type + aggregate)
+    # Count lines + update metrics
     lines = 0
     try:
-        try:
-            from core.worker_bootstrap import _safe_inc_metric as inc_m
-        except Exception:
-            inc_m = increment_metric
-
         with open(current_output_path, "r", encoding="utf-8") as f:
-            for raw in f:
-                s = raw.strip()
-                if not s:
-                    continue
-                addr = normalize_address(s.split()[0])
-                atype = detect_btc_address_type(addr)
-                inc_m(f"addresses_generated_today.{atype}", 1)
-                inc_m(f"addresses_generated_lifetime.{atype}", 1)
-                inc_m("addresses_generated_today.btc", 1)
-                inc_m("addresses_generated_lifetime.btc", 1)
-                lines += 1
+            lines = sum(1 for line in f if line.strip())
 
         total_keys_generated += lines
-        inc_m("keys_generated_today", lines)
-        inc_m("keys_generated_lifetime", lines)
+        increment_metric("keys_generated_today", lines)
+        increment_metric("keys_generated_lifetime", lines)
 
         try:
             update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
