@@ -278,9 +278,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         inc_m("keys_generated_lifetime", lines)
 
         try:
-            from core.dashboard import update_dashboard_stat, get_metric as get_m
-            update_dashboard_stat("keys_generated_today", get_m("keys_generated_today"))
-            update_dashboard_stat("keys_generated_lifetime", get_m("keys_generated_lifetime"))
+            update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
+            update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
         except Exception:
             pass
 

@@ -263,9 +263,13 @@ def _which(p: str) -> Optional[str]:
 def _resolve_exe() -> Optional[str]:
     bin_dir = _bin_dir()
     for cand in (
+        os.path.join(bin_dir, "VanitySearch.exe"),
         os.path.join(bin_dir, "vanitysearch.exe"),
+        os.path.join(bin_dir, "VanitySearch_cuda.exe"),
         os.path.join(bin_dir, "vanitysearch_cuda.exe"),
+        "VanitySearch.exe",
         "vanitysearch.exe",
+        "VanitySearch_cuda.exe",
         "vanitysearch_cuda.exe",
     ):
         path = _which(cand)
@@ -326,7 +330,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
     out_dir = ensure_dir(VANITY_TXT_DIR)
     exe = _resolve_exe()
     if not exe:
-        log_message("❌ VanitySearch binary not found (vanitysearch.exe).", "ERROR")
+        log_message("❌ VanitySearch binary not found (VanitySearch.exe).", "ERROR")
         return 0
 
     seed = _normalize_seed(seed_start)

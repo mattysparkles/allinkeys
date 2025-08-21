@@ -28,7 +28,7 @@ UNIQUE_DIR = os.path.join(DOWNLOADS_DIR, "unique")
 # Where matches and encrypted alerts are archived
 MATCHES_DIR = os.path.join(BASE_DIR, "matches")
 # VanitySearch text outputs
-VANITY_TXT_DIR = os.path.join(BASE_DIR, "output", "vanity_txt")
+VANITY_TXT_DIR = os.path.join(BASE_DIR, "vanity_output")
 VANITY_OUTPUT_DIR = VANITY_TXT_DIR  # legacy alias
 # Local audio clips for alerts
 SOUND_CLIPS_DIR = os.path.join(BASE_DIR, "alerts", "sounds")
@@ -73,8 +73,8 @@ BTC_MIN_FILE_AGE_SEC = 2.0            # ignore files newer than this
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
 # Single VanitySearch binary (CUDA only)
-VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "vanitysearch.exe")
-VANITYSEARCH_EXE_NAME = "vanitysearch.exe"
+VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "VanitySearch.exe")
+VANITYSEARCH_EXE_NAME = "VanitySearch.exe"
 # OpenCL/AMD variants from Vanitygen++
 OCLVANITYGEN_PATH = os.path.join(BASE_DIR, "bin", "oclvanitygen.exe")
 OCLVANITYMINER_PATH = os.path.join(BASE_DIR, "bin", "oclvanityminer.exe")
