@@ -1,7 +1,5 @@
 # core/keygen.py
 
-"""Key generation loop and VanitySearch runner."""
-
 import os
 import sys
 import time
@@ -336,4 +334,3 @@ if __name__ == "__main__":
     print("🧪 Running one-shot VanitySearch test with random seed...")
     test_seed = generate_random_seed()
     run_vanitysearch_stream(test_seed, 999, 0, None)
-
