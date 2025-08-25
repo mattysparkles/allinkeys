@@ -548,11 +548,13 @@ def _update_stat_internal(key, value=None):
         return
 
     if value is None:
-        print(
-            f"⚠️ update_dashboard_stat('{key}') called without a value. Defaulting to 'N/A'",
-            flush=True,
-        )
-        value = "N/A"
+        defaults = _default_metrics()
+        value = defaults.get(key, "N/A")
+        if key not in defaults:
+            print(
+                f"⚠️ update_dashboard_stat('{key}') called without a value. Defaulting to '{value}'",
+                flush=True,
+            )
 
     # Support dotted keys for nested dict updates
     if isinstance(key, str) and "." in key:
