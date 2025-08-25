@@ -7,6 +7,35 @@ import types
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 sys.modules.setdefault('pyopencl', types.SimpleNamespace(get_platforms=lambda: [], device_type=types.SimpleNamespace(GPU=0)))
 sys.modules.setdefault('core.altcoin_derive', types.SimpleNamespace(start_altcoin_conversion_process=lambda *a, **k: None))
+# Stub out heavy modules so ``import main`` does not require optional deps
+sys.modules.setdefault('core.checkpoint', types.SimpleNamespace(load_keygen_checkpoint=lambda *a, **k: None,
+                                                               save_keygen_checkpoint=lambda *a, **k: None))
+sys.modules.setdefault('core.downloader', types.SimpleNamespace(download_and_compare_address_lists=lambda *a, **k: None,
+                                                               generate_test_csv=lambda *a, **k: None))
+sys.modules.setdefault('core.csv_checker', types.SimpleNamespace(check_csvs_day_one=lambda *a, **k: None,
+                                                                check_csvs=lambda *a, **k: None))
+sys.modules.setdefault('core.alerts', types.SimpleNamespace(trigger_startup_alerts=lambda *a, **k: None,
+                                                            alert_match=lambda *a, **k: None))
+sys.modules.setdefault('core.dashboard', types.SimpleNamespace(update_dashboard_stat=lambda *a, **k: None,
+                                                              _default_metrics={},
+                                                              init_shared_metrics=lambda *a, **k: None,
+                                                              init_dashboard_manager=lambda *a, **k: None,
+                                                              get_current_metrics=lambda *a, **k: {},
+                                                              get_metric=lambda *a, **k: None,
+                                                              set_metric=lambda *a, **k: None,
+                                                              warn_rate_limited=lambda *a, **k: None))
+sys.modules.setdefault('ui.dashboard_gui', types.SimpleNamespace(start_dashboard=lambda *a, **k: None))
+sys.modules.setdefault(
+    'core.gpu_selector',
+    types.SimpleNamespace(
+        assign_gpu_roles=lambda *a, **k: None,
+        get_vanitysearch_gpu_ids=lambda: [],
+        get_altcoin_gpu_ids=lambda: [],
+        get_gpu_assignments=lambda: {},
+    ),
+)
+sys.modules.setdefault('core.keygen', types.SimpleNamespace(run_btc_only=lambda *a, **k: None))
+
 import main
 
 
@@ -54,3 +83,10 @@ def test_legacy_only_flag_emits_warning(capsys):
         main.run_only_mode(args)
         run_mock.assert_called_once_with(compressed=True)
     assert 'deprecated' in capsys.readouterr().err.lower()
+
+
+def test_parser_accepts_only_and_compressed():
+    parser = main.build_parser()
+    args = parser.parse_args(["--only", "btc", "--compressed"])
+    assert args.only == "btc"
+    assert args.compressed is True

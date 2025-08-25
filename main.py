@@ -525,18 +525,12 @@ def run_allinkeys(args):
             pass
 
 
-if __name__ == "__main__":
-    import multiprocessing as mp
-    mp.freeze_support()
-    try:
-        mp.set_start_method("spawn")
-    except RuntimeError:
-        pass  # already set
+def build_parser() -> argparse.ArgumentParser:
+    """Create the top-level :class:`argparse.ArgumentParser`.
 
-    if not os.path.exists(VANITYSEARCH_PATH):
-        raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")
-    else:
-        print(f"✅ VanitySearch found: {VANITYSEARCH_PATH}", flush=True)
+    The parser construction is factored out so tests can easily verify CLI
+    behaviour without invoking the full application.
+    """
 
     parser = argparse.ArgumentParser(description="AllInKeys Modular Runner")
     parser.add_argument("--skip-backlog", action="store_true", help="Skip backlog conversion on startup")
@@ -555,8 +549,31 @@ if __name__ == "__main__":
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("-all", action="store_true", help="Use 'all BTC addresses ever used' range mode")
     mode.add_argument("-funded", action="store_true", help="Use daily funded BTC list")
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point used by ``__main__`` and tests."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
     code = run_only_mode(args)
     if code is not None:
-        sys.exit(code)
+        return code
     run_allinkeys(args)
+    return 0
+
+
+if __name__ == "__main__":
+    import multiprocessing as mp
+    mp.freeze_support()
+    try:
+        mp.set_start_method("spawn")
+    except RuntimeError:
+        pass  # already set
+
+    if not os.path.exists(VANITYSEARCH_PATH):
+        raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")
+    else:
+        print(f"✅ VanitySearch found: {VANITYSEARCH_PATH}", flush=True)
+
+    sys.exit(main())
