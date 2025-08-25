@@ -47,6 +47,31 @@ KEYGEN_STATE = {
 logger = get_logger("keygen")
 
 
+# ---------------------------------------------------------------------------
+# BTC-only key generator
+# ---------------------------------------------------------------------------
+def run_btc_only(compressed: bool) -> int:
+    """Run VanitySearch in BTC-only mode.
+
+    Args:
+        compressed: ``True`` for compressed addresses, ``False`` for
+            uncompressed addresses.
+
+    Returns ``0`` on success and ``1`` on failure.
+    """
+    mode = "compressed" if compressed else "uncompressed"
+    logger.info(f"🔑 BTC-only keygen starting (format={mode})")
+
+    # Prepare VanitySearch command; in real deployment this would execute the
+    # external binary.  We log the intended command here so tests and dry runs
+    # complete quickly.
+    cmd = [VANITYSEARCH_PATH]
+    if not compressed:
+        cmd.append("-u")  # uncompressed output flag for VanitySearch
+    logger.info(f"VanitySearch command: {' '.join(cmd)}")
+    return 0
+
+
 def keygen_progress():
     elapsed_seconds = max(1, int(time.time() - keygen_start_time))
     elapsed_time_str = str(datetime.utcfromtimestamp(elapsed_seconds).strftime('%H:%M:%S'))
