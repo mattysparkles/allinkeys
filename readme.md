@@ -116,7 +116,9 @@ The default run will:
 | `--skip-downloads` | Skip downloading balance files |
 | `--headless` | Run without any GUI components |
 | `--match-test` | Trigger a fake match alert on startup |
-| `-only btc` | Restrict processing to a single coin flow |
+| `--only btc` | Restrict processing to a single coin flow |
+| `--addr-format {compressed,uncompressed}` | BTC-only: choose address format |
+| `--compressed` / `--uncompressed` | BTC-only convenience flags overriding `--addr-format` |
 | `-all` | Use "all BTC addresses ever used" list |
 | `-funded` | Use daily funded BTC list |
 

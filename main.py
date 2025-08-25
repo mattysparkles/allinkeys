@@ -397,112 +397,28 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
     return processes, named_processes
 
 
-def run_btc_only(args):
-    """Run BTC-only keygen and checker pipeline."""
-    from multiprocessing import Process
-    # Allow command line toggle to enable bc1 address generation.  The
-    # settings module defines bech32 modes as disabled by default for
-    # backwards compatibility.
-    if getattr(args, "enable_bc1", False):
-        settings.ENABLE_P2WPKH = True
-        settings.ENABLE_TAPROOT = True
-    from core.keygen import start_keygen_loop
-    from core.btc_only_checker import (
-        prepare_btc_only_mode,
-        process_pending_vanity_outputs_once,
-        get_vanity_backlog_count,
-    )
+def resolve_btc_compression(args):
+    """Determine whether BTC addresses should be compressed."""
+    if getattr(args, "compressed", False):
+        return True
+    if getattr(args, "uncompressed", False):
+        return False
+    return getattr(args, "addr_format", "compressed") == "compressed"
 
-    os.makedirs(LOG_DIR, exist_ok=True)
-    os.makedirs(VANITY_OUTPUT_DIR, exist_ok=True)
-    start_listener()
-    display_logo()
-    assign_gpu_roles()
 
-    shared_metrics = init_dashboard_manager()
-    init_shared_metrics(shared_metrics)
+def run_only_mode(args):
+    """Dispatch ``--only`` flows and handle legacy ``-only`` alias."""
+    if getattr(args, "only_legacy", None) and not getattr(args, "only", None):
+        args.only = args.only_legacy
+        print("Warning: '-only' is deprecated; use '--only' instead.", file=sys.stderr)
 
-    shutdown_event = multiprocessing.Event()
-    keygen_shutdown = multiprocessing.Event()
-    keygen_pause = multiprocessing.Event()
+    if getattr(args, "only", None) == "btc":
+        compressed = resolve_btc_compression(args)
+        from core.keygen import run_btc_only  # call into keygen module
+        return run_btc_only(compressed=compressed)
 
-    from core.dashboard import register_control_events, get_pause_event, get_shutdown_event
-    register_control_events(shutdown_event, None)
-    register_control_events(keygen_shutdown, keygen_pause, module="keygen")
-    keygen_pause = get_pause_event("keygen")
-    keygen_shutdown = get_shutdown_event("keygen")
+    return None
 
-    logger = get_logger("btc_only")
-    use_all = bool(args.all)
-    use_funded = bool(args.funded)
-    if not (use_all ^ use_funded):
-        log_message("Must specify exactly one of -all or -funded", "ERROR")
-        return
-
-    prepare_btc_only_mode(use_all, logger, skip_downloads=args.skip_downloads)
-
-    keygen_proc = Process(target=start_keygen_loop, args=(shared_metrics, keygen_shutdown, keygen_pause, None))
-    keygen_proc.daemon = True
-    keygen_proc.start()
-
-    metrics_proc = Process(target=metrics_updater, args=(shared_metrics,))
-    metrics_proc.daemon = True
-    metrics_proc.start()
-
-    if ENABLE_DASHBOARD and not args.no_dashboard:
-        dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
-        dashboard_thread.start()
-
-    above = below = 0
-    mode = "btc-only"
-    try:
-        while not shutdown_event.is_set():
-            backlog = get_vanity_backlog_count()
-            set_metric("vanity_backlog_count", backlog)
-            if backlog >= BACKLOG_PAUSE_THRESHOLD:
-                above += 1
-                below = 0
-                if above >= 2 and not keygen_pause.is_set():
-                    logger.info(
-                        f"Backlog gate → module=keygen mode={mode} backlog={backlog} "
-                        f"(pause>={BACKLOG_PAUSE_THRESHOLD}, resume<={BACKLOG_RESUME_THRESHOLD}) action=PAUSE"
-                    )
-                    keygen_pause.set()
-                    warn_rate_limited(
-                        "pause.keygen.backlog",
-                        f"⏸️ Pausing keygen: backlog={backlog} ≥ {BACKLOG_PAUSE_THRESHOLD}",
-                    )
-            elif backlog <= BACKLOG_RESUME_THRESHOLD:
-                below += 1
-                above = 0
-                if below >= 2 and keygen_pause.is_set():
-                    logger.info(
-                        f"Backlog gate → module=keygen mode={mode} backlog={backlog} "
-                        f"(pause>={BACKLOG_PAUSE_THRESHOLD}, resume<={BACKLOG_RESUME_THRESHOLD}) action=RESUME"
-                    )
-                    keygen_pause.clear()
-                    logger.info(
-                        f"▶️ Resuming keygen: backlog={backlog} ≤ {BACKLOG_RESUME_THRESHOLD}"
-                    )
-            try:
-                process_pending_vanity_outputs_once(logger)
-            except Exception as e:
-                logger.warning(f"⚠️ btc_only processing tick encountered an error but will continue: {e}")
-            time.sleep(2)
-    except KeyboardInterrupt:
-        log_message("Shutting down BTC-only mode", "INFO")
-    finally:
-        shutdown_event.set()
-        keygen_shutdown.set()
-        try:
-            keygen_proc.join(timeout=5)
-        except Exception:
-            pass
-        try:
-            metrics_proc.terminate()
-        except Exception:
-            pass
-        stop_listener()
 
 def run_allinkeys(args):
     # Enable bech32 modes when explicitly requested via CLI.  Settings
@@ -510,9 +426,6 @@ def run_allinkeys(args):
     if getattr(args, "enable_bc1", False):
         settings.ENABLE_P2WPKH = True
         settings.ENABLE_TAPROOT = True
-    if getattr(args, "only", None) == "btc":
-        run_btc_only(args)
-        return
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(CSV_DIR, exist_ok=True)
     start_listener()
@@ -632,10 +545,18 @@ if __name__ == "__main__":
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
     parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
-    parser.add_argument("-only", choices=["btc"], help="Restrict to a single coin flow.")
+    parser.add_argument("--only", choices=["btc"], dest="only", help="Restrict to a single coin flow.")
+    parser.add_argument("-only", choices=["btc"], dest="only_legacy", help=argparse.SUPPRESS)
+    parser.add_argument("--addr-format", choices=["compressed", "uncompressed"], default="compressed",
+                        help="BTC-only address format (default: compressed)")
+    fmt_group = parser.add_mutually_exclusive_group()
+    fmt_group.add_argument("--compressed", action="store_true", help="BTC-only: force compressed addresses")
+    fmt_group.add_argument("--uncompressed", action="store_true", help="BTC-only: force uncompressed addresses")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("-all", action="store_true", help="Use 'all BTC addresses ever used' range mode")
     mode.add_argument("-funded", action="store_true", help="Use daily funded BTC list")
     args = parser.parse_args()
-
+    code = run_only_mode(args)
+    if code is not None:
+        sys.exit(code)
     run_allinkeys(args)
