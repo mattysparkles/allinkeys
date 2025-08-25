@@ -50,25 +50,40 @@ logger = get_logger("keygen")
 # ---------------------------------------------------------------------------
 # BTC-only key generator
 # ---------------------------------------------------------------------------
+
+# Tracks whether BTC addresses should be generated in compressed form.
+BTC_COMPRESSED = True
+
+
 def run_btc_only(compressed: bool) -> int:
     """Run VanitySearch in BTC-only mode.
 
+    This launches the standard key generation loop used by the main
+    application but restricts execution to VanitySearch only.  The call blocks
+    until the loop exits (for example via ``Ctrl+C``).
+
     Args:
-        compressed: ``True`` for compressed addresses, ``False`` for
+        compressed: ``True`` to generate compressed addresses, ``False`` for
             uncompressed addresses.
 
-    Returns ``0`` on success and ``1`` on failure.
+    Returns
+    -------
+    int
+        ``0`` when the loop terminates, ``1`` if an unexpected error occurs.
     """
-    mode = "compressed" if compressed else "uncompressed"
+    global BTC_COMPRESSED
+    BTC_COMPRESSED = bool(compressed)
+
+    mode = "compressed" if BTC_COMPRESSED else "uncompressed"
     logger.info(f"🔑 BTC-only keygen starting (format={mode})")
 
-    # Prepare VanitySearch command; in real deployment this would execute the
-    # external binary.  We log the intended command here so tests and dry runs
-    # complete quickly.
-    cmd = [VANITYSEARCH_PATH]
-    if not compressed:
-        cmd.append("-u")  # uncompressed output flag for VanitySearch
-    logger.info(f"VanitySearch command: {' '.join(cmd)}")
+    try:
+        # Re‑use the standard generator loop so behaviour matches the
+        # full application, but avoid spawning extra processes.
+        start_keygen_loop()
+    except Exception:
+        logger.exception("BTC-only keygen terminated due to an unexpected error")
+        return 1
     return 0
 
 
@@ -135,10 +150,12 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     )
     last_output_file = current_output_path
 
-    cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full]
+    cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full, "-o", current_output_path]
     if use_gpu:
         cmd.append("-gpu")  # Enable CUDA acceleration
-    cmd.extend(["-o", current_output_path, "-u", VANITY_PATTERN])
+    if not BTC_COMPRESSED:
+        cmd.append("-u")
+    cmd.append(VANITY_PATTERN)
     logger.info(
         f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'CPU'}"
     )
