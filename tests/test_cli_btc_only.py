@@ -35,8 +35,10 @@ sys.modules.setdefault(
     ),
 )
 sys.modules.setdefault('core.keygen', types.SimpleNamespace(run_btc_only=lambda *a, **k: None))
+sys.modules.setdefault('core.btc_only_checker', types.SimpleNamespace(btc_only_checker_loop=lambda *a, **k: None))
 
 import main
+main.metrics_updater = lambda *a, **k: None
 
 
 def _make_args(**kwargs):
@@ -61,28 +63,32 @@ def test_btc_only_default_compressed():
     args = _make_args(only='btc')
     with patch('core.keygen.run_btc_only') as run_mock:
         main.run_only_mode(args)
-        run_mock.assert_called_once_with(compressed=True)
+        run_mock.assert_called_once()
+        assert run_mock.call_args.kwargs.get('compressed') is True
 
 
 def test_btc_only_explicit_uncompressed():
     args = _make_args(only='btc', uncompressed=True)
     with patch('core.keygen.run_btc_only') as run_mock:
         main.run_only_mode(args)
-        run_mock.assert_called_once_with(compressed=False)
+        run_mock.assert_called_once()
+        assert run_mock.call_args.kwargs.get('compressed') is False
 
 
 def test_btc_only_addr_format_uncompressed():
     args = _make_args(only='btc', addr_format='uncompressed')
     with patch('core.keygen.run_btc_only') as run_mock:
         main.run_only_mode(args)
-        run_mock.assert_called_once_with(compressed=False)
+        run_mock.assert_called_once()
+        assert run_mock.call_args.kwargs.get('compressed') is False
 
 
 def test_legacy_only_flag_emits_warning(capsys):
     args = _make_args(only_legacy='btc')
     with patch('core.keygen.run_btc_only') as run_mock:
         main.run_only_mode(args)
-        run_mock.assert_called_once_with(compressed=True)
+        run_mock.assert_called_once()
+        assert run_mock.call_args.kwargs.get('compressed') is True
     assert 'deprecated' in capsys.readouterr().err.lower()
 
 

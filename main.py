@@ -54,6 +54,7 @@ from core.logger import log_message, start_listener, stop_listener, get_logger
 from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint
 from core.downloader import download_and_compare_address_lists, generate_test_csv
 from core.csv_checker import check_csvs_day_one, check_csvs
+from core.btc_only_checker import btc_only_checker_loop
 from core.alerts import trigger_startup_alerts, alert_match
 from core.dashboard import (
     update_dashboard_stat,
@@ -426,6 +427,31 @@ def run_only_mode(args):
         from core.gpu_selector import assign_gpu_roles
         assign_gpu_roles()
 
+        shared_metrics = init_dashboard_manager()
+        shutdown_keygen = multiprocessing.Event()
+        pause_keygen = multiprocessing.Event()
+        shutdown_btc = multiprocessing.Event()
+        pause_btc = multiprocessing.Event()
+        vanity_gpu_flag = multiprocessing.Value('i', 1)
+
+        processes = []
+        from core.logger import log_queue
+
+        # Background metrics collector so the GUI has real-time stats
+        p = Process(target=metrics_updater, args=(shared_metrics,))
+        p.daemon = True
+        p.start()
+        processes.append(p)
+
+        # BTC-only vanity output checker
+        p = Process(
+            target=btc_only_checker_loop,
+            args=(shared_metrics, shutdown_btc, pause_btc, log_queue, args.all, args.skip_downloads),
+        )
+        p.daemon = True
+        p.start()
+        processes.append(p)
+
         # Launch the dashboard UI unless explicitly disabled.  Because the
         # BTC-only flow blocks while running the key generator, the GUI is
         # started on a background thread so the main thread can continue with
@@ -436,8 +462,20 @@ def run_only_mode(args):
 
         from core.keygen import run_btc_only  # call into keygen module
         try:
-            return run_btc_only(compressed=compressed)
+            return run_btc_only(
+                compressed=compressed,
+                shared_metrics=shared_metrics,
+                shutdown_event=shutdown_keygen,
+                pause_event=pause_keygen,
+                gpu_flag=vanity_gpu_flag,
+            )
         finally:
+            shutdown_keygen.set()
+            shutdown_btc.set()
+            for proc in processes:
+                if proc.is_alive():
+                    proc.terminate()
+                    proc.join()
             stop_listener()
 
     return None
