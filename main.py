@@ -414,8 +414,13 @@ def run_only_mode(args):
 
     if getattr(args, "only", None) == "btc":
         compressed = resolve_btc_compression(args)
+        os.makedirs(LOG_DIR, exist_ok=True)
+        start_listener()
         from core.keygen import run_btc_only  # call into keygen module
-        return run_btc_only(compressed=compressed)
+        try:
+            return run_btc_only(compressed=compressed)
+        finally:
+            stop_listener()
 
     return None
 
