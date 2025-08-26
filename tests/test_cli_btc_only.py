@@ -48,6 +48,7 @@ def _make_args(**kwargs):
         addr_format='compressed',
         skip_downloads=False,
         no_dashboard=False,
+        headless=False,
         enable_bc1=False,
         all=False,
         funded=False,

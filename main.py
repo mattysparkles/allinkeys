@@ -416,6 +416,24 @@ def run_only_mode(args):
         compressed = resolve_btc_compression(args)
         os.makedirs(LOG_DIR, exist_ok=True)
         start_listener()
+
+        # Even in BTC-only mode we want to give the user a chance to pick
+        # which GPU should handle VanitySearch.  Previously this mode skipped
+        # the interactive assignment entirely which caused confusion when the
+        # key generator silently defaulted to the first device.  Prompting here
+        # mirrors the behaviour of the full application and ensures the
+        # ``gpu_assignments.json`` file is always created.
+        from core.gpu_selector import assign_gpu_roles
+        assign_gpu_roles()
+
+        # Launch the dashboard UI unless explicitly disabled.  Because the
+        # BTC-only flow blocks while running the key generator, the GUI is
+        # started on a background thread so the main thread can continue with
+        # key generation.
+        if ENABLE_DASHBOARD and not getattr(args, "no_dashboard", False) and not getattr(args, "headless", False):
+            from ui.dashboard_gui import start_dashboard
+            threading.Thread(target=start_dashboard, daemon=True).start()
+
         from core.keygen import run_btc_only  # call into keygen module
         try:
             return run_btc_only(compressed=compressed)
