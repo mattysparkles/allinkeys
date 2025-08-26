@@ -55,7 +55,13 @@ logger = get_logger("keygen")
 BTC_COMPRESSED = True
 
 
-def run_btc_only(compressed: bool) -> int:
+def run_btc_only(
+    compressed: bool,
+    shared_metrics=None,
+    shutdown_event=None,
+    pause_event=None,
+    gpu_flag=None,
+) -> int:
     """Run VanitySearch in BTC-only mode.
 
     This launches the standard key generation loop used by the main
@@ -79,8 +85,15 @@ def run_btc_only(compressed: bool) -> int:
 
     try:
         # Re‑use the standard generator loop so behaviour matches the
-        # full application, but avoid spawning extra processes.
-        start_keygen_loop()
+        # full application, but avoid spawning extra processes.  Forward
+        # any supplied shared ``multiprocessing`` primitives so the GUI can
+        # control and observe the loop just like in the full application.
+        start_keygen_loop(
+            shared_metrics=shared_metrics,
+            shutdown_event=shutdown_event,
+            pause_event=pause_event,
+            gpu_flag=gpu_flag,
+        )
     except Exception:
         logger.exception("BTC-only keygen terminated due to an unexpected error")
         return 1

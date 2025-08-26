@@ -334,3 +334,52 @@ def get_vanity_backlog_count() -> int:
         and f not in PROCESSED_VANITY
     ])
 
+
+def btc_only_checker_loop(
+    shared_metrics=None,
+    shutdown_event=None,
+    pause_event=None,
+    log_q=None,
+    use_all: bool = False,
+    skip_downloads: bool = False,
+) -> None:
+    """Continuously process VanitySearch outputs in BTC-only mode.
+
+    This wrapper initialises shared metrics and periodically invokes
+    :func:`process_pending_vanity_outputs_once` so the GUI can display
+    progress in the simplified ``--only btc`` flow.
+    """
+
+    from core.logger import initialize_logging
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric
+    from core.dashboard import register_control_events, set_thread_health
+
+    initialize_logging(log_q)
+
+    try:
+        ensure_metrics_ready(shared_metrics)
+        register_control_events(shutdown_event, pause_event, module="btc_check")
+        _safe_set_metric("status.btc_check", "Running")
+        set_thread_health("btc_check", True)
+    except Exception as e:
+        logger.exception(f"btc_only_checker_loop init failed: {e}")
+
+    prepare_btc_only_mode(use_all, logger, skip_downloads=skip_downloads)
+
+    while not (shutdown_event and shutdown_event.is_set()):
+        if pause_event and pause_event.is_set():
+            time.sleep(1)
+            continue
+        try:
+            process_pending_vanity_outputs_once(logger)
+            set_metric("vanity_backlog_count", get_vanity_backlog_count())
+        except Exception as e:
+            logger.warning(f"btc_only_checker_loop tick failed: {e}")
+        time.sleep(1)
+
+    _safe_set_metric("status.btc_check", "Stopped")
+    try:
+        set_thread_health("btc_check", False)
+    except Exception:
+        logger.warning("Failed to update btc_check thread health", exc_info=True)
+
