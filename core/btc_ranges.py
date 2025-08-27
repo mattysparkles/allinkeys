@@ -2,7 +2,6 @@
 
 import os
 import gzip
-import requests
 from typing import Iterable, List, Tuple
 
 from config.settings import (
@@ -13,13 +12,13 @@ from config.settings import (
     BTC_RANGE_FILE_PATTERN,
 )
 from core.dashboard import set_metric
+from utils.network_utils import get_with_https_fallback
 
 
 def download_with_progress(url: str, dest_path: str, logger) -> None:
     """Stream HTTP download with progress metrics."""
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    r = requests.get(url, stream=True, timeout=30)
-    r.raise_for_status()
+    r = get_with_https_fallback(url, stream=True, timeout=30)
     total = int(r.headers.get("Content-Length", 0))
     if total:
         set_metric("btc_ranges_download_size_bytes", total)
