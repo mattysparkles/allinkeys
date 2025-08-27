@@ -4,12 +4,12 @@ import os
 import gzip
 import shutil
 import csv
-import requests
 from datetime import datetime
 from glob import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from utils.file_utils import find_latest_funded_file
+from utils.network_utils import get_with_https_fallback
 
 from config.settings import (
     COIN_DOWNLOAD_URLS,
@@ -152,8 +152,7 @@ def _download_single_coin(coin: str, url: str) -> None:
         )
         gz_path = output_full + ".gz"
 
-        r = requests.get(url, stream=True, timeout=30)
-        r.raise_for_status()
+        r = get_with_https_fallback(url, stream=True, timeout=30)
         with open(gz_path, "wb") as f:
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
