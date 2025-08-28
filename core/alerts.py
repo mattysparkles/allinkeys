@@ -55,6 +55,7 @@ ALERT_FLAGS = {
 
 # Mapping of alert channels for metrics tracking
 ALERT_CHANNELS = [
+    "audio",
     "email",
     "telegram",
     "popup",
@@ -91,6 +92,40 @@ def _start_audio_worker():
     if audio_thread is None or not audio_thread.is_alive():
         audio_thread = threading.Thread(target=_audio_worker, daemon=True)
         audio_thread.start()
+
+
+def _show_desktop_popup(alert_type: str):
+    """Display the desktop popup without blocking other alerts."""
+    try:
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        win = tk.Toplevel(root)
+        win.title(alert_type)
+        win.configure(bg=ALERT_POPUP_COLOR_1)
+        win.geometry("600x250")
+        lbl = tk.Label(
+            win,
+            text=ALERT_PHRASE,
+            fg="white",
+            bg=ALERT_POPUP_COLOR_1,
+            font=("Helvetica", 16, "bold"),
+            wraplength=560,
+            justify="center",
+        )
+        lbl.pack(expand=True, fill="both", padx=10, pady=10)
+
+        def flash():
+            new = ALERT_POPUP_COLOR_2 if win["bg"] == ALERT_POPUP_COLOR_1 else ALERT_POPUP_COLOR_1
+            win.configure(bg=new)
+            lbl.configure(bg=new)
+            win.after(500, flash)
+
+        flash()
+        root.mainloop()
+    except Exception as exc:
+        log_message(f"❌ Desktop alert error: {exc}", "ERROR")
 
 
 # ------------------------- PGP SUPPORT -------------------------
@@ -225,32 +260,7 @@ def alert_match(match_data, test_mode=False):
     # 🖥️ Desktop Window Alert
     if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT"):
         try:
-            import tkinter as tk
-            root = tk.Tk()
-            root.withdraw()
-            win = tk.Toplevel(root)
-            win.title(alert_type)
-            win.configure(bg=ALERT_POPUP_COLOR_1)
-            win.geometry("600x250")
-            lbl = tk.Label(
-                win,
-                text=ALERT_PHRASE,
-                fg="white",
-                bg=ALERT_POPUP_COLOR_1,
-                font=("Helvetica", 16, "bold"),
-                wraplength=560,
-                justify="center",
-            )
-            lbl.pack(expand=True, fill="both", padx=10, pady=10)
-
-            def flash():
-                new = ALERT_POPUP_COLOR_2 if win["bg"] == ALERT_POPUP_COLOR_1 else ALERT_POPUP_COLOR_1
-                win.configure(bg=new)
-                lbl.configure(bg=new)
-                win.after(500, flash)
-
-            flash()
-            root.mainloop()
+            threading.Thread(target=_show_desktop_popup, args=(alert_type,), daemon=True).start()
             log_message("✅ Desktop popup displayed.", "INFO")
             _safe_inc_metric("alerts_sent_today.popup")
             _safe_inc_metric("alerts_sent_lifetime.popup")
@@ -263,8 +273,8 @@ def alert_match(match_data, test_mode=False):
         if os.path.exists(ALERT_SOUND_FILE):
             _start_audio_worker()
             audio_queue.put(ALERT_SOUND_FILE)
-            _safe_inc_metric("alerts_sent_today.popup")
-            _safe_inc_metric("alerts_sent_lifetime.popup")
+            _safe_inc_metric("alerts_sent_today.audio")
+            _safe_inc_metric("alerts_sent_lifetime.audio")
         else:
             log_message(f"❌ Sound file not found: {ALERT_SOUND_FILE}", "ERROR")
 
