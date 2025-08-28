@@ -79,11 +79,15 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
     """Prepare BTC-only checking mode."""
     global USE_ALL, FUNDed_SET, BOUNDARIES
     USE_ALL = use_all
+
+    funded_fp: Optional[str] = None
+
     def _iter_daily():
-        fp = find_latest_funded_file("btc")
-        if not fp:
+        nonlocal funded_fp
+        funded_fp = find_latest_funded_file("btc")
+        if not funded_fp:
             return []
-        with open(fp, "r", encoding="utf-8") as f:
+        with open(funded_fp, "r", encoding="utf-8") as f:
             for line in f:
                 addr = line.strip()
                 if addr:
@@ -99,6 +103,12 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
             daily_iter = list(_iter_daily())
         else:
             daily_iter = list(_iter_daily())
+        if funded_fp:
+            logger.info(
+                f"Using funded list {os.path.basename(funded_fp)} with {len(daily_iter)} addresses"
+            )
+        else:
+            logger.warning("No funded BTC address file found")
         by_range = {i: [] for i in range(len(BOUNDARIES))}
         for addr in daily_iter:
             idx = route_address_to_range(addr, BOUNDARIES)
@@ -113,7 +123,12 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
             from core.downloader import download_and_compare_address_lists
             download_and_compare_address_lists()
         FUNDed_SET = set(_iter_daily())
-        logger.info(f"Loaded {len(FUNDed_SET)} funded BTC addresses")
+        if funded_fp:
+            logger.info(
+                f"Using funded list {os.path.basename(funded_fp)} with {len(FUNDed_SET)} addresses"
+            )
+        else:
+            logger.warning("No funded BTC address file found")
 
 
 def _extract_pubaddr_blocks(path: str, logger) -> Tuple[List[Tuple[str, int, int]], List[str]]:
@@ -213,7 +228,9 @@ def _is_file_stable(path: str, logger) -> bool:
         return False
 
 
-def check_vanity_file_against_ranges(sorted_vanity_txt: str, all_btc_dir: str, logger) -> Tuple[int, int]:
+def check_vanity_file_against_ranges(
+    sorted_vanity_txt: str, all_btc_dir: str, logger
+) -> Tuple[int, int, List[Tuple[int, str]]]:
     """
     Open an already-sorted vanity text file and check addresses against funded ranges/lists.
     Caller guarantees the file exists and is non-empty. This function should *not* do path existence checks,
@@ -221,10 +238,11 @@ def check_vanity_file_against_ranges(sorted_vanity_txt: str, all_btc_dir: str, l
     """
     rows = 0
     matches = 0
+    matched_lines: List[Tuple[int, str]] = []
 
     try:
         with open(sorted_vanity_txt, "r", encoding="utf-8") as f:
-            for line in f:
+            for line_num, line in enumerate(f, 1):
                 addr = line.strip()
                 if not addr:
                     continue
@@ -232,23 +250,35 @@ def check_vanity_file_against_ranges(sorted_vanity_txt: str, all_btc_dir: str, l
                 matched = False
                 if USE_ALL:
                     idx = route_address_to_range(addr, BOUNDARIES)
-                    range_file = os.path.join(all_btc_dir, BTC_RANGE_FILE_PATTERN.format(idx))
+                    range_file = os.path.join(
+                        all_btc_dir, BTC_RANGE_FILE_PATTERN.format(idx)
+                    )
                     matched = _binary_search_file(range_file, addr)
                 else:
                     matched = addr in FUNDed_SET
                 if matched:
                     matches += 1
+                    matched_lines.append((line_num, addr))
                     try:
                         from core.alerts import alert_match
-                        alert_match({"coin": "BTC", "address": addr, "csv_file": os.path.basename(sorted_vanity_txt)})
+
+                        alert_match(
+                            {
+                                "coin": "BTC",
+                                "address": addr,
+                                "csv_file": os.path.basename(sorted_vanity_txt),
+                            }
+                        )
                     except Exception as e:
                         logger.warning(f"alert_match failed (non-fatal): {e}")
     except FileNotFoundError:
         # Another process could have rotated/deleted the file—just log and skip.
-        logger.info(f"⏭️  sorted file vanished before reading: {os.path.basename(sorted_vanity_txt)}")
-        return (0, 0)
+        logger.info(
+            f"⏭️  sorted file vanished before reading: {os.path.basename(sorted_vanity_txt)}"
+        )
+        return (0, 0, [])
 
-    return (rows, matches)
+    return (rows, matches, matched_lines)
 
 
 def process_pending_vanity_outputs_once(logger):
@@ -302,7 +332,14 @@ def process_pending_vanity_outputs_once(logger):
             logger.info(f"⏭️  Skipping empty .sorted for {name}")
             continue
 
-        rows, matches = check_vanity_file_against_ranges(sorted_path, ALL_BTC_ADDRESSES_DIR, logger)
+        rows, matches, match_lines = check_vanity_file_against_ranges(
+            sorted_path, ALL_BTC_ADDRESSES_DIR, logger
+        )
+        logger.info(
+            f"{os.path.basename(sorted_path)} was checked, ({rows}) addresses ({matches}) matches found"
+        )
+        for line_no, addr in match_lines:
+            logger.info(f"Line {line_no}: {addr}")
         logger.info(
             json.dumps(
                 {
