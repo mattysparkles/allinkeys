@@ -400,6 +400,8 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
 def resolve_btc_compression(args):
     """Determine whether BTC addresses should be compressed."""
+    if getattr(args, "puzzle", None) is not None:
+        return True
     if getattr(args, "compressed", False):
         return True
     if getattr(args, "uncompressed", False):
@@ -407,13 +409,51 @@ def resolve_btc_compression(args):
     return getattr(args, "addr_format", "compressed") == "compressed"
 
 
-def run_only_mode(args):
-    """Dispatch ``--only`` flows and handle legacy ``-only`` alias."""
+COIN_OPTIONS = ["btc", "bch", "ltc", "doge", "dash", "rvn", "pep"]
+
+
+def _parse_only(value: str) -> list[str]:
+    coins = [c.strip().lower() for c in value.split(",") if c.strip()]
+    for c in coins:
+        if c not in COIN_OPTIONS:
+            raise argparse.ArgumentTypeError(f"Unknown coin option: {c}")
+    return coins
+
+
+def handle_deprecated_flags(args):
     if getattr(args, "only_legacy", None) and not getattr(args, "only", None):
         args.only = args.only_legacy
         print("Warning: '-only' is deprecated; use '--only' instead.", file=sys.stderr)
+    if getattr(args, "all_legacy", False) and not getattr(args, "all", False):
+        args.all = True
+        print("Warning: '-all' is deprecated; use '--all' instead.", file=sys.stderr)
+    if getattr(args, "funded_legacy", False) and not getattr(args, "funded", False):
+        args.funded = True
+        print("Warning: '-funded' is deprecated; use '--funded' instead.", file=sys.stderr)
 
-    if getattr(args, "only", None) == "btc":
+
+def handle_puzzle_mode(args):
+    if getattr(args, "puzzle", None) is None:
+        return
+    from utils.puzzle import get_puzzle_info
+    info = get_puzzle_info(args.puzzle)
+    settings.PUZZLE_MODE = True
+    settings.PUZZLE_START = info["start"]
+    settings.PUZZLE_END = info["end"]
+    if getattr(args, "every", False):
+        settings.VANITY_PATTERN = "1**"
+    else:
+        settings.VANITY_PATTERN = info["address"]
+    args.compressed = True
+
+
+def run_only_mode(args):
+    """Dispatch flows when ``--only`` is provided."""
+    coins = getattr(args, "only", None)
+    if not coins:
+        return None
+
+    if coins == ["btc"]:
         compressed = resolve_btc_compression(args)
         os.makedirs(LOG_DIR, exist_ok=True)
         start_listener()
@@ -477,8 +517,10 @@ def run_only_mode(args):
                     proc.terminate()
                     proc.join()
             stop_listener()
+        return 0
 
-    return None
+    print(f"Warning: altcoin-only mode not fully implemented for: {', '.join(coins)}", file=sys.stderr)
+    return 1
 
 
 def run_allinkeys(args):
@@ -600,16 +642,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
     parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
-    parser.add_argument("--only", choices=["btc"], dest="only", help="Restrict to a single coin flow.")
-    parser.add_argument("-only", choices=["btc"], dest="only_legacy", help=argparse.SUPPRESS)
+    parser.add_argument("--only", type=_parse_only, dest="only", help="Restrict to coin flow(s). Comma-separated list.")
+    parser.add_argument("-only", type=_parse_only, dest="only_legacy", help=argparse.SUPPRESS)
+    parser.add_argument("--puzzle", type=int, help="Run BTC puzzle mode for given puzzle number")
+    puzzle_group = parser.add_mutually_exclusive_group()
+    puzzle_group.add_argument("--every", action="store_true", help="Puzzle mode: keep generic '1**' prefix")
+    puzzle_group.add_argument("--target", action="store_true", help="Puzzle mode: target puzzle address (default)")
     parser.add_argument("--addr-format", choices=["compressed", "uncompressed"], default="compressed",
                         help="BTC-only address format (default: compressed)")
     fmt_group = parser.add_mutually_exclusive_group()
     fmt_group.add_argument("--compressed", action="store_true", help="BTC-only: force compressed addresses")
     fmt_group.add_argument("--uncompressed", action="store_true", help="BTC-only: force uncompressed addresses")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("-all", action="store_true", help="Use 'all BTC addresses ever used' range mode")
-    mode.add_argument("-funded", action="store_true", help="Use daily funded BTC list")
+    mode.add_argument("--all", action="store_true", help="Use 'all BTC addresses ever used' range mode")
+    mode.add_argument("--funded", action="store_true", help="Use daily funded BTC list")
+    mode.add_argument("-all", dest="all_legacy", action="store_true", help=argparse.SUPPRESS)
+    mode.add_argument("-funded", dest="funded_legacy", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
@@ -617,6 +665,8 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point used by ``__main__`` and tests."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    handle_deprecated_flags(args)
+    handle_puzzle_mode(args)
     code = run_only_mode(args)
     if code is not None:
         return code

@@ -1,5 +1,7 @@
 import argparse
 from unittest.mock import patch
+import argparse
+from unittest.mock import patch
 import pathlib
 import sys
 import types
@@ -54,13 +56,18 @@ def _make_args(**kwargs):
         enable_bc1=False,
         all=False,
         funded=False,
+        all_legacy=False,
+        funded_legacy=False,
+        puzzle=None,
+        every=False,
+        target=False,
     )
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
 
 
 def test_btc_only_default_compressed():
-    args = _make_args(only='btc')
+    args = _make_args(only=['btc'])
     with patch('core.keygen.run_btc_only') as run_mock:
         main.run_only_mode(args)
         run_mock.assert_called_once()
@@ -68,7 +75,7 @@ def test_btc_only_default_compressed():
 
 
 def test_btc_only_explicit_uncompressed():
-    args = _make_args(only='btc', uncompressed=True)
+    args = _make_args(only=['btc'], uncompressed=True)
     with patch('core.keygen.run_btc_only') as run_mock:
         main.run_only_mode(args)
         run_mock.assert_called_once()
@@ -76,7 +83,7 @@ def test_btc_only_explicit_uncompressed():
 
 
 def test_btc_only_addr_format_uncompressed():
-    args = _make_args(only='btc', addr_format='uncompressed')
+    args = _make_args(only=['btc'], addr_format='uncompressed')
     with patch('core.keygen.run_btc_only') as run_mock:
         main.run_only_mode(args)
         run_mock.assert_called_once()
@@ -84,8 +91,9 @@ def test_btc_only_addr_format_uncompressed():
 
 
 def test_legacy_only_flag_emits_warning(capsys):
-    args = _make_args(only_legacy='btc')
+    args = _make_args(only_legacy=['btc'])
     with patch('core.keygen.run_btc_only') as run_mock:
+        main.handle_deprecated_flags(args)
         main.run_only_mode(args)
         run_mock.assert_called_once()
         assert run_mock.call_args.kwargs.get('compressed') is True
@@ -95,5 +103,25 @@ def test_legacy_only_flag_emits_warning(capsys):
 def test_parser_accepts_only_and_compressed():
     parser = main.build_parser()
     args = parser.parse_args(["--only", "btc", "--compressed"])
-    assert args.only == "btc"
+    assert args.only == ["btc"]
     assert args.compressed is True
+
+
+def test_parser_accepts_multiple_only():
+    parser = main.build_parser()
+    args = parser.parse_args(["--only", "btc,ltc"])
+    assert args.only == ["btc", "ltc"]
+
+
+def test_deprecated_all_flag_warning(capsys):
+    args = _make_args(all_legacy=True)
+    main.handle_deprecated_flags(args)
+    assert args.all is True
+    assert 'deprecated' in capsys.readouterr().err.lower()
+
+
+def test_deprecated_funded_flag_warning(capsys):
+    args = _make_args(funded_legacy=True)
+    main.handle_deprecated_flags(args)
+    assert args.funded is True
+    assert 'deprecated' in capsys.readouterr().err.lower()
