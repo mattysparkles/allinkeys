@@ -58,7 +58,9 @@ allinkeys/
 ├── utils/
 │   ├── balance_checker.py
 │   ├── file_utils.py
-│   └── pgp_utils.py
+│   ├── network_utils.py
+│   ├── pgp_utils.py
+│   └── puzzle.py
 ├── Downloads/               # Downloaded funded address lists
 ├── logs/                    # Runtime logs and checkpoints
 ├── output/
@@ -116,11 +118,27 @@ The default run will:
 | `--skip-downloads` | Skip downloading balance files |
 | `--headless` | Run without any GUI components |
 | `--match-test` | Trigger a fake match alert on startup |
-| `--only btc` | Restrict processing to a single coin flow |
+| `--only <coins>` | Restrict processing to coin flow(s); comma-separated list |
 | `--addr-format {compressed,uncompressed}` | BTC-only: choose address format |
 | `--compressed` / `--uncompressed` | BTC-only convenience flags overriding `--addr-format` |
-| `-all` | Use "all BTC addresses ever used" list |
-| `-funded` | Use daily funded BTC list |
+| `--all` | BTC-only: use "all BTC addresses ever used" range mode |
+| `--funded` | BTC-only: use daily funded BTC list |
+| `--puzzle N` | BTC puzzle mode for puzzle number `N` |
+| `--every` | With `--puzzle`: keep generic `1**` prefix |
+| `--target` | With `--puzzle`: target specific puzzle address (default) |
+
+### 🧩 BTC Puzzle Mode
+
+Use the Bitcoin puzzle challenge ranges by supplying `--puzzle` with a puzzle number.
+The generator targets the published address by default (`--target`); use `--every`
+to keep the generic `1**` prefix and search the entire range. Puzzle mode
+automatically enables compressed addresses and is typically paired with
+`--only btc` to run a lightweight search.
+
+```bash
+python main.py --only btc --puzzle 71            # target puzzle 71 address
+python main.py --only btc --puzzle 71 --every    # search full puzzle range
+```
 
 ---
 
