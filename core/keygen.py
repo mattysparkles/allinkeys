@@ -28,6 +28,7 @@ from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
 from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 from core.logger import get_logger
+import config.settings as settings
 
 
 # Runtime trackers
@@ -134,7 +135,21 @@ def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1024000):
 
 
 def generate_random_seed(min_bits=128):
-    """Generate a cryptographically secure random seed."""
+    """Generate a cryptographically secure random seed.
+
+    When puzzle mode is active, seeds are restricted to the configured
+    puzzle range defined by ``settings.PUZZLE_START`` and
+    ``settings.PUZZLE_END``. Otherwise a random seed in
+    ``[2^min_bits, SECP256K1_ORDER)`` is returned.
+    """
+    if getattr(settings, "PUZZLE_MODE", False):
+        start = int(getattr(settings, "PUZZLE_START", "0"), 16)
+        end = int(getattr(settings, "PUZZLE_END", "0"), 16)
+        if end < start:
+            start, end = end, start
+        span = max(1, end - start + 1)
+        return secrets.randbelow(span) + start
+
     min_val = 1 << min_bits
     range_span = SECP256K1_ORDER - min_val
     return secrets.randbelow(range_span) + min_val
