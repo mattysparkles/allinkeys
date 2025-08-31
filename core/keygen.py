@@ -7,6 +7,7 @@ import subprocess
 import threading
 import logging
 import secrets
+import platform
 from datetime import datetime
 from collections import deque
 from config.settings import (
@@ -145,7 +146,12 @@ def generate_random_seed(min_bits=128):
         if puzzle_num is not None:
             from core import puzzle_queue as pq  # depends on SQLite
             chunk_idx = getattr(settings, "PUZZLE_CHUNK_INDEX", None)
-            seed = pq.next_seed(puzzle_num, os.uname().nodename, chunk_idx)
+
+            # ``os.uname`` is unavailable on some platforms (e.g., Windows).
+            # ``platform.node`` provides a portable host identifier which
+            # replicates the ``nodename`` attribute used previously.
+            host_id = platform.node() if hasattr(platform, "node") else "unknown"
+            seed = pq.next_seed(puzzle_num, host_id, chunk_idx)
             if seed is None:
                 raise RuntimeError(f"No remaining puzzle-{puzzle_num} chunks to process")
             return seed
