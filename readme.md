@@ -126,6 +126,7 @@ The default run will:
 | `--puzzle N` | BTC puzzle mode for puzzle number `N` |
 | `--every` | With `--puzzle`: keep generic `1**` prefix |
 | `--target` | With `--puzzle`: target specific puzzle address (default) |
+| `--chunk INDEX` | With `--puzzle`: start at chunk `INDEX` (0-based) |
 
 ### 🧩 BTC Puzzle Mode
 
@@ -135,9 +136,16 @@ to keep the generic `1**` prefix and search the entire range. Puzzle mode
 automatically enables compressed addresses and is typically paired with
 `--only btc` to run a lightweight search.
 
+Puzzle ranges are divided into ~1M-key chunks and tracked in a SQLite database
+(`logs/work_queue.db`) so multiple workers do not overlap. Progress within a
+chunk is saved to `logs/puzzleN_checkpoint.json`, enabling restart after
+interruptions. Pass `--chunk` with a zero-based index to claim a specific
+starting chunk.
+
 ```bash
 python main.py --only btc --puzzle 71            # target puzzle 71 address
 python main.py --only btc --puzzle 71 --every    # search full puzzle range
+python main.py --only btc --puzzle 71 --chunk 5  # resume at chunk 5
 ```
 
 ---
