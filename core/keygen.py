@@ -135,14 +135,21 @@ def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1024000):
 
 
 def generate_random_seed(min_bits=128):
-    """Generate a cryptographically secure random seed.
+    """Generate the next seed for VanitySearch.
 
-    When puzzle mode is active, seeds are restricted to the configured
-    puzzle range defined by ``settings.PUZZLE_START`` and
-    ``settings.PUZZLE_END``. Otherwise a random seed in
-    ``[2^min_bits, SECP256K1_ORDER)`` is returned.
+    Puzzle-71 mode uses deterministic chunking backed by SQLite.
+    Other modes keep the previous random behaviour.
     """
     if getattr(settings, "PUZZLE_MODE", False):
+        puzzle_num = getattr(settings, "PUZZLE_NUMBER", None)
+        if puzzle_num is not None:
+            from core import puzzle_queue as pq  # depends on SQLite
+            chunk_idx = getattr(settings, "PUZZLE_CHUNK_INDEX", None)
+            seed = pq.next_seed(puzzle_num, os.uname().nodename, chunk_idx)
+            if seed is None:
+                raise RuntimeError(f"No remaining puzzle-{puzzle_num} chunks to process")
+            return seed
+        # Fallback to random within start/end if puzzle number is missing
         start = int(getattr(settings, "PUZZLE_START", "0"), 16)
         end = int(getattr(settings, "PUZZLE_END", "0"), 16)
         if end < start:
@@ -276,7 +283,10 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     register_control_events(shutdown_event, pause_event, module="keygen")
     if not os.path.exists(VANITY_OUTPUT_DIR):
         os.makedirs(VANITY_OUTPUT_DIR)
-
+    if getattr(settings, "PUZZLE_MODE", False) and getattr(settings, "PUZZLE_NUMBER", None) is not None:
+        # Prepare SQLite queue with deterministic ranges
+        from core import puzzle_queue as pq
+        pq.init_work_queue()
     checkpoint = load_checkpoint()
     if checkpoint:
         KEYGEN_STATE["batch_id"] = checkpoint.get("batch_id", 0)
