@@ -438,8 +438,10 @@ def handle_puzzle_mode(args):
     from utils.puzzle import get_puzzle_info
     info = get_puzzle_info(args.puzzle)
     settings.PUZZLE_MODE = True
+    settings.PUZZLE_NUMBER = args.puzzle
     settings.PUZZLE_START = info["start"]
     settings.PUZZLE_END = info["end"]
+    settings.PUZZLE_CHUNK_INDEX = getattr(args, "chunk", None)
     if getattr(args, "every", False):
         settings.VANITY_PATTERN = "1**"
     else:
@@ -645,6 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--only", type=_parse_only, dest="only", help="Restrict to coin flow(s). Comma-separated list.")
     parser.add_argument("-only", type=_parse_only, dest="only_legacy", help=argparse.SUPPRESS)
     parser.add_argument("--puzzle", type=int, help="Run BTC puzzle mode for given puzzle number")
+    parser.add_argument("--chunk", type=int, help="Puzzle mode: claim specific chunk index")
     puzzle_group = parser.add_mutually_exclusive_group()
     puzzle_group.add_argument("--every", action="store_true", help="Puzzle mode: keep generic '1**' prefix")
     puzzle_group.add_argument("--target", action="store_true", help="Puzzle mode: target puzzle address (default)")

@@ -1,5 +1,28 @@
 import types
 import argparse
+import sys
+
+# Stub optional environment dependencies and heavy modules
+sys.modules.setdefault('dotenv', types.SimpleNamespace(load_dotenv=lambda *a, **k: None))
+sys.modules.setdefault(
+    'psutil',
+    types.SimpleNamespace(
+        cpu_percent=lambda: 0,
+        virtual_memory=lambda: types.SimpleNamespace(percent=0, used=0, total=0),
+        disk_usage=lambda p: types.SimpleNamespace(free=0),
+    ),
+)
+sys.modules.setdefault('pyopencl', types.SimpleNamespace(get_platforms=lambda: [], device_type=types.SimpleNamespace(GPU=0)))
+sys.modules.setdefault('core.altcoin_derive', types.SimpleNamespace(start_altcoin_conversion_process=lambda *a, **k: None))
+sys.modules.setdefault('core.checkpoint', types.SimpleNamespace(load_keygen_checkpoint=lambda *a, **k: None, save_keygen_checkpoint=lambda *a, **k: None))
+sys.modules.setdefault('core.downloader', types.SimpleNamespace(download_and_compare_address_lists=lambda *a, **k: None, generate_test_csv=lambda *a, **k: None))
+sys.modules.setdefault('core.csv_checker', types.SimpleNamespace(check_csvs_day_one=lambda *a, **k: None, check_csvs=lambda *a, **k: None))
+sys.modules.setdefault('core.alerts', types.SimpleNamespace(trigger_startup_alerts=lambda *a, **k: None, alert_match=lambda *a, **k: None))
+sys.modules.setdefault('core.dashboard', types.SimpleNamespace(update_dashboard_stat=lambda *a, **k: None, _default_metrics={}, init_shared_metrics=lambda *a, **k: None, init_dashboard_manager=lambda *a, **k: None, get_current_metrics=lambda *a, **k: {}, get_metric=lambda *a, **k: None, set_metric=lambda *a, **k: None, warn_rate_limited=lambda *a, **k: None))
+sys.modules.setdefault('ui.dashboard_gui', types.SimpleNamespace(start_dashboard=lambda *a, **k: None))
+sys.modules.setdefault('core.gpu_selector', types.SimpleNamespace(assign_gpu_roles=lambda *a, **k: None, get_vanitysearch_gpu_ids=lambda: [], get_altcoin_gpu_ids=lambda: [], get_gpu_assignments=lambda: {}))
+sys.modules.setdefault('core.keygen', types.SimpleNamespace(run_btc_only=lambda *a, **k: None))
+sys.modules.setdefault('core.btc_only_checker', types.SimpleNamespace(btc_only_checker_loop=lambda *a, **k: None))
 
 from utils.puzzle import get_puzzle_info
 import main

@@ -9,6 +9,16 @@ import types
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 sys.modules.setdefault('pyopencl', types.SimpleNamespace(get_platforms=lambda: [], device_type=types.SimpleNamespace(GPU=0)))
 sys.modules.setdefault('core.altcoin_derive', types.SimpleNamespace(start_altcoin_conversion_process=lambda *a, **k: None))
+# Stub optional environment dependencies
+sys.modules.setdefault('dotenv', types.SimpleNamespace(load_dotenv=lambda *a, **k: None))
+sys.modules.setdefault(
+    'psutil',
+    types.SimpleNamespace(
+        cpu_percent=lambda: 0,
+        virtual_memory=lambda: types.SimpleNamespace(percent=0, used=0, total=0),
+        disk_usage=lambda p: types.SimpleNamespace(free=0),
+    ),
+)
 # Stub out heavy modules so ``import main`` does not require optional deps
 sys.modules.setdefault('core.checkpoint', types.SimpleNamespace(load_keygen_checkpoint=lambda *a, **k: None,
                                                                save_keygen_checkpoint=lambda *a, **k: None))
