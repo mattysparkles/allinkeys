@@ -21,14 +21,12 @@ import struct
 import random
 from typing import Dict, List, Optional
 
-import base58
-from ecdsa import SECP256k1, SigningKey
-from eth_hash.auto import keccak
-from eth_utils import to_checksum_address
+from ecdsa import SECP256k1
 
 from core.vanity_io import RollingAtomicWriter
 from config import settings
-from .deriv_paths import COIN_INFO, SUPPORTED_COINS, resolve_paths
+from .deriv_paths import SUPPORTED_COINS, resolve_paths
+from .encoders_mnemonic import encode_privkey, privkey_to_pubkey
 
 # ---------------------------------------------------------------------------
 # Word list helpers
@@ -108,52 +106,6 @@ def derive_private_key(seed: bytes, path: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Encoding helpers
-# ---------------------------------------------------------------------------
-
-
-def privkey_to_pubkey(priv: bytes, compressed: bool = True) -> bytes:
-    """Return the SEC1 encoded public key for ``priv``."""
-    sk = SigningKey.from_string(priv, curve=SECP256k1)
-    vk = sk.get_verifying_key()
-    if compressed:
-        prefix = b"\x02" if vk.pubkey.point.y() % 2 == 0 else b"\x03"
-        return prefix + vk.to_string()[:32]
-    else:
-        return b"\x04" + vk.to_string()
-
-
-def pubkey_to_p2pkh(pub: bytes, version: int = 0x00) -> str:
-    """Convert ``pub`` to a base58 P2PKH address."""
-    h160 = hashlib.new("ripemd160", hashlib.sha256(pub).digest()).digest()
-    payload = bytes([version]) + h160
-    checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
-    return base58.b58encode(payload + checksum).decode()
-
-
-def priv_to_wif(priv: bytes, version: int = 0x80, compressed: bool = True) -> str:
-    """Encode ``priv`` into Wallet Import Format."""
-    payload = bytes([version]) + priv + (b"\x01" if compressed else b"")
-    checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
-    return base58.b58encode(payload + checksum).decode()
-
-
-def priv_to_btc(priv: bytes) -> tuple[str, str]:
-    info = COIN_INFO["btc"]
-    pub = privkey_to_pubkey(priv)
-    addr = pubkey_to_p2pkh(pub, info.p2pkh_version)
-    wif = priv_to_wif(priv, info.wif_version, True)
-    return addr, wif
-
-
-def priv_to_eth(priv: bytes) -> str:
-    sk = SigningKey.from_string(priv, curve=SECP256k1)
-    pub = sk.get_verifying_key().to_string()
-    addr = keccak(pub)[-20:]
-    return to_checksum_address("0x" + addr.hex())
-
-
-# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -200,15 +152,7 @@ def run_mnemonic_mode(args) -> None:
 
     for coin in coins:
         priv = derive_private_key(seed, paths[coin])
-        if coin == "btc":
-            addr, wif = priv_to_btc(priv)
-        elif coin == "eth":
-            addr = priv_to_eth(priv)
-            wif = priv.hex()
-        else:
-            # Future coins can plug in proper encoders here
-            addr = priv.hex()
-            wif = priv.hex()
+        addr, wif = encode_privkey(coin, priv)
         line = (
             f"{timestamp} | {mnemonic} | {args.passphrase or '-'} | coin={coin.upper()} | "
             f"path={paths[coin]} | addr={addr} | wif={wif} | funded=0"
