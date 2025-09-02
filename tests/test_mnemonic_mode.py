@@ -37,7 +37,8 @@ sys.modules.setdefault(
 sys.modules.setdefault('core.keygen', types.SimpleNamespace(run_btc_only=lambda *a, **k: None))
 sys.modules.setdefault('core.btc_only_checker', types.SimpleNamespace(btc_only_checker_loop=lambda *a, **k: None))
 
-from keygen.mnemonic_mode import mnemonic_to_seed, priv_to_btc, priv_to_eth
+from keygen.mnemonic_mode import mnemonic_to_seed
+from keygen.encoders_mnemonic import encode_privkey, priv_to_btc, priv_to_eth
 from keygen.deriv_paths import resolve_paths
 import main
 
@@ -61,6 +62,40 @@ def test_btc_address_from_privkey():
 def test_eth_address_from_privkey():
     priv = (1).to_bytes(32, "big")
     assert priv_to_eth(priv) == "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"
+
+
+def test_additional_coin_encoders():
+    priv = (1).to_bytes(32, "big")
+    vectors = {
+        "ltc": (
+            "LVuDpNCSSj6pQ7t9Pv6d6sUkLKoqDEVUnJ",
+            "T33ydQRKp4FCW5LCLLUB7deioUMoveiwekdwUwyfRDeGZm76aUjV",
+        ),
+        "bch": (
+            "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH",
+            "KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn",
+        ),
+        "dash": (
+            "XmN7PQYWKn5MJFna5fRYgP6mxT2F7xpekE",
+            "XBHddvWWiMu3nZhhpTXBQWJMmdz5JNKJD85b9fgKAckCT2coW3Y4",
+        ),
+        "doge": (
+            "DFpN6QqFfUm3gKNaxN6tNcab1FArL9cZLE",
+            "QNcdLVw8fHkixm6NNyN6nVwxKek4u7qrioRbQmjxac5TVoTtZuot",
+        ),
+        "pep": (
+            "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+            priv.hex(),
+        ),
+        "rvn": (
+            "RKxTdfmtxtfLDKZBgx6SvNkBtNu9jRYnLh",
+            "KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn",
+        ),
+    }
+    for coin, (addr, wif) in vectors.items():
+        got_addr, got_wif = encode_privkey(coin, priv)
+        assert got_addr == addr
+        assert got_wif == wif
 
 
 def test_resolve_paths_preset_and_override():
