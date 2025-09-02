@@ -2,6 +2,7 @@ import argparse
 import pathlib
 import sys
 import types
+import random
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -37,9 +38,18 @@ sys.modules.setdefault(
 sys.modules.setdefault('core.keygen', types.SimpleNamespace(run_btc_only=lambda *a, **k: None))
 sys.modules.setdefault('core.btc_only_checker', types.SimpleNamespace(btc_only_checker_loop=lambda *a, **k: None))
 
-from keygen.mnemonic_mode import mnemonic_to_seed
+import keygen.mnemonic_mode as mnemonic_mode
+from keygen.mnemonic_mode import (
+    mnemonic_to_seed,
+    generate_mnemonic,
+    load_wordlist,
+    derive_private_key,
+    run_mnemonic_mode,
+)
 from keygen.encoders_mnemonic import encode_privkey, priv_to_btc, priv_to_eth
 from keygen.deriv_paths import resolve_paths
+from config import settings
+from utils import file_utils
 import main
 
 
@@ -111,3 +121,65 @@ def test_cli_parses_mnemonic_flags():
     assert args.num_words == 12
     assert args.coins == ["btc", "eth"]
     assert args.atomic is True
+
+
+def test_run_mnemonic_mode_marks_funded(tmp_path, monkeypatch):
+    """Ensure mnemonic mode flags funded addresses when lists are available."""
+
+    # Redirect output directory to a temporary location for isolation
+    monkeypatch.setattr(settings, "VANITY_TXT_DIR", str(tmp_path))
+
+    # Determine deterministic mnemonic and corresponding BTC address
+    rng_seed = 1234
+    wordlist = load_wordlist(None)
+    rng = random.Random(rng_seed)
+    mnemonic = generate_mnemonic(12, wordlist, rng)
+    seed = mnemonic_to_seed(mnemonic, "")
+    paths = resolve_paths(["btc"])
+    priv = derive_private_key(seed, paths["btc"])
+    addr, _ = encode_privkey("btc", priv)
+
+    # Create a fake funded list containing this address
+    funded_file = tmp_path / "BTC_addresses_test.txt"
+    funded_file.write_text(addr + "\n")
+    monkeypatch.setattr(
+        mnemonic_mode,
+        "find_latest_funded_file",
+        lambda coin, directory=file_utils.DOWNLOADS_DIR, unique=False: str(funded_file)
+        if coin == "btc" else None,
+    )
+
+    # Build argument namespace expected by run_mnemonic_mode
+    args = argparse.Namespace(
+        num_words=12,
+        custom_words_file=None,
+        rng_seed=rng_seed,
+        passphrase="",
+        allcoins=False,
+        coins=["btc"],
+        global_path=None,
+        btc_path=None,
+        eth_path=None,
+        ltc_path=None,
+        bch_path=None,
+        doge_path=None,
+        dash_path=None,
+        rvn_path=None,
+        pep_path=None,
+        atomic=False,
+        coinomi=False,
+        ledger=False,
+        trust=False,
+        trezor=False,
+        mnemonic=True,
+        funded=True,
+        gpu_id=None,
+        threads=1,
+    )
+
+    run_mnemonic_mode(args)
+
+    output_files = list(tmp_path.glob("mnemonic_output_*.txt"))
+    assert len(output_files) == 1
+    contents = output_files[0].read_text()
+    assert "funded=1" in contents

@@ -19,7 +19,7 @@ import hashlib
 import hmac
 import struct
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from ecdsa import SECP256k1
 
@@ -27,6 +27,8 @@ from core.vanity_io import RollingAtomicWriter
 from config import settings
 from .deriv_paths import SUPPORTED_COINS, resolve_paths
 from .encoders_mnemonic import encode_privkey, privkey_to_pubkey
+from gpu.mnemonic_opencl import available_devices, pbkdf2_sha512
+from utils.file_utils import find_latest_funded_file
 
 # ---------------------------------------------------------------------------
 # Word list helpers
@@ -55,6 +57,43 @@ def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
     """Convert BIP-39 mnemonic to seed bytes."""
     salt = ("mnemonic" + passphrase).encode("utf-8")
     return hashlib.pbkdf2_hmac("sha512", mnemonic.encode("utf-8"), salt, 2048)
+
+
+# ---------------------------------------------------------------------------
+# Funded address helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_funded_sets(coins: List[str]) -> Dict[str, Set[str]]:
+    """Load funded address sets for the specified ``coins``.
+
+    The function looks up the most recent funded list for each coin using
+    :func:`utils.file_utils.find_latest_funded_file`.  Missing files are
+    silently ignored and result in an empty set.  Addresses are stored exactly
+    as they appear in the file except for Ethereum addresses which are
+    normalised to lowercase to match the encoder behaviour.
+    """
+
+    funded: Dict[str, Set[str]] = {}
+    for coin in coins:
+        funded[coin] = set()
+        file_path = find_latest_funded_file(coin)
+        if not file_path:
+            continue
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    addr = line.strip()
+                    if not addr:
+                        continue
+                    if coin == "eth":
+                        addr = addr.lower()
+                    funded[coin].add(addr)
+        except Exception:
+            # Missing or unreadable files simply result in an empty set which is
+            # treated as "no funded addresses" for that coin.
+            continue
+    return funded
 
 
 # ---------------------------------------------------------------------------
@@ -146,16 +185,29 @@ def run_mnemonic_mode(args) -> None:
         prefix="mnemonic_output",
     )
 
+    # Load funded address data if requested.  Missing files simply yield empty
+    # sets so the rest of the pipeline can continue unhindered.
+    funded_sets = _load_funded_sets(coins) if getattr(args, "funded", False) else {c: set() for c in coins}
+
+    # GPU acceleration is optional; we only attempt to use it when a specific
+    # device is requested and at least one OpenCL device is present.
+    gpu_devices = available_devices()
+
     mnemonic = generate_mnemonic(num_words, wordlist, rng)
-    seed = mnemonic_to_seed(mnemonic, args.passphrase)
+    if gpu_devices and getattr(args, "gpu_id", None) is not None:
+        seed = pbkdf2_sha512(mnemonic, args.passphrase, device_id=args.gpu_id)
+    else:
+        seed = mnemonic_to_seed(mnemonic, args.passphrase)
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%S")
 
     for coin in coins:
         priv = derive_private_key(seed, paths[coin])
         addr, wif = encode_privkey(coin, priv)
+        normalized = addr.lower() if coin == "eth" else addr
+        funded_flag = 1 if normalized in funded_sets.get(coin, set()) else 0
         line = (
             f"{timestamp} | {mnemonic} | {args.passphrase or '-'} | coin={coin.upper()} | "
-            f"path={paths[coin]} | addr={addr} | wif={wif} | funded=0"
+            f"path={paths[coin]} | addr={addr} | wif={wif} | funded={funded_flag}"
         )
         writer.write_line(line)
     writer.close()
