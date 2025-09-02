@@ -175,6 +175,7 @@ def test_run_mnemonic_mode_marks_funded(tmp_path, monkeypatch):
         funded=True,
         gpu_id=None,
         threads=1,
+        iterations=1,
     )
 
     run_mnemonic_mode(args)
