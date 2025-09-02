@@ -409,7 +409,7 @@ def resolve_btc_compression(args):
     return getattr(args, "addr_format", "compressed") == "compressed"
 
 
-COIN_OPTIONS = ["btc", "bch", "ltc", "doge", "dash", "rvn", "pep"]
+COIN_OPTIONS = ["btc", "bch", "ltc", "doge", "dash", "rvn", "pep", "eth"]
 
 
 def _parse_only(value: str) -> list[str]:
@@ -661,6 +661,41 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--funded", action="store_true", help="Use daily funded BTC list")
     mode.add_argument("-all", dest="all_legacy", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("-funded", dest="funded_legacy", action="store_true", help=argparse.SUPPRESS)
+
+    # ------------------------------------------------------------------
+    # Mnemonic mode flags
+    # ------------------------------------------------------------------
+    parser.add_argument("--mnemonic", action="store_true", help="Enable mnemonic generation mode")
+    for i in range(3, 26):
+        parser.add_argument(
+            f"--{i}words",
+            dest="num_words",
+            action="store_const",
+            const=i,
+            help=f"Generate {i}-word mnemonics",
+        )
+
+    parser.add_argument("--bip39", action="store_true", help="Use BIP39 English wordlist (default)")
+    parser.add_argument("--custom-words-file", help="Path to custom word list for mnemonic generation")
+    parser.add_argument("--coins", type=_parse_only, help="Comma separated list of coins to derive")
+    parser.add_argument("--allcoins", action="store_true", help="Derive all supported coins")
+    parser.add_argument("--atomic", action="store_true", help="Use Atomic wallet derivation paths")
+    parser.add_argument("--coinomi", action="store_true", help="Use Coinomi wallet paths")
+    parser.add_argument("--ledger", action="store_true", help="Use Ledger wallet paths")
+    parser.add_argument("--trust", action="store_true", help="Use Trust wallet paths")
+    parser.add_argument("--trezor", action="store_true", help="Use Trezor wallet paths")
+    parser.add_argument("--path", dest="global_path", help="Custom derivation path for all coins")
+    for _coin in ["btc", "bch", "ltc", "eth", "dash", "doge", "pep", "rvn"]:
+        parser.add_argument(f"--{_coin}-path", dest=f"{_coin}_path", help=f"Custom derivation path for {_coin.upper()}")
+    parser.add_argument("--gpu", action="store_true", help="Enable OpenCL acceleration if available")
+    parser.add_argument("--gpu-id", type=int, help="Select specific GPU device for mnemonic mode")
+    parser.add_argument("--no-gpu", action="store_true", help="Force CPU implementation")
+    parser.add_argument("--rng-seed", type=int, help="Deterministic RNG seed for mnemonics")
+    parser.add_argument("--passphrase", default="", help="Optional BIP39 passphrase")
+    parser.add_argument("--rate-limit", type=int, help="Throttle derivations per second")
+    parser.add_argument("--batch-size", type=int, default=1, help="Mnemonic mode batch size")
+    parser.add_argument("--threads", type=int, default=1, help="CPU threads for mnemonic mode")
+    parser.add_argument("--progress-interval", type=int, default=10, help="Progress update interval")
     return parser
 
 
@@ -669,6 +704,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     handle_deprecated_flags(args)
+    if getattr(args, "mnemonic", False):
+        # Lazy import to keep startup fast for other modes
+        from keygen.mnemonic_mode import run_mnemonic_mode
+
+        run_mnemonic_mode(args)
+        return 0
     handle_puzzle_mode(args)
     code = run_only_mode(args)
     if code is not None:
