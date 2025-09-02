@@ -148,6 +148,28 @@ python main.py --only btc --puzzle 71 --every    # search full puzzle range
 python main.py --only btc --puzzle 71 --chunk 5  # resume at chunk 5
 ```
 
+### 🧠 Mnemonic Mode
+
+AllInKeys can also generate BIP‑39 mnemonics and derive keys directly
+without running VanitySearch.  The mode is enabled with `--mnemonic` and
+produces VanitySearch‑style rolling output files.
+
+Example invocations:
+
+```bash
+python main.py --mnemonic --12words                          # 12‑word mnemonic → BTC address
+python main.py --mnemonic --24words --coins btc,eth --atomic  # BTC + ETH using Atomic paths
+```
+
+Additional options mirror the specification:
+
+- `--custom-words-file <path>` use a custom word list
+- `--coins btc,eth` or `--allcoins` choose which coins to derive
+- `--atomic`, `--ledger`, `--trezor`, … wallet path presets
+- `--path`, `--btc-path`, `--eth-path` supply explicit derivation paths
+- `--rng-seed <n>` deterministic mnemonic generation for testing
+- `--gpu` / `--no-gpu` toggle OpenCL acceleration (falls back to CPU)
+
 ---
 
 ## 🧪 Features by Module
