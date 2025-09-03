@@ -30,6 +30,8 @@ MATCHES_DIR = os.path.join(BASE_DIR, "matches")
 # VanitySearch text outputs
 VANITY_TXT_DIR = os.path.join(BASE_DIR, "vanity_output")
 VANITY_OUTPUT_DIR = VANITY_TXT_DIR  # legacy alias
+# Mnemonic mode text outputs
+MNEMONIC_TXT_DIR = os.path.join(BASE_DIR, "mnemonic_output")
 # Local audio clips for alerts
 SOUND_CLIPS_DIR = os.path.join(BASE_DIR, "alerts", "sounds")
 CHECKPOINT_PATH = os.path.join(LOG_DIR, "restore_checkpoint.json")
@@ -491,6 +493,8 @@ STATS_TO_DISPLAY = {
     "matches_found_lifetime": SHOW_MATCHES_LIFETIME,
     "keys_generated_today": SHOW_KEYS_GENERATED_TODAY,
     "keys_generated_lifetime": SHOW_KEYS_GENERATED_LIFETIME,
+    "mnemonics_generated_today": True,
+    "mnemonics_generated_lifetime": True,
     "vanity_progress_percent": SHOW_KEYS_PER_SEC,
     "csv_created_today": SHOW_CSV_CREATED_TODAY,
     "csv_created_lifetime": SHOW_CSV_CREATED_LIFETIME,
@@ -550,6 +554,8 @@ METRICS_LABEL_MAP = {
     "matches_found_lifetime": "Matches Lifetime",
     "keys_generated_today": "Keys Generated Today",
     "keys_generated_lifetime": "Keys Generated Lifetime",
+    "mnemonics_generated_today": "Mnemonics Generated Today",
+    "mnemonics_generated_lifetime": "Mnemonics Generated Lifetime",
     "vanity_progress_percent": "Keygen Progress %",
     "addresses_checked_today": "Addresses Checked Today",
     "addresses_checked_lifetime": "Addresses Checked Lifetime",
