@@ -55,6 +55,7 @@ class DashboardGUI:
         self.master.title("ALLINKEYS Live Dashboard")
         self.metrics = {}
         self.prev_values = {}
+        self.prev_numeric = {}
         self.checkbox_vars = {}
         self.module_states = {}
         self.module_buttons = {}
@@ -671,9 +672,17 @@ class DashboardGUI:
                     disp = str(value)
                     if len(disp) > 40:
                         disp = disp[:37] + "..."
-                if self.prev_values.get(key) != disp:
-                    self._flash_widget(widget)
-                self.prev_values[key] = disp
+                if isinstance(value, (int, float)):
+                    prev = self.prev_numeric.get(key)
+                    if prev is not None and value != prev:
+                        color = "#228B22" if value > prev else "#B22222"
+                        self._flash_widget(widget, color=color)
+                    self.prev_numeric[key] = value
+                    self.prev_values[key] = disp
+                else:
+                    if self.prev_values.get(key) != disp:
+                        self._flash_widget(widget)
+                    self.prev_values[key] = disp
                 widget.config(text=disp)
 
     def open_config_file(self):

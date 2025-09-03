@@ -133,6 +133,7 @@ METRIC_ALIASES = {
 METRICS_LIFETIME_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'metrics_lifetime.json'))
 LIFETIME_KEYS = {
     'keys_generated_lifetime',
+    'mnemonics_generated_lifetime',
     'csv_checked_lifetime',
     'csv_rechecked_lifetime',
     'csv_created_lifetime',
@@ -277,6 +278,7 @@ TODAY_METRIC_KEYS = [
     'csv_rechecked_today',
     'csv_created_today',
     'keys_generated_today',
+    'mnemonics_generated_today',
     'derived_addresses_today',
     'altcoin_files_converted',
     'alerts_sent_today',
@@ -345,11 +347,13 @@ def _default_metrics():
         "matched_keys": 0,
         "batches_completed": 0,
         "keys_generated_today": 0,
+        "mnemonics_generated_today": 0,
         "addresses_generated_today": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
             "p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0
         },
         "keys_generated_lifetime": 0,
+        "mnemonics_generated_lifetime": 0,
         "addresses_generated_lifetime": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
             "p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0

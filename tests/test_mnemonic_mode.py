@@ -24,7 +24,7 @@ sys.modules.setdefault('core.checkpoint', types.SimpleNamespace(load_keygen_chec
 sys.modules.setdefault('core.downloader', types.SimpleNamespace(download_and_compare_address_lists=lambda *a, **k: None, generate_test_csv=lambda *a, **k: None))
 sys.modules.setdefault('core.csv_checker', types.SimpleNamespace(check_csvs_day_one=lambda *a, **k: None, check_csvs=lambda *a, **k: None))
 sys.modules.setdefault('core.alerts', types.SimpleNamespace(trigger_startup_alerts=lambda *a, **k: None, alert_match=lambda *a, **k: None))
-sys.modules.setdefault('core.dashboard', types.SimpleNamespace(update_dashboard_stat=lambda *a, **k: None, _default_metrics={}, init_shared_metrics=lambda *a, **k: None, init_dashboard_manager=lambda *a, **k: None, get_current_metrics=lambda *a, **k: {}, get_metric=lambda *a, **k: None, set_metric=lambda *a, **k: None, warn_rate_limited=lambda *a, **k: None))
+sys.modules.setdefault('core.dashboard', types.SimpleNamespace(update_dashboard_stat=lambda *a, **k: None, _default_metrics={}, init_shared_metrics=lambda *a, **k: None, init_dashboard_manager=lambda *a, **k: None, get_current_metrics=lambda *a, **k: {}, get_metric=lambda *a, **k: None, set_metric=lambda *a, **k: None, warn_rate_limited=lambda *a, **k: None, increment_metric=lambda *a, **k: None))
 sys.modules.setdefault('ui.dashboard_gui', types.SimpleNamespace(start_dashboard=lambda *a, **k: None))
 sys.modules.setdefault(
     'core.gpu_selector',
@@ -108,6 +108,12 @@ def test_additional_coin_encoders():
         assert got_wif == wif
 
 
+def test_load_wordlist_languages():
+    for lang in ["spanish", "chinese", "chinese-simple"]:
+        words = load_wordlist(language=lang)
+        assert len(words) == 2048
+
+
 def test_resolve_paths_preset_and_override():
     paths = resolve_paths(["btc", "eth"], preset="atomic", global_path="m/0/0", overrides={"eth": "m/44'/60'/0'/0/1"})
     assert paths["btc"] == "m/44'/0'/0'/0/0"
@@ -127,7 +133,7 @@ def test_run_mnemonic_mode_marks_funded(tmp_path, monkeypatch):
     """Ensure mnemonic mode flags funded addresses when lists are available."""
 
     # Redirect output directory to a temporary location for isolation
-    monkeypatch.setattr(settings, "VANITY_TXT_DIR", str(tmp_path))
+    monkeypatch.setattr(settings, "MNEMONIC_TXT_DIR", str(tmp_path))
 
     # Determine deterministic mnemonic and corresponding BTC address
     rng_seed = 1234

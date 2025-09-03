@@ -29,18 +29,36 @@ from .deriv_paths import SUPPORTED_COINS, resolve_paths
 from .encoders_mnemonic import encode_privkey, privkey_to_pubkey
 from gpu.mnemonic_opencl import available_devices, pbkdf2_sha512
 from utils.file_utils import find_latest_funded_file
+from core.dashboard import increment_metric, update_dashboard_stat, get_metric
 
 # ---------------------------------------------------------------------------
 # Word list helpers
 # ---------------------------------------------------------------------------
 
 
-def load_wordlist(custom_path: Optional[str] = None) -> List[str]:
-    """Return list of words for mnemonic generation."""
+def load_wordlist(custom_path: Optional[str] = None, language: str = "english") -> List[str]:
+    """Return list of words for mnemonic generation.
+
+    ``language`` selects one of the bundled BIP-39 lists.  Supported values
+    include ``english`` (default), ``spanish``, ``chinese`` (traditional), and
+    ``chinese-simple`` (simplified).  A ``custom_path`` takes precedence over
+    ``language`` if provided.
+    """
     if custom_path:
         path = custom_path
     else:
-        path = os.path.join(os.path.dirname(__file__), "bip39_english.txt")
+        fname_map = {
+            "english": "bip39_english.txt",
+            "spanish": "bip39_spanish.txt",
+            "chinese": "bip39_chinese_traditional.txt",
+            "chinese_traditional": "bip39_chinese_traditional.txt",
+            "chinese-simple": "bip39_chinese_simplified.txt",
+            "chinese_simplified": "bip39_chinese_simplified.txt",
+        }
+        filename = fname_map.get(language.lower())
+        if not filename:
+            raise ValueError(f"Unsupported language: {language}")
+        path = os.path.join(os.path.dirname(__file__), filename)
     with open(path, "r", encoding="utf-8") as f:
         words = [w.strip() for w in f.readlines() if w.strip()]
     if not words:
@@ -152,7 +170,15 @@ def derive_private_key(seed: bytes, path: str) -> bytes:
 def run_mnemonic_mode(args) -> None:
     """Entry point invoked from :mod:`main` when ``--mnemonic`` is passed."""
 
-    wordlist = load_wordlist(args.custom_words_file)
+    language = "english"
+    if getattr(args, "spanish", False):
+        language = "spanish"
+    elif getattr(args, "chinese_simple", False):
+        language = "chinese-simple"
+    elif getattr(args, "chinese", False):
+        language = "chinese"
+
+    wordlist = load_wordlist(args.custom_words_file, language=language)
     num_words = args.num_words or 12
     rng = random.Random(args.rng_seed)
 
@@ -179,7 +205,7 @@ def run_mnemonic_mode(args) -> None:
     paths = resolve_paths(coins, preset=preset, global_path=getattr(args, "global_path", None), overrides=overrides)
 
     writer = RollingAtomicWriter(
-        settings.VANITY_TXT_DIR,
+        settings.MNEMONIC_TXT_DIR,
         rotate_lines=settings.VANITY_ROTATE_LINES,
         max_bytes=settings.VANITY_MAX_BYTES,
         prefix="mnemonic_output",
@@ -198,6 +224,7 @@ def run_mnemonic_mode(args) -> None:
 
     iterations = getattr(args, "iterations", 0) or 0
     produced = 0
+    checked_counts = {c: 0 for c in coins}
     try:
         while iterations <= 0 or produced < iterations:
             mnemonic = generate_mnemonic(num_words, wordlist, rng)
@@ -216,13 +243,37 @@ def run_mnemonic_mode(args) -> None:
                 line = f"{coin}: {addr}" + (" funded" if funded_flag else "")
                 addr_lines.append(line)
 
+                increment_metric(f"addresses_generated_today.{coin}", 1)
+                increment_metric(f"addresses_generated_lifetime.{coin}", 1)
+                increment_metric(f"addresses_checked_today.{coin}", 1)
+                increment_metric(f"addresses_checked_lifetime.{coin}", 1)
+                checked_counts[coin] += 1
+
             for line in addr_lines:
                 writer.write_line(line)
             writer.write_line("")
+
+            increment_metric("mnemonics_generated_today", 1)
+            increment_metric("mnemonics_generated_lifetime", 1)
+
+            update_dashboard_stat("mnemonics_generated_today", get_metric("mnemonics_generated_today"))
+            update_dashboard_stat("mnemonics_generated_lifetime", get_metric("mnemonics_generated_lifetime"))
+            update_dashboard_stat("addresses_generated_today", get_metric("addresses_generated_today"))
+            update_dashboard_stat("addresses_generated_lifetime", get_metric("addresses_generated_lifetime"))
+            update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
+            update_dashboard_stat("addresses_checked_lifetime", get_metric("addresses_checked_lifetime"))
 
             produced += 1
     except KeyboardInterrupt:
         pass
     finally:
         writer.close()
+        update_dashboard_stat("mnemonics_generated_today", get_metric("mnemonics_generated_today"))
+        update_dashboard_stat("mnemonics_generated_lifetime", get_metric("mnemonics_generated_lifetime"))
+        update_dashboard_stat("addresses_generated_today", get_metric("addresses_generated_today"))
+        update_dashboard_stat("addresses_generated_lifetime", get_metric("addresses_generated_lifetime"))
+        update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
+        update_dashboard_stat("addresses_checked_lifetime", get_metric("addresses_checked_lifetime"))
         print(f"Generated mnemonics written to {writer.final_path}")
+        summary = ", ".join(f"{c}: {n}" for c, n in checked_counts.items())
+        print(f"Checked addresses → {summary}")

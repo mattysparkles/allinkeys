@@ -677,6 +677,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--bip39", action="store_true", help="Use BIP39 English wordlist (default)")
     parser.add_argument("--custom-words-file", help="Path to custom word list for mnemonic generation")
+    lang_group = parser.add_mutually_exclusive_group()
+    lang_group.add_argument("--spanish", action="store_true", help="Use BIP39 Spanish wordlist")
+    lang_group.add_argument("--chinese", action="store_true", help="Use BIP39 Traditional Chinese wordlist")
+    lang_group.add_argument("--chinese-simple", action="store_true", help="Use BIP39 Simplified Chinese wordlist")
     parser.add_argument("--coins", type=_parse_only, help="Comma separated list of coins to derive")
     parser.add_argument("--allcoins", action="store_true", help="Derive all supported coins")
     parser.add_argument("--atomic", action="store_true", help="Use Atomic wallet derivation paths")
