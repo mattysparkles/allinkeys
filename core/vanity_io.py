@@ -18,11 +18,30 @@ class RollingAtomicWriter:
         rotate_lines: int,
         max_bytes: int,
         prefix: str = "vanity",
+        rotate_seconds: Optional[int] = None,
     ) -> None:
+        """Create a new rolling writer.
+
+        Parameters
+        ----------
+        directory:
+            Destination directory for output files.
+        rotate_lines:
+            Rotate once this many lines have been written.
+        max_bytes:
+            Rotate once file reaches this size in bytes.
+        prefix:
+            Filename prefix for generated files.
+        rotate_seconds:
+            If provided, rotate the file after this many seconds
+            regardless of line or byte count.
+        """
+
         self.directory = ensure_dir(directory)
         self.rotate_lines = rotate_lines
         self.max_bytes = max_bytes
         self.prefix = prefix
+        self.rotate_seconds = rotate_seconds
         self._counter = 0
         # Open files in binary mode so byte counting matches on all platforms
         self._fh: Optional[BinaryIO] = None
@@ -45,6 +64,7 @@ class RollingAtomicWriter:
         self._fh = open(self.temp_path, "wb")
         self._lines = 0
         self._bytes = 0
+        self._opened = time.time()
 
     def _commit(self) -> None:
         if not self._fh:
@@ -64,7 +84,14 @@ class RollingAtomicWriter:
         self._fh.write(data)
         self._lines += 1
         self._bytes += len(data)
-        rotated = self._lines >= self.rotate_lines or self._bytes >= self.max_bytes
+        rotated = (
+            self._lines >= self.rotate_lines
+            or self._bytes >= self.max_bytes
+            or (
+                self.rotate_seconds is not None
+                and (time.time() - self._opened) >= self.rotate_seconds
+            )
+        )
         if rotated:
             self._commit()
             self._open_new_file()

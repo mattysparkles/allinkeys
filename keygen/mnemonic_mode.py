@@ -183,6 +183,7 @@ def run_mnemonic_mode(args) -> None:
         rotate_lines=settings.VANITY_ROTATE_LINES,
         max_bytes=settings.VANITY_MAX_BYTES,
         prefix="mnemonic_output",
+        rotate_seconds=60,
     )
 
     # Load funded address data if requested.  Missing files simply yield empty
@@ -193,23 +194,31 @@ def run_mnemonic_mode(args) -> None:
     # device is requested and at least one OpenCL device is present.
     gpu_devices = available_devices()
 
-    mnemonic = generate_mnemonic(num_words, wordlist, rng)
-    if gpu_devices and getattr(args, "gpu_id", None) is not None:
-        seed = pbkdf2_sha512(mnemonic, args.passphrase, device_id=args.gpu_id)
-    else:
-        seed = mnemonic_to_seed(mnemonic, args.passphrase)
-    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+    iterations = getattr(args, "iterations", 0) or 0
+    produced = 0
+    try:
+        while iterations <= 0 or produced < iterations:
+            mnemonic = generate_mnemonic(num_words, wordlist, rng)
+            if gpu_devices and getattr(args, "gpu_id", None) is not None:
+                seed = pbkdf2_sha512(mnemonic, args.passphrase, device_id=args.gpu_id)
+            else:
+                seed = mnemonic_to_seed(mnemonic, args.passphrase)
+            timestamp = time.strftime("%Y-%m-%dT%H:%M:%S")
 
-    for coin in coins:
-        priv = derive_private_key(seed, paths[coin])
-        addr, wif = encode_privkey(coin, priv)
-        normalized = addr.lower() if coin == "eth" else addr
-        funded_flag = 1 if normalized in funded_sets.get(coin, set()) else 0
-        line = (
-            f"{timestamp} | {mnemonic} | {args.passphrase or '-'} | coin={coin.upper()} | "
-            f"path={paths[coin]} | addr={addr} | wif={wif} | funded={funded_flag}"
-        )
-        writer.write_line(line)
-    writer.close()
+            for coin in coins:
+                priv = derive_private_key(seed, paths[coin])
+                addr, wif = encode_privkey(coin, priv)
+                normalized = addr.lower() if coin == "eth" else addr
+                funded_flag = 1 if normalized in funded_sets.get(coin, set()) else 0
+                line = (
+                    f"{timestamp} | {mnemonic} | {args.passphrase or '-'} | coin={coin.upper()} | "
+                    f"path={paths[coin]} | addr={addr} | wif={wif} | funded={funded_flag}"
+                )
+                writer.write_line(line)
 
-    print(f"Generated mnemonic written to {writer.final_path}")
+            produced += 1
+    except KeyboardInterrupt:
+        pass
+    finally:
+        writer.close()
+        print(f"Generated mnemonics written to {writer.final_path}")
