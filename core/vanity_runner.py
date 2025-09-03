@@ -14,6 +14,7 @@ from config.settings import (
     VANITYSEARCH_BIN_CPU,
     MIN_EXPECTED_GPU_MKEYS,
     MAX_OUTPUT_FILE_SIZE,
+    ENABLE_P2PKH,
     ENABLE_P2WPKH,
     ENABLE_TAPROOT,
     DEFAULT_BTC_PATTERNS,
@@ -24,11 +25,13 @@ from config.settings import (
     VANITY_MAX_BYTES,
     ENABLE_BC1_DEFAULT,
     VANITY_MODE,
+    OCLVANITYGEN_PATH,
 )
 from core.logger import get_logger, log_message
 from core.dashboard import set_metric, update_dashboard_stat
 from core.utils.io_safety import atomic_open, atomic_commit
 from core.vanity_io import RollingAtomicWriter, ensure_dir
+from core.oclvanity_runner import run_oclvanitygen
 
 logger = get_logger(__name__)
 logger.info("Atomic writes enabled for vanity outputs (temp → rename). Empty outputs are skipped.")
@@ -86,6 +89,8 @@ def resolve_vanitysearch_binary(backend: str) -> str:
         return VANITYSEARCH_BIN_CUDA
     if backend == "opencl":
         return VANITYSEARCH_BIN_OPENCL
+    if backend == "oclvanitygen":
+        return OCLVANITYGEN_PATH
     return VANITYSEARCH_BIN_CPU
 
 
@@ -93,24 +98,28 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
     """Select appropriate backend/device based on settings and availability."""
     global _SELECTED_BACKEND, _SELECTED_DEVICE_ID, _SELECTED_DEVICE_NAME, _SELECTED_BINARY
 
-    devices = list_devices()
     backend = "cpu"
     device_id: Optional[int] = None
     device_name = "CPU"
 
-    if not FORCE_CPU_FALLBACK:
-        if GPU_BACKEND in ("cuda", "opencl") and devices.get(GPU_BACKEND):
-            backend = GPU_BACKEND
-            device_id, device_name = devices[GPU_BACKEND][0]
-        elif GPU_BACKEND == "auto":
-            for cand in ("cuda", "opencl"):
-                if devices.get(cand):
-                    backend = cand
-                    device_id, device_name = devices[cand][0]
-                    break
+    if GPU_BACKEND == "oclvanitygen":
+        backend = "oclvanitygen"
+        device_name = "OCLVanityGen"
+    else:
+        devices = list_devices()
+        if not FORCE_CPU_FALLBACK:
+            if GPU_BACKEND in ("cuda", "opencl") and devices.get(GPU_BACKEND):
+                backend = GPU_BACKEND
+                device_id, device_name = devices[GPU_BACKEND][0]
+            elif GPU_BACKEND == "auto":
+                for cand in ("cuda", "opencl"):
+                    if devices.get(cand):
+                        backend = cand
+                        device_id, device_name = devices[cand][0]
+                        break
 
     binary = resolve_vanitysearch_binary(backend)
-    if backend in ("cuda", "opencl") and not os.path.exists(binary):
+    if backend in ("cuda", "opencl", "oclvanitygen") and not os.path.exists(binary):
         _warn_once("binary_missing", f"GPU backend {backend} selected but binary missing. Falling back to CPU")
         backend = "cpu"
         device_id = None
@@ -146,13 +155,18 @@ def build_vanitysearch_args(hex_seed: str) -> List[Tuple[List[str], str]]:
     """Return a list of argument lists for each enabled address type."""
     jobs: List[Tuple[List[str], str]] = []
 
+    backend = get_selected_backend()
+
     def _job(pattern: str) -> List[str]:
+        if backend == "oclvanitygen":
+            return [pattern]
         args = ["-s", hex_seed]
         _apply_mode_flags(args)
         args.append(pattern)
         return args
 
-    jobs.append((_job(DEFAULT_BTC_PATTERNS[0]), "p2pkh"))
+    if ENABLE_P2PKH:
+        jobs.append((_job(DEFAULT_BTC_PATTERNS[0]), "p2pkh"))
     if ENABLE_P2WPKH:
         jobs.append((_job(DEFAULT_BTC_PATTERNS_BECH32[0]), "p2wpkh"))
     if ENABLE_TAPROOT:
@@ -173,6 +187,10 @@ def run_vanitysearch(
     if pause_event and pause_event.is_set():
         logger.info("Keygen paused; skipping VanitySearch job")
         return False
+
+    if backend == "oclvanitygen":
+        pattern = seed_args[0] if seed_args else DEFAULT_BTC_PATTERNS[0]
+        return run_oclvanitygen(pattern, output_path, timeout=timeout, pause_event=pause_event, addr_mode=addr_mode)
 
     binary = resolve_vanitysearch_binary(backend)
     cmd = [binary] + seed_args
