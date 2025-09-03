@@ -14,7 +14,7 @@ points for future GPU acceleration and additional coins.
 from __future__ import annotations
 
 import os
-import time
+import sys
 import hashlib
 import hmac
 import struct
@@ -185,6 +185,8 @@ def run_mnemonic_mode(args) -> None:
         prefix="mnemonic_output",
         rotate_seconds=60,
     )
+    # Record the command invocation once at the top of the output file
+    writer.write_line(" ".join(sys.argv))
 
     # Load funded address data if requested.  Missing files simply yield empty
     # sets so the rest of the pipeline can continue unhindered.
@@ -203,18 +205,20 @@ def run_mnemonic_mode(args) -> None:
                 seed = pbkdf2_sha512(mnemonic, args.passphrase, device_id=args.gpu_id)
             else:
                 seed = mnemonic_to_seed(mnemonic, args.passphrase)
-            timestamp = time.strftime("%Y-%m-%dT%H:%M:%S")
 
+            writer.write_line(mnemonic)
+            addr_lines = []
             for coin in coins:
                 priv = derive_private_key(seed, paths[coin])
-                addr, wif = encode_privkey(coin, priv)
+                addr, _ = encode_privkey(coin, priv)
                 normalized = addr.lower() if coin == "eth" else addr
-                funded_flag = 1 if normalized in funded_sets.get(coin, set()) else 0
-                line = (
-                    f"{timestamp} | {mnemonic} | {args.passphrase or '-'} | coin={coin.upper()} | "
-                    f"path={paths[coin]} | addr={addr} | wif={wif} | funded={funded_flag}"
-                )
+                funded_flag = normalized in funded_sets.get(coin, set())
+                line = f"{coin}: {addr}" + (" funded" if funded_flag else "")
+                addr_lines.append(line)
+
+            for line in addr_lines:
                 writer.write_line(line)
+            writer.write_line("")
 
             produced += 1
     except KeyboardInterrupt:

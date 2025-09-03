@@ -183,4 +183,4 @@ def test_run_mnemonic_mode_marks_funded(tmp_path, monkeypatch):
     output_files = list(tmp_path.glob("mnemonic_output_*.txt"))
     assert len(output_files) == 1
     contents = output_files[0].read_text()
-    assert "funded=1" in contents
+    assert f"btc: {addr} funded" in contents
