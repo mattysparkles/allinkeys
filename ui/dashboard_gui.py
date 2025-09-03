@@ -112,26 +112,44 @@ class DashboardGUI:
         addr_frame.grid_columnconfigure(0, weight=1)
         addr_frame.grid_columnconfigure(1, weight=1)
         addr_frame.grid_columnconfigure(2, weight=1)
-        self.p2pkh_var = tk.BooleanVar(value=ENABLE_P2PKH)
-        self.p2wpkh_var = tk.BooleanVar(value=ENABLE_P2WPKH)
-        self.taproot_var = tk.BooleanVar(value=ENABLE_TAPROOT)
-        ttk.Checkbutton(
+
+        initial = 'p2pkh' if ENABLE_P2PKH else ('p2wpkh' if ENABLE_P2WPKH else 'taproot')
+        self.addr_type_var = tk.StringVar(value=initial)
+
+        def _select_addr_type():
+            sel = self.addr_type_var.get()
+            settings.ENABLE_P2PKH = sel == 'p2pkh'
+            settings.ENABLE_P2WPKH = sel == 'p2wpkh'
+            settings.ENABLE_TAPROOT = sel == 'taproot'
+            try:
+                from core.dashboard import module_pause_events
+                ev = module_pause_events.get('keygen')
+                if ev:
+                    ev.set()
+                    self.master.after(500, ev.clear)
+            except Exception:
+                pass
+
+        ttk.Radiobutton(
             addr_frame,
             text="1 (P2PKH)",
-            variable=self.p2pkh_var,
-            command=lambda: setattr(settings, 'ENABLE_P2PKH', self.p2pkh_var.get()),
+            variable=self.addr_type_var,
+            value='p2pkh',
+            command=_select_addr_type,
         ).grid(row=0, column=0, sticky="w")
-        ttk.Checkbutton(
+        ttk.Radiobutton(
             addr_frame,
             text="bc1q (P2WPKH)",
-            variable=self.p2wpkh_var,
-            command=lambda: setattr(settings, 'ENABLE_P2WPKH', self.p2wpkh_var.get()),
+            variable=self.addr_type_var,
+            value='p2wpkh',
+            command=_select_addr_type,
         ).grid(row=0, column=1, sticky="w")
-        ttk.Checkbutton(
+        ttk.Radiobutton(
             addr_frame,
             text="bc1p (Taproot)",
-            variable=self.taproot_var,
-            command=lambda: setattr(settings, 'ENABLE_TAPROOT', self.taproot_var.get()),
+            variable=self.addr_type_var,
+            value='taproot',
+            command=_select_addr_type,
         ).grid(row=0, column=2, sticky="w")
 
         # Metric Panels

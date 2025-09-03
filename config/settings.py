@@ -677,7 +677,7 @@ BUTTONS_ENABLED = {
 # ===================== 🖥️ GPU/CPU BACKENDS ==========================
 # GPU/CPU selection & binaries
 # Only the CUDA-enabled VanitySearch binary is bundled.
-GPU_BACKEND = "cuda"        # CUDA is the only supported backend
+GPU_BACKEND = os.getenv("GPU_BACKEND", "cuda")  # cuda, opencl, cpu, auto, or oclvanitygen
 VANITYSEARCH_BIN_CUDA = VANITYSEARCH_PATH
 VANITYSEARCH_BIN_OPENCL = ""  # placeholder for future OpenCL support
 VANITYSEARCH_BIN_CPU = VANITYSEARCH_PATH  # CPU fallback shares the same binary
