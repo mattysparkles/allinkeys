@@ -164,7 +164,9 @@ python main.py --mnemonic --24words --coins btc,eth --atomic  # BTC + ETH using 
 Additional options mirror the specification:
 
 - `--custom-words-file <path>` use a custom word list
-- `--spanish`, `--chinese`, `--chinese-simple` select BIP‑39 word list language
+- `--spanish`, `--french`, `--italian`, `--japanese`, `--korean`, `--czech`,
+  `--portuguese`, `--chinese`, `--chinese-simple` select BIP‑39 word list
+  language
 - `--coins btc,eth` or `--allcoins` choose which coins to derive
 - `--atomic`, `--ledger`, `--trezor`, … wallet path presets
 - `--path`, `--btc-path`, `--eth-path` supply explicit derivation paths
