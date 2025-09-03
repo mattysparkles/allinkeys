@@ -40,9 +40,10 @@ def load_wordlist(custom_path: Optional[str] = None, language: str = "english") 
     """Return list of words for mnemonic generation.
 
     ``language`` selects one of the bundled BIP-39 lists.  Supported values
-    include ``english`` (default), ``spanish``, ``chinese`` (traditional), and
-    ``chinese-simple`` (simplified).  A ``custom_path`` takes precedence over
-    ``language`` if provided.
+    include ``english`` (default), ``spanish``, ``french``, ``italian``,
+    ``japanese``, ``korean``, ``czech``, ``portuguese``, ``chinese``
+    (traditional), and ``chinese-simple`` (simplified).  A ``custom_path``
+    takes precedence over ``language`` if provided.
     """
     if custom_path:
         path = custom_path
@@ -50,6 +51,12 @@ def load_wordlist(custom_path: Optional[str] = None, language: str = "english") 
         fname_map = {
             "english": "bip39_english.txt",
             "spanish": "bip39_spanish.txt",
+            "french": "bip39_french.txt",
+            "italian": "bip39_italian.txt",
+            "japanese": "bip39_japanese.txt",
+            "korean": "bip39_korean.txt",
+            "czech": "bip39_czech.txt",
+            "portuguese": "bip39_portuguese.txt",
             "chinese": "bip39_chinese_traditional.txt",
             "chinese_traditional": "bip39_chinese_traditional.txt",
             "chinese-simple": "bip39_chinese_simplified.txt",
@@ -171,12 +178,21 @@ def run_mnemonic_mode(args) -> None:
     """Entry point invoked from :mod:`main` when ``--mnemonic`` is passed."""
 
     language = "english"
-    if getattr(args, "spanish", False):
-        language = "spanish"
-    elif getattr(args, "chinese_simple", False):
-        language = "chinese-simple"
-    elif getattr(args, "chinese", False):
-        language = "chinese"
+    lang_opts = {
+        "spanish": "spanish",
+        "french": "french",
+        "italian": "italian",
+        "japanese": "japanese",
+        "korean": "korean",
+        "czech": "czech",
+        "portuguese": "portuguese",
+        "chinese_simple": "chinese-simple",
+        "chinese": "chinese",
+    }
+    for attr, value in lang_opts.items():
+        if getattr(args, attr, False):
+            language = value
+            break
 
     wordlist = load_wordlist(args.custom_words_file, language=language)
     num_words = args.num_words or 12

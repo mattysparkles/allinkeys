@@ -24,7 +24,17 @@ sys.modules.setdefault('core.checkpoint', types.SimpleNamespace(load_keygen_chec
 sys.modules.setdefault('core.downloader', types.SimpleNamespace(download_and_compare_address_lists=lambda *a, **k: None, generate_test_csv=lambda *a, **k: None))
 sys.modules.setdefault('core.csv_checker', types.SimpleNamespace(check_csvs_day_one=lambda *a, **k: None, check_csvs=lambda *a, **k: None))
 sys.modules.setdefault('core.alerts', types.SimpleNamespace(trigger_startup_alerts=lambda *a, **k: None, alert_match=lambda *a, **k: None))
-sys.modules.setdefault('core.dashboard', types.SimpleNamespace(update_dashboard_stat=lambda *a, **k: None, _default_metrics={}, init_shared_metrics=lambda *a, **k: None, init_dashboard_manager=lambda *a, **k: None, get_current_metrics=lambda *a, **k: {}, get_metric=lambda *a, **k: None, set_metric=lambda *a, **k: None, warn_rate_limited=lambda *a, **k: None, increment_metric=lambda *a, **k: None))
+dashboard_stub = types.ModuleType('core.dashboard')
+dashboard_stub.update_dashboard_stat = lambda *a, **k: None
+dashboard_stub._default_metrics = {}
+dashboard_stub.init_shared_metrics = lambda *a, **k: None
+dashboard_stub.init_dashboard_manager = lambda *a, **k: None
+dashboard_stub.get_current_metrics = lambda *a, **k: {}
+dashboard_stub.get_metric = lambda *a, **k: None
+dashboard_stub.set_metric = lambda *a, **k: None
+dashboard_stub.warn_rate_limited = lambda *a, **k: None
+dashboard_stub.increment_metric = lambda *a, **k: None
+sys.modules['core.dashboard'] = dashboard_stub
 sys.modules.setdefault('ui.dashboard_gui', types.SimpleNamespace(start_dashboard=lambda *a, **k: None))
 sys.modules.setdefault(
     'core.gpu_selector',
@@ -109,7 +119,17 @@ def test_additional_coin_encoders():
 
 
 def test_load_wordlist_languages():
-    for lang in ["spanish", "chinese", "chinese-simple"]:
+    for lang in [
+        "spanish",
+        "french",
+        "italian",
+        "japanese",
+        "korean",
+        "czech",
+        "portuguese",
+        "chinese",
+        "chinese-simple",
+    ]:
         words = load_wordlist(language=lang)
         assert len(words) == 2048
 
