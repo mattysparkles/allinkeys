@@ -30,7 +30,11 @@ from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keyg
 from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 from core.logger import get_logger
 import config.settings as settings
-from core.seed_tracker import seed_in_used_range, record_seed_range
+from core.seed_tracker import (
+    seed_in_used_range,
+    record_seed_range,
+    get_condensed_ranges,
+)
 
 
 # Runtime trackers
@@ -38,6 +42,10 @@ total_keys_generated = 0
 keygen_start_time = time.time()
 last_output_file = None
 KPS_WINDOW = deque()
+
+# Prefetch queue to reduce I/O when checking used seeds
+_SEED_QUEUE: list[int] = []
+SEED_QUEUE_SIZE = 10
 
 # Used to track current batch progress
 KEYGEN_STATE = {
@@ -139,6 +147,8 @@ def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1024000):
 def generate_random_seed(min_bits=128):
     """Generate the next seed for VanitySearch while avoiding used ranges."""
 
+    global _SEED_QUEUE
+
     while True:
         if getattr(settings, "PUZZLE_MODE", False):
             puzzle_num = getattr(settings, "PUZZLE_NUMBER", None)
@@ -169,12 +179,16 @@ def generate_random_seed(min_bits=128):
                 continue
             return seed
 
+        if _SEED_QUEUE:
+            return _SEED_QUEUE.pop(0)
+
         min_val = 1 << min_bits
         range_span = SECP256K1_ORDER - min_val
-        seed = secrets.randbelow(range_span) + min_val
-        if seed_in_used_range(seed):
+        ranges = get_condensed_ranges()
+        candidates = [secrets.randbelow(range_span) + min_val for _ in range(SEED_QUEUE_SIZE)]
+        if any(seed_in_used_range(c, ranges) for c in candidates):
             continue
-        return seed
+        _SEED_QUEUE.extend(candidates)
 
 
 def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None):
