@@ -175,7 +175,7 @@ class DashboardGUI:
             "batches_completed", "avg_keygen_time", "backlog_files_queued",
             "backlog_eta", "backlog_avg_time", "backlog_current_file",
             "keys_per_sec", "keys_generated_today", "keys_generated_lifetime",
-            "current_seed_index", "altcoin_files_converted",
+            "current_seed_index", "current_seed", "altcoin_files_converted",
             "derived_addresses_today", "vanity_backlog_count",
             "btc_only_files_checked_today", "btc_only_matches_found_today",
             "new_btc_ranges_size_bytes", "btc_ranges_progress", "btc_ranges_last_updated",

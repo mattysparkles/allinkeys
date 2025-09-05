@@ -239,6 +239,7 @@ PEP = ENABLED_COINS["PEP"]
 SHOW_BATCHES_COMPLETED = True
 SHOW_CURRENT_SEED_INDEX = True
 SHOW_CURRENT_SEED_INDEX = True
+SHOW_CURRENT_SEED = True
 SHOW_KEYS_PER_SEC = True
 SHOW_AVG_KEYGEN_FILE_TIME = True
 SHOW_AVG_CSV_FILE_CHECK_TIME = True
@@ -481,6 +482,7 @@ STATS_TO_DISPLAY = {
     "keys_per_sec": SHOW_KEYS_PER_SEC,
     "batches_completed": SHOW_BATCHES_COMPLETED,
     "current_seed_index": SHOW_CURRENT_SEED_INDEX,
+    "current_seed": SHOW_CURRENT_SEED,
     "avg_keygen_time": SHOW_AVG_KEYGEN_FILE_TIME,
     "avg_check_time": SHOW_AVG_CSV_FILE_CHECK_TIME,
     "cpu_usage": SHOW_CPU_USAGE_STATS,
@@ -537,6 +539,7 @@ METRICS_LABEL_MAP = {
     "keys_per_sec": "Keys/sec",
     "batches_completed": "Batches Completed",
     "current_seed_index": "Current Seed Index",
+    "current_seed": "Current Seed",
     "avg_keygen_time": "Avg. Keygen Time",
     "avg_check_time": "Avg. CSV Check Time",
     "cpu_usage": "CPU Usage",
