@@ -2,6 +2,7 @@ import threading
 import time
 import json
 import os
+import tempfile
 from datetime import datetime, timezone, timedelta
 import core.checkpoint as checkpoint
 import traceback
@@ -226,11 +227,12 @@ def save_lifetime_metrics():
     lock = metrics_lock if metrics_lock else nullcontext()
     with lock:
         delays = [0.1, 0.25, 0.5, 0.75, 1.0]
+        dir_name = os.path.dirname(METRICS_LIFETIME_PATH)
         for i, delay in enumerate(delays, 1):
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)
             try:
                 # [FIX PHASE 2] atomic write to survive crashes/power loss
-                tmp_path = METRICS_LIFETIME_PATH + '.tmp'
-                with open(tmp_path, 'w', encoding='utf-8') as f:
+                with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2)
                     f.flush()
                     os.fsync(f.fileno())
@@ -238,11 +240,19 @@ def save_lifetime_metrics():
                 logger.debug("Lifetime metrics saved to disk")
                 break
             except OSError:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
                 if i == len(delays):
                     logger.exception("Failed to save lifetime metrics")
                 else:
                     time.sleep(delay)
             except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
                 logger.exception("Failed to save lifetime metrics")
                 break
 
