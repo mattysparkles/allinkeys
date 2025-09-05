@@ -60,7 +60,8 @@ CSV_MAX_ROWS = 100_000
 
 # ===================== 📊 DASHBOARD SETTINGS =======================
 SHOW_BATCHES_COMPLETED = True # Shows how many batches were created
-SHOW_CURRENT_SEED_INDEX = True # Shows Current Derivation Seed Index 
+SHOW_CURRENT_SEED_INDEX = True # Shows Current Derivation Seed Index
+SHOW_CURRENT_SEED = True # Shows current seed value being processed
 SHOW_KEYS_PER_SEC = True # Shows How Many Keys/Sec Your Generating
 SHOW_AVG_KEYGEN_FILE_TIME = True
 SHOW_AVG_CSV_FILE_CHECK_TIME = True

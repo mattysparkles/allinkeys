@@ -30,6 +30,7 @@ from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keyg
 from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 from core.logger import get_logger
 import config.settings as settings
+from core.seed_tracker import seed_in_used_range, record_seed_range
 
 
 # Runtime trackers
@@ -136,36 +137,44 @@ def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1024000):
 
 
 def generate_random_seed(min_bits=128):
-    """Generate the next seed for VanitySearch.
+    """Generate the next seed for VanitySearch while avoiding used ranges."""
 
-    Puzzle-71 mode uses deterministic chunking backed by SQLite.
-    Other modes keep the previous random behaviour.
-    """
-    if getattr(settings, "PUZZLE_MODE", False):
-        puzzle_num = getattr(settings, "PUZZLE_NUMBER", None)
-        if puzzle_num is not None:
-            from core import puzzle_queue as pq  # depends on SQLite
-            chunk_idx = getattr(settings, "PUZZLE_CHUNK_INDEX", None)
+    while True:
+        if getattr(settings, "PUZZLE_MODE", False):
+            puzzle_num = getattr(settings, "PUZZLE_NUMBER", None)
+            if puzzle_num is not None:
+                from core import puzzle_queue as pq  # depends on SQLite
+                chunk_idx = getattr(settings, "PUZZLE_CHUNK_INDEX", None)
 
-            # ``os.uname`` is unavailable on some platforms (e.g., Windows).
-            # ``platform.node`` provides a portable host identifier which
-            # replicates the ``nodename`` attribute used previously.
-            host_id = platform.node() if hasattr(platform, "node") else "unknown"
-            seed = pq.next_seed(puzzle_num, host_id, chunk_idx)
-            if seed is None:
-                raise RuntimeError(f"No remaining puzzle-{puzzle_num} chunks to process")
+                # ``os.uname`` is unavailable on some platforms (e.g., Windows).
+                # ``platform.node`` provides a portable host identifier which
+                # replicates the ``nodename`` attribute used previously.
+                host_id = platform.node() if hasattr(platform, "node") else "unknown"
+                seed = pq.next_seed(puzzle_num, host_id, chunk_idx)
+                if seed is None:
+                    raise RuntimeError(
+                        f"No remaining puzzle-{puzzle_num} chunks to process"
+                    )
+                if seed_in_used_range(seed):
+                    continue
+                return seed
+            # Fallback to random within start/end if puzzle number is missing
+            start = int(getattr(settings, "PUZZLE_START", "0"), 16)
+            end = int(getattr(settings, "PUZZLE_END", "0"), 16)
+            if end < start:
+                start, end = end, start
+            span = max(1, end - start + 1)
+            seed = secrets.randbelow(span) + start
+            if seed_in_used_range(seed):
+                continue
             return seed
-        # Fallback to random within start/end if puzzle number is missing
-        start = int(getattr(settings, "PUZZLE_START", "0"), 16)
-        end = int(getattr(settings, "PUZZLE_END", "0"), 16)
-        if end < start:
-            start, end = end, start
-        span = max(1, end - start + 1)
-        return secrets.randbelow(span) + start
 
-    min_val = 1 << min_bits
-    range_span = SECP256K1_ORDER - min_val
-    return secrets.randbelow(range_span) + min_val
+        min_val = 1 << min_bits
+        range_span = SECP256K1_ORDER - min_val
+        seed = secrets.randbelow(range_span) + min_val
+        if seed_in_used_range(seed):
+            continue
+        return seed
 
 
 def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None):
@@ -259,14 +268,32 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         try:
             with open(current_output_path, 'r', encoding='utf-8') as f:
                 logger.info(f"Opened {current_output_path} for reading")
-                lines = sum(1 for _ in f)
+                lines = 0
+                first_seed = None
+                last_seed = None
+                for line in f:
+                    if line.startswith("Priv (HEX):"):
+                        hex_val = line.split(":", 1)[1].strip().replace("0x", "")
+                        seed_int = int(hex_val, 16)
+                        if first_seed is None:
+                            first_seed = seed_int
+                        last_seed = seed_int
+                        lines += 1
                 total_keys_generated += lines
                 increment_metric("keys_generated_today", lines)
                 increment_metric("keys_generated_lifetime", lines)
                 from core.dashboard import update_dashboard_stat, get_metric
-                update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
-                update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
-                logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
+                update_dashboard_stat(
+                    "keys_generated_today", get_metric("keys_generated_today")
+                )
+                update_dashboard_stat(
+                    "keys_generated_lifetime", get_metric("keys_generated_lifetime")
+                )
+                if first_seed is not None and last_seed is not None:
+                    record_seed_range(first_seed, last_seed)
+                logger.info(
+                    f"📄 File complete: {lines} lines → {current_output_path}"
+                )
         except Exception as e:
             logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
         return True
@@ -307,6 +334,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     set_metric("keys_generated_today", 0)
     set_metric("vanity_progress_percent", 0)
     set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
+    set_metric("current_seed", KEYGEN_STATE.get("last_seed", "0x0"))
 
     try:
         set_metric("status.keygen", "Running")
@@ -369,6 +397,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
 
                 KEYGEN_STATE["index_within_batch"] = index
                 KEYGEN_STATE["last_seed"] = hex(seed)[2:].rjust(64, "0")
+                set_metric("current_seed", KEYGEN_STATE["last_seed"])
                 set_metric("current_seed_index", index)
                 progress = round((index / float(FILES_PER_BATCH)) * 100, 2)
                 set_metric("vanity_progress_percent", progress)

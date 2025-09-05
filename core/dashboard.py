@@ -333,6 +333,7 @@ def _default_metrics():
     return {
         "batches_completed": 0,
         "current_seed_index": 0,
+        "current_seed": "0x0",
         "vanitysearch_speed": "0 MKeys/s",
         "vanitysearch_current_mkeys": 0.0,
         "vanitysearch_backend": "cpu",
