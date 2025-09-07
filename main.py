@@ -642,6 +642,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="AllInKeys Modular Runner")
     parser.add_argument("--skip-backlog", action="store_true", help="Skip backlog conversion on startup")
     parser.add_argument("--no-dashboard", action="store_true", help="Don't launch GUI dashboard")
+    parser.add_argument("--dashboard-password", help="Password required to access the dashboard")
     parser.add_argument("--skip-downloads", action="store_true", help="Skip downloading balance files")
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
@@ -715,6 +716,9 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point used by ``__main__`` and tests."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "dashboard_password", None):
+        from utils.auth import hash_password
+        settings.DASHBOARD_PASSWORD_HASH = hash_password(args.dashboard_password)
     handle_deprecated_flags(args)
     if getattr(args, "mnemonic", False):
         # Lazy import to keep startup fast for other modes

@@ -115,6 +115,7 @@ The default run will:
 |------|-------------|
 | `--skip-backlog` | Start without backlog conversion |
 | `--no-dashboard` | Do not launch the GUI dashboard |
+| `--dashboard-password <pw>` | Protect dashboard with password `pw` |
 | `--skip-downloads` | Skip downloading balance files |
 | `--headless` | Run without any GUI components |
 | `--match-test` | Trigger a fake match alert on startup |
