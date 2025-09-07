@@ -8,6 +8,7 @@ import signal
 import argparse
 import multiprocessing
 import threading
+import subprocess
 from datetime import datetime, timedelta
 from multiprocessing import Process
 from core.logger import get_logger
@@ -46,8 +47,9 @@ from config.settings import (
     LOGO_ART, ENABLE_DAY_ONE_CHECK, ENABLE_UNIQUE_RECHECK,
     ENABLE_DASHBOARD, ENABLE_KEYGEN, ENABLE_ALERTS,
     ENABLE_BACKLOG_CONVERSION, LOG_DIR, CONFIG_FILE_PATH,
-    CSV_DIR, VANITYSEARCH_PATH, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
-    BACKLOG_PAUSE_THRESHOLD, BACKLOG_RESUME_THRESHOLD
+    CSV_DIR, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
+    BACKLOG_PAUSE_THRESHOLD, BACKLOG_RESUME_THRESHOLD,
+    find_vanitysearch_binary,
 )
 
 from core.logger import log_message, start_listener, stop_listener, get_logger
@@ -736,9 +738,17 @@ if __name__ == "__main__":
     except RuntimeError:
         pass  # already set
 
-    if not os.path.exists(VANITYSEARCH_PATH):
-        raise FileNotFoundError(f"VanitySearch not found at: {VANITYSEARCH_PATH}")
+    vanity_path = find_vanitysearch_binary()
+    if not vanity_path and os.name != "nt":
+        try:
+            subprocess.run(["apt-get", "update"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["apt-get", "install", "-y", "vanitysearch"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        vanity_path = find_vanitysearch_binary()
+    if not vanity_path:
+        raise FileNotFoundError("VanitySearch binary not found. Please install VanitySearch.")
     else:
-        print(f"✅ VanitySearch found: {VANITYSEARCH_PATH}", flush=True)
+        print(f"✅ VanitySearch found: {vanity_path}", flush=True)
 
     sys.exit(main())

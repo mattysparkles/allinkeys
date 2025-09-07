@@ -11,7 +11,6 @@ import platform
 from datetime import datetime
 from collections import deque
 from config.settings import (
-    VANITYSEARCH_PATH,
     VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
     BATCH_SIZE,
@@ -21,8 +20,8 @@ from config.settings import (
     MAX_OUTPUT_FILE_SIZE,
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
-    FILES_PER_BATCH
-
+    FILES_PER_BATCH,
+    find_vanitysearch_binary,
 )
 
 from config.constants import SECP256K1_ORDER
@@ -214,7 +213,11 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     )
     last_output_file = current_output_path
 
-    cmd = [VANITYSEARCH_PATH, "-s", hex_seed_full, "-o", current_output_path]
+    exe_path = find_vanitysearch_binary()
+    if not exe_path:
+        logger.error("VanitySearch binary not found.")
+        return False
+    cmd = [exe_path, "-s", hex_seed_full, "-o", current_output_path]
     if use_gpu:
         cmd.append("-gpu")  # Enable CUDA acceleration
     if not BTC_COMPRESSED:

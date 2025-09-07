@@ -4,6 +4,7 @@ Auto-merged to restore full functionality.
 """
 
 import os
+import shutil
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -74,12 +75,45 @@ BTC_MIN_FILE_AGE_SEC = 2.0            # ignore files newer than this
 
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
-# Single VanitySearch binary (CUDA only)
-if os.name == "nt":
-    VANITYSEARCH_EXE_NAME = "VanitySearch.exe"
-else:
-    VANITYSEARCH_EXE_NAME = "VanitySearch"
-VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", VANITYSEARCH_EXE_NAME)
+
+
+def find_vanitysearch_binary():
+    """Return the first VanitySearch binary found for the host OS."""
+    bin_dir = os.path.join(BASE_DIR, "bin")
+    if os.name == "nt":
+        candidates = [
+            os.path.join(bin_dir, "VanitySearch.exe"),
+            os.path.join(bin_dir, "vanitysearch.exe"),
+            os.path.join(bin_dir, "VanitySearch_cuda.exe"),
+            os.path.join(bin_dir, "vanitysearch_cuda.exe"),
+            "VanitySearch.exe",
+            "vanitysearch.exe",
+            "VanitySearch_cuda.exe",
+            "vanitysearch_cuda.exe",
+        ]
+    else:
+        candidates = [
+            os.path.join(bin_dir, "VanitySearch"),
+            os.path.join(bin_dir, "vanitysearch"),
+            os.path.join(bin_dir, "VanitySearch_cuda"),
+            os.path.join(bin_dir, "vanitysearch_cuda"),
+            "VanitySearch",
+            "vanitysearch",
+            "VanitySearch_cuda",
+            "vanitysearch_cuda",
+        ]
+    for cand in candidates:
+        if os.path.isabs(cand) and os.path.isfile(cand):
+            return cand
+        found = shutil.which(cand)
+        if found:
+            return found
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+VANITYSEARCH_PATH = find_vanitysearch_binary()
 # OpenCL/AMD variants from Vanitygen++
 OCLVANITYGEN_PATH = os.path.join(BASE_DIR, "bin", "oclvanitygen.exe")
 OCLVANITYMINER_PATH = os.path.join(BASE_DIR, "bin", "oclvanityminer.exe")
@@ -684,9 +718,9 @@ BUTTONS_ENABLED = {
 # GPU/CPU selection & binaries
 # Only the CUDA-enabled VanitySearch binary is bundled.
 GPU_BACKEND = os.getenv("GPU_BACKEND", "cuda")  # cuda, opencl, cpu, auto, or oclvanitygen
-VANITYSEARCH_BIN_CUDA = VANITYSEARCH_PATH
+VANITYSEARCH_BIN_CUDA = VANITYSEARCH_PATH or ""
 VANITYSEARCH_BIN_OPENCL = ""  # placeholder for future OpenCL support
-VANITYSEARCH_BIN_CPU = VANITYSEARCH_PATH  # CPU fallback shares the same binary
+VANITYSEARCH_BIN_CPU = VANITYSEARCH_PATH or ""  # CPU fallback shares the same binary
 
 FORCE_CPU_FALLBACK = False  # If True, run CPU even if GPU available
 MIN_EXPECTED_GPU_MKEYS = 120.0  # GTX 1060 typical: 150–230 MKeys/s
