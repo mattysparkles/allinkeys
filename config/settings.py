@@ -413,9 +413,13 @@ LOGGING_ENABLED = True  # or False if you want to disable it
 
 
 # ===================== 🔒 SECURITY ==========================
-DASHBOARD_RESET_PASSWORD = os.getenv("DASHBOARD_RESET_PASSWORD", "")
+# The dashboard password is stored as a salted hash to avoid keeping
+# plaintext secrets in memory or on disk.  ``DASHBOARD_PASSWORD_HASH`` can be
+# supplied via environment variable or ``--dashboard-password`` CLI flag.
+DASHBOARD_PASSWORD_HASH = os.getenv("DASHBOARD_PASSWORD_HASH", "")
 DELETE_CONFIRMATION_PASSWORD = os.getenv("DELETE_CONFIRMATION_PASSWORD", "")
-DASHBOARD_PASSWORD = DASHBOARD_RESET_PASSWORD  # Alias for UI compatibility
+# Backward compatible alias used by the GUI module
+DASHBOARD_PASSWORD = DASHBOARD_PASSWORD_HASH
 
 # ===================== ❤️ DONATION INFO ==========================
 SHOW_DONATION_MESSAGE = True
