@@ -349,7 +349,10 @@ LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
 
 # ===================== 🔐 SECURITY / RESET PROTECTION ============
-DASHBOARD_RESET_PASSWORD = "ChangeThisPassword"
+# Provide the dashboard password as a PBKDF2 hash. Use
+# ``python -c 'from utils.auth import hash_password; print(hash_password("yourpw"))'``
+# to generate a value.
+DASHBOARD_PASSWORD_HASH = ""
 DELETE_CONFIRMATION_PASSWORD = "ChangeThisPassword"
 
 # ===================== 💵 DONATION INFO (Shown on Launch) =========
