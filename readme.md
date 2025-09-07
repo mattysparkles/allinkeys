@@ -71,6 +71,33 @@ allinkeys/
 └── requirements.txt
 ```
 
+## 🐳 Docker
+
+A Docker setup is included for running AllInKeys in a containerized
+environment.
+
+### Build the Image
+
+```bash
+docker build -t allinkeys .
+```
+
+### Run a Single Container
+
+```bash
+docker run --gpus all allinkeys
+```
+
+### Scale with Docker Compose
+
+The provided `docker-compose.yml` supports multi‑GPU or clustered
+deployments. Increase the number of replicas to distribute work across
+GPUs or nodes:
+
+```bash
+docker compose up --scale allinkeys=2
+```
+
 ---
 
 ## 🧩 Configuration
