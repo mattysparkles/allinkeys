@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  allinkeys:
+    build: .
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - .:/app
+    command: python main.py
