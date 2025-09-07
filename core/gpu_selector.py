@@ -26,55 +26,80 @@ SELECTION_TIMEOUT = 20  # seconds
 
 
 def list_gpus():
-    """Return a list of available GPUs with OpenCL device indices."""
+    """Return a list of detected GPU devices.
 
-    gpus = []
-    seen = set()
+    The routine attempts to enumerate both CUDA and OpenCL capable hardware
+    using the optional ``GPUtil`` and ``pyopencl`` libraries.  Each entry in the
+    returned list contains at minimum ``type`` (``nvidia``/``amd``/``other``),
+    ``name`` and a monotonically increasing ``id``.  When an OpenCL index is
+    known it is exposed via ``cl_index``.  A ``backend`` field records whether
+    the device was discovered through the CUDA or OpenCL stack (or both).
 
-    # Enumerate all OpenCL GPU devices so that both AMD and NVIDIA cards
-    # receive a valid ``cl_index`` for later context creation.  Falling back to
-    # GPUtil (if available) ensures we still display devices even if OpenCL is
-    # missing or misconfigured.
-    try:
-        cl_index = 0
-        for platform in cl.get_platforms():
-            for device in platform.get_devices(device_type=cl.device_type.GPU):
-                vendor = device.vendor.lower()
-                if "nvidia" in vendor:
-                    gtype = "nvidia"
-                elif "amd" in vendor or "advanced micro devices" in vendor:
-                    gtype = "amd"
-                else:
-                    gtype = "other"
-                name = device.name.strip()
-                entry = {
-                    "type": gtype,
-                    "name": name,
-                    "id": len(gpus),
-                    "cl_index": cl_index,
-                }
-                gpus.append(entry)
-                seen.add(name)
-                cl_index += 1
-    except Exception:
-        pass
+    Missing libraries or enumeration failures emit warnings but do not raise
+    exceptions so the application can gracefully fall back to CPU execution.
+    """
 
-    # Supplement with GPUtil results (no ``cl_index``) for visibility
-    if GPUtil:
+    gpus: list[dict] = []
+    seen: dict[str, dict] = {}
+
+    # ----------------------------- CUDA detection -----------------------------
+    if GPUtil is None:
+        print("⚠️ GPUtil not available; CUDA devices will not be detected.")
+    else:
         try:
             for gpu in GPUtil.getGPUs():
-                if gpu.name not in seen:
-                    gpus.append(
-                        {
-                            "type": "nvidia",
-                            "name": gpu.name,
+                entry = {
+                    "type": "nvidia",
+                    "name": gpu.name,
+                    "id": len(gpus),
+                    "cl_index": None,
+                    "backend": ["CUDA"],
+                }
+                gpus.append(entry)
+                seen[gpu.name] = entry
+        except Exception as exc:
+            print(f"⚠️ CUDA detection failed: {exc}")
+
+    # ---------------------------- OpenCL detection ----------------------------
+    if cl is None:
+        print("⚠️ PyOpenCL not available; OpenCL devices will not be detected.")
+    else:
+        try:
+            cl_index = 0
+            for platform in cl.get_platforms():
+                for device in platform.get_devices(device_type=cl.device_type.GPU):
+                    vendor = device.vendor.lower()
+                    if "nvidia" in vendor:
+                        gtype = "nvidia"
+                    elif "amd" in vendor or "advanced micro devices" in vendor:
+                        gtype = "amd"
+                    else:
+                        gtype = "other"
+                    name = device.name.strip()
+                    existing = seen.get(name)
+                    if existing:
+                        existing["backend"].append("OpenCL")
+                        existing["cl_index"] = cl_index
+                    else:
+                        entry = {
+                            "type": gtype,
+                            "name": name,
                             "id": len(gpus),
-                            "cl_index": None,
+                            "cl_index": cl_index,
+                            "backend": ["OpenCL"],
                         }
-                    )
-                    seen.add(gpu.name)
-        except Exception:
-            pass
+                        gpus.append(entry)
+                        seen[name] = entry
+                    cl_index += 1
+        except Exception as exc:
+            print(f"⚠️ OpenCL detection failed: {exc}")
+
+    # Normalise backend listing
+    for g in gpus:
+        g["backend"] = "/".join(g.get("backend", []))
+
+    if not gpus:
+        print("⚠️ No CUDA or OpenCL GPUs detected; falling back to CPU.")
 
     return gpus
 
@@ -170,11 +195,35 @@ def prompt_user_to_choose(gpus):
     print("  Altcoin Derive →", ", ".join([g["name"] for g in assigned_gpus["altcoin_derive"]]) or "None")
 
 
-def assign_gpu_roles():
+def assign_gpu_roles(preferred_index: int | None = None):
+    """Populate ``assigned_gpus`` based on detected hardware.
+
+    When ``preferred_index`` is provided the corresponding device is selected
+    for both VanitySearch and Altcoin Derive without prompting the user.  If the
+    index is out of range a warning is emitted and the normal interactive flow
+    is used instead.  When no GPUs are detected the function simply prints a
+    warning and returns, allowing the rest of the application to continue using
+    CPU implementations.
+    """
+
     gpus = list_gpus()
     if not gpus:
         print("⚠️ No GPUs found! Proceeding without GPU acceleration.")
         return
+
+    if preferred_index is not None:
+        if 0 <= preferred_index < len(gpus):
+            assigned_gpus["vanitysearch"] = [gpus[preferred_index]]
+            assigned_gpus["altcoin_derive"] = [gpus[preferred_index]]
+            print(
+                f"🎯 GPU Assignments:\n  VanitySearch → {gpus[preferred_index]['name']}\n  Altcoin Derive → {gpus[preferred_index]['name']}"
+            )
+            save_gpu_assignments()
+            return
+        else:
+            print(
+                f"⚠️ Requested GPU index {preferred_index} out of range; falling back to interactive selection."
+            )
 
     prompt_user_to_choose(gpus)
     save_gpu_assignments()

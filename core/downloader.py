@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 from utils.file_utils import find_latest_funded_file
-from utils.network_utils import get_with_https_fallback
+from utils.network_utils import download_file
 
 from config.settings import (
     COIN_DOWNLOAD_URLS,
@@ -22,6 +22,7 @@ from config.coin_definitions import coin_columns
 from core.dashboard import update_dashboard_stat
 from core.logger import log_message
 from config.settings import NORMALIZE_BECH32_LOWER
+from config.constants import DOWNLOAD_SHA256
 
 
 def parse_address_lines(file_obj):
@@ -155,31 +156,38 @@ def _download_single_coin(coin: str, url: str) -> None:
         )
         gz_path = output_full + ".gz"
 
-        r = get_with_https_fallback(url, stream=True, timeout=30)
-        total_size = int(r.headers.get("content-length", 0))
-        downloaded = 0
+        total_size = 0
+        progress_bar = None
+
+        def progress_cb(downloaded: int, total: int) -> None:
+            nonlocal progress_bar, total_size
+            if total:
+                total_size = total
+                if progress_bar is None:
+                    progress_bar = tqdm(
+                        total=total,
+                        unit="B",
+                        unit_scale=True,
+                        desc=f"{coin.upper()} download",
+                        leave=False,
+                    )
+                progress_bar.update(downloaded - progress_bar.n)
+                percent = int(downloaded / total * 100)
+                update_dashboard_stat(f"download_progress.{coin}", percent)
+            else:
+                update_dashboard_stat(f"download_progress.{coin}", downloaded)
+
         update_dashboard_stat(f"download_progress.{coin}", 0)
-        chunk_size = 8192
-        progress_bar = (
-            tqdm(total=total_size, unit="B", unit_scale=True,
-                 desc=f"{coin.upper()} download", leave=False)
-            if total_size else None
+        download_file(
+            url,
+            gz_path,
+            expected_sha256=DOWNLOAD_SHA256.get(url),
+            timeout=30,
+            progress_cb=progress_cb,
         )
-        with open(gz_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=chunk_size):
-                if not chunk:
-                    continue
-                f.write(chunk)
-                downloaded += len(chunk)
-                if progress_bar:
-                    progress_bar.update(len(chunk))
-                if total_size:
-                    percent = int(downloaded / total_size * 100)
-                    update_dashboard_stat(f"download_progress.{coin}", percent)
-                else:
-                    update_dashboard_stat(f"download_progress.{coin}", downloaded)
         if progress_bar:
             progress_bar.close()
+
         log_message(f"{coin.upper()}: Download complete")
         if total_size:
             update_dashboard_stat(f"download_progress.{coin}", 100)
