@@ -34,6 +34,7 @@ from core.seed_tracker import (
     record_seed_range,
     get_condensed_ranges,
 )
+from core.utils.process import popen_with_retry
 
 
 # Runtime trackers
@@ -235,11 +236,12 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
             logger.info(f"Opened {current_output_path} for writing")
             # Launch VanitySearch as a subprocess and stream output to the file
-            proc = subprocess.Popen(
+            proc = popen_with_retry(
                 cmd,
                 stdout=outfile,
                 stderr=subprocess.STDOUT,
                 env={**os.environ, **gpu_env},
+                module="keygen",
             )
             logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd}")
 

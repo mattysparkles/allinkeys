@@ -406,6 +406,8 @@ def _default_metrics():
         "altcoin_gpu_on": False,
         "state": "Initializing",
         "active_processes": [],
+        "popen_failures": {},
+        "last_popen_error": {},
         "csv_check_queue": [],
         "csv_recheck_queue": [],
         "csv_check_progress": {},

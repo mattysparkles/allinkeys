@@ -63,6 +63,7 @@ import core.checkpoint as checkpoint
 from core.gpu_selector import get_altcoin_gpu_ids, list_gpus
 import config.settings as settings
 from core.utils.io_safety import safe_nonempty
+from core.utils.process import start_process_with_retry
 
 
 def safe_str(obj):
@@ -1212,13 +1213,20 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                         name=f"AltcoinWorker-{txt}",
                     )
                     p.daemon = True
-                    p.start()
-                    log_message(
-                        f"Spawned altcoin worker PID {p.pid} for {txt} on GPU {gid if gid is not None else 'CPU'}",
-                        "INFO",
-                    )
-                    processes[gid] = p
-                    queued.add(txt)
+                    try:
+                        start_process_with_retry(p, module="altcoin")
+                        log_message(
+                            f"Spawned altcoin worker PID {p.pid} for {txt} on GPU {gid if gid is not None else 'CPU'}",
+                            "INFO",
+                        )
+                        processes[gid] = p
+                        queued.add(txt)
+                    except Exception as e:
+                        log_message(
+                            f"❌ Failed to spawn altcoin worker for {txt}: {safe_str(e)}",
+                            "ERROR",
+                            exc_info=True,
+                        )
 
             try:
                 while True:
@@ -1302,12 +1310,20 @@ def start_altcoin_conversion_process(shared_shutdown_event, shared_metrics=None,
     # and therefore cannot be a daemon. Marking it as non-daemonic avoids
     # ``daemonic processes are not allowed to have children`` errors.
     process.daemon = False
-    process.start()
-    log_message(
-        f"🚀 Altcoin derive subprocess PID {process.pid} started with args {proc_args}",
-        "INFO",
-    )
-    return process
+    try:
+        start_process_with_retry(process, module="altcoin")
+        log_message(
+            f"🚀 Altcoin derive subprocess PID {process.pid} started with args {proc_args}",
+            "INFO",
+        )
+        return process
+    except Exception as e:
+        log_message(
+            f"❌ Failed to start altcoin derive subprocess: {safe_str(e)}",
+            "ERROR",
+            exc_info=True,
+        )
+        return None
 
 
 if __name__ == "__main__":
