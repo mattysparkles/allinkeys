@@ -3,8 +3,6 @@ import json
 import csv
 csv.field_size_limit(2**30)  # allow very large CSV fields
 import time
-import smtplib
-import requests
 import threading
 import queue
 import subprocess
@@ -13,8 +11,6 @@ try:
     from twilio.rest import Client
 except Exception:  # handle missing twilio dependency
     Client = None
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 import base64
@@ -38,6 +34,12 @@ from config.settings import (
 from core.logger import log_message
 from core.dashboard import get_metric
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
+from core.utils.alert_helpers import (
+    send_email_alert,
+    send_telegram_alert,
+    send_discord_alert,
+    send_home_assistant_alert,
+)
 
 # runtime alert flags that can be toggled from the GUI
 ALERT_FLAGS = {
@@ -280,37 +282,24 @@ def alert_match(match_data, test_mode=False):
 
     # 📧 Email Alert
     if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED"):
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = ALERT_EMAIL_FROM
-            msg['To'] = ",".join(ALERT_EMAIL_TO) if isinstance(ALERT_EMAIL_TO, list) else ALERT_EMAIL_TO
-            msg['Subject'] = f"AllInKeys {alert_type}"
-            msg.attach(MIMEText(match_text, 'plain'))
-
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
-            server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            server.send_message(msg)
-            server.quit()
-            log_message("[ALERT] ✉️ Email sent", "INFO")
+        if send_email_alert(
+            match_text,
+            ALERT_EMAIL_FROM,
+            ALERT_EMAIL_TO,
+            f"AllInKeys {alert_type}",
+            SMTP_SERVER,
+            SMTP_PORT,
+            SMTP_USERNAME,
+            SMTP_PASSWORD,
+        ):
             _safe_inc_metric("alerts_sent_today.email")
             _safe_inc_metric("alerts_sent_lifetime.email")
-        except Exception as e:
-            log_message(f"❌ Email alert error: {e}", "WARNING")
 
     # 📲 Telegram Alert
     if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT"):
-        try:
-            telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
-            if resp.ok and resp.json().get("ok"):
-                log_message("[ALERT] 📟 Telegram sent", "INFO")
-                _safe_inc_metric("alerts_sent_today.telegram")
-                _safe_inc_metric("alerts_sent_lifetime.telegram")
-            else:
-                log_message(f"❌ Telegram alert failed: {resp.text}", "ERROR")
-        except Exception as e:
-            log_message(f"❌ Telegram alert error: {e}", "WARNING")
+        if send_telegram_alert(match_text, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID):
+            _safe_inc_metric("alerts_sent_today.telegram")
+            _safe_inc_metric("alerts_sent_lifetime.telegram")
 
     # 📱 SMS via Twilio
     if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client:
@@ -329,35 +318,15 @@ def alert_match(match_data, test_mode=False):
 
     # 💬 Discord Alert
     if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):
-        try:
-            data = {"content": match_text}
-            resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
-            if resp.ok:
-                log_message("💬 Discord alert sent.", "INFO")
-                _safe_inc_metric("alerts_sent_today.discord")
-                _safe_inc_metric("alerts_sent_lifetime.discord")
-            else:
-                log_message(f"❌ Discord alert failed: {resp.text}", "ERROR")
-        except Exception as e:
-            log_message(f"❌ Discord alert error: {e}", "ERROR")
+        if send_discord_alert(match_text, DISCORD_WEBHOOK_URL):
+            _safe_inc_metric("alerts_sent_today.discord")
+            _safe_inc_metric("alerts_sent_lifetime.discord")
 
     # 🏠 Home Assistant Alert
     if ALERT_FLAGS.get("ENABLE_HOME_ASSISTANT_ALERT"):
-        try:
-            headers = {
-                "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            payload = {"message": match_text}
-            resp = requests.post(HOME_ASSISTANT_URL, headers=headers, json=payload, timeout=10)
-            if resp.ok:
-                log_message("🏠 Home Assistant alert sent.", "INFO")
-                _safe_inc_metric("alerts_sent_today.home_assistant")
-                _safe_inc_metric("alerts_sent_lifetime.home_assistant")
-            else:
-                log_message(f"❌ Home Assistant alert failed: {resp.text}", "ERROR")
-        except Exception as e:
-            log_message(f"❌ Home Assistant alert error: {e}", "ERROR")
+        if send_home_assistant_alert(match_text, HOME_ASSISTANT_URL, HOME_ASSISTANT_TOKEN):
+            _safe_inc_metric("alerts_sent_today.home_assistant")
+            _safe_inc_metric("alerts_sent_lifetime.home_assistant")
 
     # ☁ PGP + Cloud Upload
     if ALERT_FLAGS.get("ENABLE_CLOUD_UPLOAD"):
