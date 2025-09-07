@@ -357,7 +357,6 @@ def _default_metrics():
         "processed_pages": 0,
         "checked_pages": 0,
         "matched_keys": 0,
-        "batches_completed": 0,
         "keys_generated_today": 0,
         "mnemonics_generated_today": 0,
         "addresses_generated_today": {
