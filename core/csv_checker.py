@@ -20,7 +20,6 @@ from config.settings import (
     LOG_LEVEL,
     NORMALIZE_BECH32_LOWER,
     MATCHES_DIR,
-    PGP_PUBLIC_KEY_PATH,
 )
 from utils.file_utils import find_latest_funded_file
 from core.alerts import alert_match
