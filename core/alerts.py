@@ -68,6 +68,32 @@ ALERT_CHANNELS = [
     "home_assistant",
 ]
 
+# Per-service rate limit (seconds). Override defaults via environment variables like
+# ``EMAIL_ALERT_RATE_LIMIT`` or set ``DEFAULT_ALERT_RATE_LIMIT`` for all channels.
+DEFAULT_ALERT_RATE_LIMIT = int(os.getenv("DEFAULT_ALERT_RATE_LIMIT", "0"))
+RATE_LIMIT_SECONDS = {
+    channel: int(os.getenv(f"{channel.upper()}_ALERT_RATE_LIMIT", DEFAULT_ALERT_RATE_LIMIT))
+    for channel in ALERT_CHANNELS
+}
+_last_alert_times = {channel: 0.0 for channel in ALERT_CHANNELS}
+
+
+def _rate_limited(channel: str) -> bool:
+    """Return True if the given channel is currently rate limited."""
+    limit = RATE_LIMIT_SECONDS.get(channel, 0)
+    if limit <= 0:
+        return False
+    now = time.time()
+    elapsed = now - _last_alert_times.get(channel, 0)
+    if elapsed < limit:
+        log_message(
+            f"⏳ {channel} alert skipped due to rate limit (wait {int(limit - elapsed)}s)",
+            "INFO",
+        )
+        return True
+    _last_alert_times[channel] = now
+    return False
+
 # Queue for sequential audio alerts
 audio_queue = queue.Queue()
 audio_thread = None
@@ -175,6 +201,8 @@ init_pgp()
 
 def send_phone_call_alert(message: str):
     """Send a Twilio phone call if enabled."""
+    if _rate_limited("phone"):
+        return
     if not (ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT") and Client):
         return
     try:
@@ -258,7 +286,7 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ Failed to store encrypted match: {exc}", "ERROR")
 
     # 🖥️ Desktop Window Alert
-    if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT"):
+    if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT") and not _rate_limited("popup"):
         try:
             threading.Thread(target=_show_desktop_popup, args=(alert_type,), daemon=True).start()
             log_message("✅ Desktop popup displayed.", "INFO")
@@ -269,7 +297,11 @@ def alert_match(match_data, test_mode=False):
 
     # 🔊 Sound Alert (queued)
     skip_audio = test_mode or os.path.basename(csv_file) == "test_alerts.csv"
-    if ALERT_FLAGS.get("ENABLE_AUDIO_ALERT_LOCAL") and not skip_audio:
+    if (
+        ALERT_FLAGS.get("ENABLE_AUDIO_ALERT_LOCAL")
+        and not skip_audio
+        and not _rate_limited("audio")
+    ):
         if os.path.exists(ALERT_SOUND_FILE):
             _start_audio_worker()
             audio_queue.put(ALERT_SOUND_FILE)
@@ -279,7 +311,7 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ Sound file not found: {ALERT_SOUND_FILE}", "ERROR")
 
     # 📧 Email Alert
-    if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED"):
+    if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED") and not _rate_limited("email"):
         try:
             msg = MIMEMultipart()
             msg['From'] = ALERT_EMAIL_FROM
@@ -299,7 +331,7 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ Email alert error: {e}", "WARNING")
 
     # 📲 Telegram Alert
-    if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT"):
+    if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT") and not _rate_limited("telegram"):
         try:
             telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
             resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
@@ -313,7 +345,7 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ Telegram alert error: {e}", "WARNING")
 
     # 📱 SMS via Twilio
-    if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client:
+    if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client and not _rate_limited("sms"):
         try:
             if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_SMS]):
                 raise ValueError("Missing Twilio SMS credentials")
@@ -328,7 +360,7 @@ def alert_match(match_data, test_mode=False):
     send_phone_call_alert(match_text)
 
     # 💬 Discord Alert
-    if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):
+    if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT") and not _rate_limited("discord"):
         try:
             data = {"content": match_text}
             resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
@@ -342,7 +374,7 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ Discord alert error: {e}", "ERROR")
 
     # 🏠 Home Assistant Alert
-    if ALERT_FLAGS.get("ENABLE_HOME_ASSISTANT_ALERT"):
+    if ALERT_FLAGS.get("ENABLE_HOME_ASSISTANT_ALERT") and not _rate_limited("home_assistant"):
         try:
             headers = {
                 "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
@@ -360,7 +392,7 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ Home Assistant alert error: {e}", "ERROR")
 
     # ☁ PGP + Cloud Upload
-    if ALERT_FLAGS.get("ENABLE_CLOUD_UPLOAD"):
+    if ALERT_FLAGS.get("ENABLE_CLOUD_UPLOAD") and not _rate_limited("cloud"):
         try:
             with open(PGP_PUBLIC_KEY_PATH, "rb") as pubkey_file:
                 pubkey = RSA.import_key(pubkey_file.read())
@@ -378,17 +410,18 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ PGP/cloud upload error: {e}", "ERROR")
 
     # 📜 Local match log
-    try:
-        os.makedirs(MATCH_LOG_DIR, exist_ok=True)
-        ts = datetime.utcnow().strftime('%Y-%m-%d')
-        log_path = os.path.join(MATCH_LOG_DIR, f"matches_{ts}.log")
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(match_data) + "\n")
-        log_message("📝 Match written to local log.", "INFO")
-        _safe_inc_metric("alerts_sent_today.file")
-        _safe_inc_metric("alerts_sent_lifetime.file")
-    except Exception as e:
-        log_message(f"❌ Local match logging error: {e}", "ERROR")
+    if not _rate_limited("file"):
+        try:
+            os.makedirs(MATCH_LOG_DIR, exist_ok=True)
+            ts = datetime.utcnow().strftime('%Y-%m-%d')
+            log_path = os.path.join(MATCH_LOG_DIR, f"matches_{ts}.log")
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(match_data) + "\n")
+            log_message("📝 Match written to local log.", "INFO")
+            _safe_inc_metric("alerts_sent_today.file")
+            _safe_inc_metric("alerts_sent_lifetime.file")
+        except Exception as e:
+            log_message(f"❌ Local match logging error: {e}", "ERROR")
 
 
 def trigger_startup_alerts(shared_metrics=None):

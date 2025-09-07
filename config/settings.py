@@ -7,8 +7,42 @@ import os
 import shutil
 from datetime import datetime
 from dotenv import load_dotenv
+from typing import Dict
 
 load_dotenv()
+
+
+# --------------------- API KEY ROTATION ---------------------
+_API_KEY_STATES: Dict[str, Dict[str, object]] = {}
+
+
+def _init_api_key(name: str) -> str:
+    """Load API key(s) for ``name`` supporting comma-separated pools.
+
+    The plural environment variable (``<NAME>S``) takes precedence and may
+    contain a comma-separated list of keys.  If absent, the singular
+    ``<NAME>`` is used.  The first key becomes the active value.
+    """
+    list_var = f"{name}S"
+    keys = [k.strip() for k in os.getenv(list_var, "").split(",") if k.strip()]
+    if not keys:
+        single = os.getenv(name, "")
+        keys = [single] if single else [""]
+    _API_KEY_STATES[name] = {"keys": keys, "index": 0}
+    os.environ[name] = keys[0]
+    return keys[0]
+
+
+def rotate_api_keys():
+    """Advance to the next API key for all services."""
+    for env_name, state in _API_KEY_STATES.items():
+        state["index"] = (state["index"] + 1) % len(state["keys"])
+        new_val = state["keys"][state["index"]]
+        globals()[env_name] = new_val
+        os.environ[env_name] = new_val
+        if env_name == "TWILIO_AUTH_TOKEN":
+            globals()["TWILIO_TOKEN"] = new_val
+            os.environ["TWILIO_TOKEN"] = new_val
 # --- Paths ---
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
@@ -476,14 +510,14 @@ ALERT_EMAIL_TO = ALERT_EMAIL_RECIPIENTS  # DONT CHANGE HERE CHANGE ALERT_EMAIL_R
 # === TELEGRAM BOT ALERT CONFIGURATION ===
 ALERT_TELEGRAM_ENABLED = True
 ENABLE_TELEGRAM_ALERT = ALERT_TELEGRAM_ENABLED # alias for backward compatibility dont modify
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_TOKEN = _init_api_key("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # === SMS VIA TWILIO ===
 ALERT_SMS_ENABLED = True
 ENABLE_SMS_ALERT = ALERT_SMS_ENABLED # alias for backward compatibility dont modify
-TWILIO_SID = os.getenv("TWILIO_SID", "")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_SID = _init_api_key("TWILIO_SID")
+TWILIO_AUTH_TOKEN = _init_api_key("TWILIO_AUTH_TOKEN")
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
 TWILIO_TO_NUMBER = os.getenv("TWILIO_TO_NUMBER", "")
 TWILIO_TO = TWILIO_TO_NUMBER # Alias do not change
@@ -497,14 +531,14 @@ TWILIO_TO_CALL = TWILIO_CALL_TO_NUMBER # Alias do not change
 # === DISCORD WEBHOOK ALERTS ===
 ALERT_DISCORD_ENABLED = False
 ENABLE_DISCORD_ALERT = ALERT_DISCORD_ENABLED # Alias do not change
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+DISCORD_WEBHOOK_URL = _init_api_key("DISCORD_WEBHOOK_URL")
 
 # === HOME ASSISTANT / IoT WEBHOOK ===
 ALERT_HOME_ASSISTANT_ENABLED = False
 ENABLE_HOME_ASSISTANT_ALERT = ALERT_HOME_ASSISTANT_ENABLED # Alias do not change
 HOME_ASSISTANT_WEBHOOK = os.getenv("HOME_ASSISTANT_WEBHOOK", "")
 HOME_ASSISTANT_URL = HOME_ASSISTANT_WEBHOOK # Alias do not change
-HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN", "")
+HOME_ASSISTANT_TOKEN = _init_api_key("HOME_ASSISTANT_TOKEN")
 
 # === CLOUD STORAGE MATCH BACKUPS ===
 
