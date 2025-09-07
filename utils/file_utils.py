@@ -1,7 +1,7 @@
 import os
 from glob import glob
 
-from config.settings import DOWNLOADS_DIR, FULL_DIR, UNIQUE_DIR
+from config.settings import DOWNLOADS_DIR
 
 
 def find_latest_funded_file(

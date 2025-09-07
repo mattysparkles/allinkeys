@@ -7,7 +7,6 @@ Preserves all columns and GPU pipeline. Flushes rows as it writes.
 """
 
 import signal
-import sys
 import os
 import csv
 import hashlib
@@ -21,7 +20,6 @@ from eth_hash.auto import keccak
 from ecdsa import SigningKey, SECP256k1
 import time
 import multiprocessing
-import io
 import pathlib
 from queue import Empty
 
@@ -39,15 +37,7 @@ cpu_fallback_active = False
 MAX_FIELD_SIZE = 10000  # 10KB per field safety cap
 
 from config.settings import (
-    ENABLE_ALTCOIN_DERIVATION,
     ENABLE_SEED_VERIFICATION,
-    DOGE,
-    DASH,
-    LTC,
-    BCH,
-    RVN,
-    PEP,
-    ETH,
     CSV_DIR,
     VANITY_OUTPUT_DIR,
     MAX_CSV_MB,
@@ -58,8 +48,7 @@ from config.settings import (
 )
 from core.logger import log_message
 from core.dashboard import update_dashboard_stat, get_metric
-from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
-import core.checkpoint as checkpoint
+from core.worker_bootstrap import _safe_inc_metric
 from core.gpu_selector import get_altcoin_gpu_ids, list_gpus
 import config.settings as settings
 from core.utils.io_safety import safe_nonempty
@@ -1002,7 +991,6 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q
             return
         batch_id = None
         context = None
-        device_name = "CPU"
         if gpu_id is not None:
             try:
                 gpu_list = list_gpus()
@@ -1020,7 +1008,6 @@ def _convert_file_worker(txt_file, pause_event, shutdown_event, gpu_id, result_q
                     "DEBUG",
                 )
                 context = cl.Context([device])
-                device_name = f"GPU{gpu_id} {device.name}"
                 log_message(
                     f"GPU worker context established for {device.vendor} {device.name}",
                     "INFO",
@@ -1067,7 +1054,7 @@ from core.logger import initialize_logging
 
 def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_event=None, log_q=None, gpu_flag=None):
     initialize_logging(log_q)
-    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric
     try:
         ensure_metrics_ready(shared_metrics)
         _safe_set_metric("status.altcoin", "Running")

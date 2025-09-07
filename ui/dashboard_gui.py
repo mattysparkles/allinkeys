@@ -20,25 +20,17 @@ from config.settings import (
     CONFIG_FILE_PATH,
     METRICS_LABEL_MAP,
     LOGO_ASCII,
-    ALERT_OPTIONS,
     ALERT_CHECKBOXES,
     ALERT_CREDENTIAL_WARNINGS,
     DASHBOARD_PASSWORD,
-    SHOW_ALERTS_SUCCESSFULLY_CONFIGURED_TYPES,
     SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES,
     SHOW_CONTROL_BUTTONS_MAIN,
-    SHOW_REFRESH_DASHBOARD_DATA_BUTTON,
     SHOW_DELETE_DASHBOARD_DATA_BUTTON,
     SHOW_DONATION_MESSAGE,
-    DELETE_VANITY_SEARCH_LOGS,
-    DELETE_CSV_FILES,
-    DELETE_SYSTEM_LOGS,
-    DELETE_CSV_CHECKING_LOGS,
     OPEN_CONFIG_FILE_FROM_DASHBOARD,
     GPU_STRATEGY,
     ENABLE_P2PKH,
     ENABLE_P2WPKH,
-    ENABLE_TAPROOT,
 )
 
 from core.dashboard import (
@@ -775,7 +767,7 @@ class DashboardGUI:
 def start_dashboard():
     root = ttk.Window(themename="darkly")
     root.geometry("900x600")
-    app = DashboardGUI(root)
+    DashboardGUI(root)
     root.mainloop()
 
 

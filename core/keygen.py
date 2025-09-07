@@ -1,11 +1,9 @@
 # core/keygen.py
 
 import os
-import sys
 import time
 import subprocess
 import threading
-import logging
 import secrets
 import platform
 from datetime import datetime
@@ -13,12 +11,7 @@ from collections import deque
 from config.settings import (
     VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
-    BATCH_SIZE,
-    ADDR_PER_FILE,
-    LOGGING_ENABLED,
-    CHECKPOINT_PATH,
     MAX_OUTPUT_FILE_SIZE,
-    MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
     FILES_PER_BATCH,
     find_vanitysearch_binary,
@@ -449,7 +442,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
 
     except KeyboardInterrupt:
         logger.info("🛑 Keygen loop interrupted by user. Exiting cleanly.")
-    except Exception as e:
+    except Exception:
         # Log full stack trace for any unexpected failure
         logger.exception("❌ Unexpected error in keygen loop")
     finally:

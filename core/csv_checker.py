@@ -16,7 +16,6 @@ from config.settings import (
     CSV_CHECKPOINT_STATE,
     ENABLE_PGP,
     PGP_PUBLIC_KEY_PATH,
-    LOG_LEVEL,
     NORMALIZE_BECH32_LOWER,
 )
 from utils.file_utils import find_latest_funded_file
@@ -418,7 +417,7 @@ from core.logger import initialize_logging
 
 def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False, log_q=None):
     initialize_logging(log_q)
-    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric
     try:
         ensure_metrics_ready(shared_metrics)
         from core.dashboard import register_control_events
@@ -490,7 +489,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
 
 def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False, log_q=None):
     initialize_logging(log_q)
-    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric
     try:
         ensure_metrics_ready(shared_metrics)
         from core.dashboard import register_control_events

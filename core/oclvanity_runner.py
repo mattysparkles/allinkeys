@@ -2,7 +2,6 @@ import os
 import re
 import subprocess
 import time
-from typing import Optional
 
 from config.settings import (
     OCLVANITYGEN_PATH,

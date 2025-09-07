@@ -28,7 +28,7 @@ from config.settings import (
     find_vanitysearch_binary,
 )
 from core.logger import get_logger, log_message
-from core.dashboard import set_metric, update_dashboard_stat
+from core.dashboard import update_dashboard_stat
 from core.utils.io_safety import atomic_open, atomic_commit
 from core.vanity_io import RollingAtomicWriter, ensure_dir
 from core.oclvanity_runner import run_oclvanitygen

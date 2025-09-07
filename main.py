@@ -4,14 +4,12 @@ import os
 import io
 import time
 import sys
-import signal
 import argparse
 import multiprocessing
 import threading
 import subprocess
 from datetime import datetime, timedelta
 from multiprocessing import Process
-from core.logger import get_logger
 import psutil
 
 # Wrap stdout once with UTF-8 encoding if not already wrapped
@@ -46,13 +44,11 @@ from config.settings import (
     ENABLE_CHECKPOINT_RESTORE, CHECKPOINT_INTERVAL_SECONDS,
     LOGO_ART, ENABLE_DAY_ONE_CHECK, ENABLE_UNIQUE_RECHECK,
     ENABLE_DASHBOARD, ENABLE_KEYGEN, ENABLE_ALERTS,
-    ENABLE_BACKLOG_CONVERSION, LOG_DIR, CONFIG_FILE_PATH,
-    CSV_DIR, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
-    BACKLOG_PAUSE_THRESHOLD, BACKLOG_RESUME_THRESHOLD,
+    ENABLE_BACKLOG_CONVERSION, LOG_DIR, CSV_DIR, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
     find_vanitysearch_binary,
 )
 
-from core.logger import log_message, start_listener, stop_listener, get_logger
+from core.logger import log_message, start_listener, stop_listener
 from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint
 from core.downloader import download_and_compare_address_lists, generate_test_csv
 from core.csv_checker import check_csvs_day_one, check_csvs
@@ -60,15 +56,12 @@ from core.btc_only_checker import btc_only_checker_loop
 from core.alerts import trigger_startup_alerts, alert_match
 from core.dashboard import (
     update_dashboard_stat,
-    _default_metrics,
     init_shared_metrics,
     init_dashboard_manager,
     get_current_metrics,
     get_metric,
     set_metric,
-    warn_rate_limited,
 )
-import core.dashboard as dashboard_core
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
 
@@ -104,7 +97,7 @@ from core.gpu_selector import (
 
 
 def metrics_updater(shared_metrics=None):
-    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
+    from core.worker_bootstrap import ensure_metrics_ready
     try:
         ensure_metrics_ready(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -222,7 +215,6 @@ def metrics_updater(shared_metrics=None):
                 stats['backlog_eta'] = 'N/A'
 
             prog = keygen_progress()
-            curr_today = get_metric('keys_generated_today', 0)
             curr_lifetime = get_metric('keys_generated_lifetime', 0)
             current_kps = get_metric('keys_per_sec', 0)
             if current_kps > 0:
@@ -259,7 +251,6 @@ def should_skip_download_today(download_dir):
 
 def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q):
     from core.keygen import start_keygen_loop
-    from core.backlog import start_backlog_conversion_loop  # Optional non-GPU parser
     from core.dashboard import init_shared_metrics
 
     try:
