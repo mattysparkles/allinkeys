@@ -71,6 +71,7 @@ def _make_args(**kwargs):
         puzzle=None,
         every=False,
         target=False,
+        gpu_index=None,
     )
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
