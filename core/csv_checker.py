@@ -25,7 +25,7 @@ from core.alerts import alert_match
 from config.coin_definitions import coin_columns
 from core.logger import get_logger
 from utils.pgp_utils import encrypt_with_pgp
-from core.dashboard import update_dashboard_stat, get_metric
+from core.dashboard import update_dashboard_stat, get_metric, record_rate
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 from utils.balance_checker import fetch_live_balance
 from core.downloader import load_btc_funded_multi
@@ -467,6 +467,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                 _safe_inc_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
         update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
         update_dashboard_stat("addresses_checked_lifetime", get_metric("addresses_checked_lifetime"))
+        rows_per_sec = rows_scanned / duration_sec if duration_sec > 0 else 0
+        record_rate("csv_checker.rows_per_sec", rows_per_sec)
 
         logger.info(f"✅ {'Recheck' if recheck else 'Check'} complete: {len(new_matches)} matches found")
         logger.info(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s")
