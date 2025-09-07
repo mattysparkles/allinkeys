@@ -6,44 +6,14 @@ Auto-merged to restore full functionality.
 import os
 import shutil
 from datetime import datetime
-from dotenv import load_dotenv
 from typing import Dict
+from dotenv import load_dotenv
 
 load_dotenv()
-
-
-# --------------------- API KEY ROTATION ---------------------
-_API_KEY_STATES: Dict[str, Dict[str, object]] = {}
-
-
-def _init_api_key(name: str) -> str:
-    """Load API key(s) for ``name`` supporting comma-separated pools.
-
-    The plural environment variable (``<NAME>S``) takes precedence and may
-    contain a comma-separated list of keys.  If absent, the singular
-    ``<NAME>`` is used.  The first key becomes the active value.
-    """
-    list_var = f"{name}S"
-    keys = [k.strip() for k in os.getenv(list_var, "").split(",") if k.strip()]
-    if not keys:
-        single = os.getenv(name, "")
-        keys = [single] if single else [""]
-    _API_KEY_STATES[name] = {"keys": keys, "index": 0}
-    os.environ[name] = keys[0]
-    return keys[0]
-
-
-def rotate_api_keys():
-    """Advance to the next API key for all services."""
-    for env_name, state in _API_KEY_STATES.items():
-        state["index"] = (state["index"] + 1) % len(state["keys"])
-        new_val = state["keys"][state["index"]]
-        globals()[env_name] = new_val
-        os.environ[env_name] = new_val
-        if env_name == "TWILIO_AUTH_TOKEN":
-            globals()["TWILIO_TOKEN"] = new_val
-            os.environ["TWILIO_TOKEN"] = new_val
-
+# --- Paths ---
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_DIR = os.path.join(ROOT_DIR, "logs")
+...
 # ===================== 🔌 SYSTEM PATHS ==========================
 # Root of the repository
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -257,8 +227,47 @@ ENABLE_DESKTOP_WINDOW_ALERT = True
 ALERT_POPUP_COLOR_1 = "#FF0000"
 ALERT_POPUP_COLOR_2 = "#000000"
 
+# --------------------- API KEY ROTATION ---------------------
+_API_KEY_STATES: Dict[str, Dict[str, object]] = {}
+
+
+def _init_api_key(name: str) -> str:
+    """Load API key(s) for ``name`` supporting comma-separated pools.
+
+    The plural environment variable (``<NAME>S``) takes precedence and may
+    contain a comma-separated list of keys. If absent, the singular
+    ``<NAME>`` is used. The first key becomes the active value.
+    """
+
+    list_var = f"{name}S"
+    keys = [k.strip() for k in os.getenv(list_var, "").split(",") if k.strip()]
+    if not keys:
+        single = os.getenv(name, "")
+        keys = [single] if single else [""]
+    _API_KEY_STATES[name] = {"keys": keys, "index": 0}
+    os.environ[name] = keys[0]
+    globals()[name] = keys[0]
+    if name == "TWILIO_AUTH_TOKEN":
+        globals()["TWILIO_TOKEN"] = keys[0]
+        os.environ["TWILIO_TOKEN"] = keys[0]
+    return keys[0]
+
+
+def rotate_api_keys():
+    """Advance to the next API key for all services."""
+    for env_name, state in _API_KEY_STATES.items():
+        if len(state["keys"]) <= 1:
+            continue
+        state["index"] = (state["index"] + 1) % len(state["keys"])
+        new_val = state["keys"][state["index"]]
+        globals()[env_name] = new_val
+        os.environ[env_name] = new_val
+        if env_name == "TWILIO_AUTH_TOKEN":
+            globals()["TWILIO_TOKEN"] = new_val
+            os.environ["TWILIO_TOKEN"] = new_val
+
 # ===================== 🔗 API KEYS ==========================
-TOKENVIEW_API_KEY = os.getenv("TOKENVIEW_API_KEY", "")
+TOKENVIEW_API_KEY = _init_api_key("TOKENVIEW_API_KEY")
 
 # ===================== 🌍 COIN SOURCES ==========================
 COIN_DOWNLOAD_URLS = {
