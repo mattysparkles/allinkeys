@@ -78,38 +78,50 @@ VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts
 
 
 def find_vanitysearch_binary():
-    """Return the first VanitySearch binary found for the host OS."""
+    """Return the first VanitySearch binary found for the host OS.
+
+    ``VanitySearch`` ships as ``VanitySearch.exe`` on Windows but may be
+    compiled without an extension on Linux.  Some environments (e.g. WSL)
+    can execute either variant, so we search for both forms regardless of
+    platform with OS-preferred names checked first.
+    """
     bin_dir = os.path.join(BASE_DIR, "bin")
-    if os.name == "nt":
-        candidates = [
-            os.path.join(bin_dir, "VanitySearch.exe"),
-            os.path.join(bin_dir, "vanitysearch.exe"),
-            os.path.join(bin_dir, "VanitySearch_cuda.exe"),
-            os.path.join(bin_dir, "vanitysearch_cuda.exe"),
-            "VanitySearch.exe",
-            "vanitysearch.exe",
-            "VanitySearch_cuda.exe",
-            "vanitysearch_cuda.exe",
-        ]
-    else:
-        candidates = [
-            os.path.join(bin_dir, "VanitySearch"),
-            os.path.join(bin_dir, "vanitysearch"),
-            os.path.join(bin_dir, "VanitySearch_cuda"),
-            os.path.join(bin_dir, "vanitysearch_cuda"),
-            "VanitySearch",
-            "vanitysearch",
-            "VanitySearch_cuda",
-            "vanitysearch_cuda",
-        ]
+
+    exe_candidates = [
+        os.path.join(bin_dir, "VanitySearch.exe"),
+        os.path.join(bin_dir, "vanitysearch.exe"),
+        os.path.join(bin_dir, "VanitySearch_cuda.exe"),
+        os.path.join(bin_dir, "vanitysearch_cuda.exe"),
+        "VanitySearch.exe",
+        "vanitysearch.exe",
+        "VanitySearch_cuda.exe",
+        "vanitysearch_cuda.exe",
+    ]
+    nix_candidates = [
+        os.path.join(bin_dir, "VanitySearch"),
+        os.path.join(bin_dir, "vanitysearch"),
+        os.path.join(bin_dir, "VanitySearch_cuda"),
+        os.path.join(bin_dir, "vanitysearch_cuda"),
+        "VanitySearch",
+        "vanitysearch",
+        "VanitySearch_cuda",
+        "vanitysearch_cuda",
+    ]
+
+    # Windows prefers ``.exe`` binaries while POSIX environments prefer the
+    # extensionless names.  Include both sets so running a Windows binary from
+    # WSL (or vice-versa) still works.
+    candidates = exe_candidates + nix_candidates if os.name == "nt" else nix_candidates + exe_candidates
+
     for cand in candidates:
-        if os.path.isabs(cand) and os.path.isfile(cand):
-            return cand
-        found = shutil.which(cand)
-        if found:
-            return found
-        if os.path.isfile(cand):
-            return cand
+        # Resolve absolute/relative candidates and ensure executability.
+        path = cand if os.path.isabs(cand) else shutil.which(cand) or cand
+        if not os.path.isfile(path):
+            continue
+        if os.name != "nt" and not os.access(path, os.X_OK):
+            # Skip non-executable files on POSIX (e.g. bundled Windows .exe).
+            continue
+        return path
     return None
 
 
