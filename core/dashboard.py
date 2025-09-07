@@ -22,6 +22,7 @@ from config.settings import (
     MANUAL_TIME_ZONE_OVERRIDE,
     GPU_STRATEGY,
     PAUSE_WARNING_RATELIMIT_SECONDS,
+    COIN_DOWNLOAD_URLS,
 )
 try:
     from multiprocessing.managers import DictProxy
@@ -427,6 +428,7 @@ def _default_metrics():
         "btc_ranges_last_updated": "N/A",
         "btc_ranges_files_ready": False,
         "btc_ranges_updated_today": False,
+        "download_progress": {coin: 0 for coin in COIN_DOWNLOAD_URLS},
         "vanity_backlog_count": 0,
         "btc_only_files_checked_today": 0,
         "btc_only_matches_found_today": 0,

@@ -163,6 +163,7 @@ class DashboardGUI:
             "gpu_stats", "gpu_assignments", "gpu_strategy", "gpu_assignment",
             "vanity_gpu_on", "altcoin_gpu_on", "uptime",
             "vanity_progress_percent", "last_updated", "status",
+            "download_progress",
         }
         csv_stats = {
             "csv_checked_today", "csv_rechecked_today",
