@@ -2,7 +2,6 @@ import os
 import re
 import subprocess
 import time
-import shutil
 import tempfile
 from typing import Dict, List, Tuple, Optional
 
@@ -26,6 +25,7 @@ from config.settings import (
     ENABLE_BC1_DEFAULT,
     VANITY_MODE,
     OCLVANITYGEN_PATH,
+    find_vanitysearch_binary,
 )
 from core.logger import get_logger, log_message
 from core.dashboard import set_metric, update_dashboard_stat
@@ -64,7 +64,7 @@ def list_devices() -> Dict[str, List[Tuple[int, str]]]:
         "opencl": VANITYSEARCH_BIN_OPENCL,
     }
     for backend, bin_path in binaries.items():
-        if not os.path.exists(bin_path):
+        if not bin_path or not os.path.exists(bin_path):
             continue
         out = _run_binary(bin_path, ["-l"])
         entries: List[Tuple[int, str]] = []
@@ -80,18 +80,18 @@ def list_devices() -> Dict[str, List[Tuple[int, str]]]:
 _SELECTED_BACKEND: str = "cpu"
 _SELECTED_DEVICE_ID: Optional[int] = None
 _SELECTED_DEVICE_NAME: str = "CPU"
-_SELECTED_BINARY: str = VANITYSEARCH_BIN_CPU
+_SELECTED_BINARY: str = VANITYSEARCH_BIN_CPU or ""
 
 
 def resolve_vanitysearch_binary(backend: str) -> str:
     """Return the VanitySearch binary path for ``backend``."""
     if backend == "cuda":
-        return VANITYSEARCH_BIN_CUDA
+        return VANITYSEARCH_BIN_CUDA or find_vanitysearch_binary()
     if backend == "opencl":
         return VANITYSEARCH_BIN_OPENCL
     if backend == "oclvanitygen":
         return OCLVANITYGEN_PATH
-    return VANITYSEARCH_BIN_CPU
+    return VANITYSEARCH_BIN_CPU or find_vanitysearch_binary()
 
 
 def probe_device() -> Tuple[str, Optional[int], str, str]:
@@ -119,7 +119,9 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
                         break
 
     binary = resolve_vanitysearch_binary(backend)
-    if backend in ("cuda", "opencl", "oclvanitygen") and not os.path.exists(binary):
+    if backend in ("cuda", "opencl", "oclvanitygen") and (
+        not binary or not os.path.exists(binary)
+    ):
         _warn_once("binary_missing", f"GPU backend {backend} selected but binary missing. Falling back to CPU")
         backend = "cpu"
         device_id = None
@@ -267,46 +269,10 @@ get_selected_device_name = lambda: _SELECTED_DEVICE_NAME
 
 
 # --- New unified generator --------------------------------------------------
-def _bin_dir() -> str:
-    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "bin")
-
-
-def _which(p: str) -> Optional[str]:
-    if os.path.isabs(p) and os.path.isfile(p):
-        return p
-    f = shutil.which(p)
-    return f if f else (p if os.path.isfile(p) else None)
 
 
 def _resolve_exe() -> Optional[str]:
-    bin_dir = _bin_dir()
-    if os.name == "nt":
-        candidates = [
-            os.path.join(bin_dir, "VanitySearch.exe"),
-            os.path.join(bin_dir, "vanitysearch.exe"),
-            os.path.join(bin_dir, "VanitySearch_cuda.exe"),
-            os.path.join(bin_dir, "vanitysearch_cuda.exe"),
-            "VanitySearch.exe",
-            "vanitysearch.exe",
-            "VanitySearch_cuda.exe",
-            "vanitysearch_cuda.exe",
-        ]
-    else:
-        candidates = [
-            os.path.join(bin_dir, "VanitySearch"),
-            os.path.join(bin_dir, "vanitysearch"),
-            os.path.join(bin_dir, "VanitySearch_cuda"),
-            os.path.join(bin_dir, "vanitysearch_cuda"),
-            "VanitySearch",
-            "vanitysearch",
-            "VanitySearch_cuda",
-            "vanitysearch_cuda",
-        ]
-    for cand in candidates:
-        path = _which(cand)
-        if path:
-            return path
-    return None
+    return find_vanitysearch_binary()
 
 
 def _normalize_seed(seed_val: int) -> str:
