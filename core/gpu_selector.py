@@ -3,7 +3,10 @@
 import os
 import time
 import json
-import pyopencl as cl
+try:
+    import pyopencl as cl
+except Exception:  # pragma: no cover - optional dependency
+    cl = None
 
 try:
     import GPUtil
