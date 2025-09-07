@@ -18,7 +18,7 @@ This repository was recently opened to the public and remains a work in progress
 
 * Python 3.9+
 * Git
-* Optional: CUDA/OpenCL drivers for GPU support
+* Optional: CUDA/OpenCL drivers and `pyopencl` for GPU support
 
 ```bash
 git clone https://github.com/mattysparkles/allinkeys.git

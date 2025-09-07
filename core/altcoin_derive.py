@@ -12,7 +12,10 @@ import os
 import csv
 import hashlib
 import base58
-import pyopencl as cl
+try:
+    import pyopencl as cl
+except Exception:  # pragma: no cover - optional dependency
+    cl = None
 import numpy as np
 from eth_hash.auto import keccak
 from ecdsa import SigningKey, SECP256k1
@@ -257,6 +260,8 @@ def get_gpu_context_for_altcoin():
         )
         selected = [next(iter(available_ids), 0)]
 
+    if cl is None:
+        raise RuntimeError("pyopencl not available")
     try:
         platforms = cl.get_platforms()
         platform_names = [p.name for p in platforms]
@@ -613,11 +618,14 @@ def derive_addresses_cpu(hex_keys):
 
 def derive_addresses(hex_keys, context=None):
     """Try GPU derivation then fall back to CPU on failure."""
+    if cl is None:
+        global cpu_fallback_active
+        cpu_fallback_active = True
+        return derive_addresses_cpu(hex_keys)
     try:
         return derive_addresses_gpu(hex_keys, context)
     except Exception as e:
         log_message(f"⚠️ GPU derive failed, falling back to CPU: {safe_str(e)}", "WARNING")
-        global cpu_fallback_active
         cpu_fallback_active = True
         return derive_addresses_cpu(hex_keys)
 
