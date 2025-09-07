@@ -1,0 +1,4 @@
+address,balance
+1ABC,10
+3def,20
+BC1xyz,30

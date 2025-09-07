@@ -9,7 +9,7 @@ from glob import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from utils.file_utils import find_latest_funded_file
-from utils.network_utils import get_with_https_fallback
+from utils.network_utils import download_file
 
 from config.settings import (
     COIN_DOWNLOAD_URLS,
@@ -19,6 +19,7 @@ from config.settings import (
 from config.coin_definitions import coin_columns
 from core.logger import log_message
 from config.settings import NORMALIZE_BECH32_LOWER
+from config.constants import DOWNLOAD_SHA256
 
 
 def parse_address_lines(file_obj):
@@ -152,10 +153,12 @@ def _download_single_coin(coin: str, url: str) -> None:
         )
         gz_path = output_full + ".gz"
 
-        r = get_with_https_fallback(url, stream=True, timeout=30)
-        with open(gz_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
+        download_file(
+            url,
+            gz_path,
+            expected_sha256=DOWNLOAD_SHA256.get(url),
+            timeout=30,
+        )
         log_message(f"{coin.upper()}: Download complete")
 
         with open(gz_path, "rb") as test_f:
