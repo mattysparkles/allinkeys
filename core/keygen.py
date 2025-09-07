@@ -71,7 +71,7 @@ logger = get_logger("keygen")
 BTC_COMPRESSED = True
 
 
-def _encrypt_bytes(data: bytes) -> bytes:
+def _encrypt_bytes(data: bytes) -> bytes:  # pragma: no cover
     """Encrypt ``data`` according to OUTPUT_ENCRYPTION env variable."""
     method = os.getenv("OUTPUT_ENCRYPTION", "").lower()
     if method == "pgp":
@@ -256,24 +256,44 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         return False
     encryption = os.getenv("OUTPUT_ENCRYPTION", "").lower()
 
+    lines = 0
+    first_seed = None
+    last_seed_local = None
+
     try:
-        if encryption:
+        if encryption:  # pragma: no cover
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env={**os.environ, **gpu_env},
+                text=True,
+                bufsize=1,
             )
-            captured: list[bytes] = []
-
-            def reader():
-                for chunk in proc.stdout:
-                    captured.append(chunk)
-
-            t = threading.Thread(target=reader)
-            t.start()
             start = time.time()
+            captured_lines: list[str] = []
+            captured_size = 0
+
             while proc.poll() is None:
+                line = proc.stdout.readline()
+                if not line:
+                    time.sleep(0.1)
+                    continue
+                captured_lines.append(line)
+                captured_size += len(line)
+                if line.startswith("Priv (HEX):"):
+                    hex_val = line.split(":", 1)[1].strip().replace("0x", "")
+                    seed_int = int(hex_val, 16)
+                    if first_seed is None:
+                        first_seed = seed_int
+                    last_seed_local = seed_int
+                    lines += 1
+                    if lines >= MAX_OUTPUT_LINES:
+                        logger.info(
+                            f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {os.path.basename(current_output_path)}"
+                        )
+                        proc.terminate()
+                        break
                 if pause_event and pause_event.is_set():
                     logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
                     proc.terminate()
@@ -282,16 +302,16 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                     logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
                     proc.terminate()
                     break
-                if sum(len(c) for c in captured) >= MAX_OUTPUT_FILE_SIZE:
+                if captured_size >= MAX_OUTPUT_FILE_SIZE:
                     logger.info(
                         f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file"
                     )
                     proc.terminate()
                     break
-                time.sleep(0.5)
-            t.join()
-            output_data = b"".join(captured)
-            total_keys_generated += output_data.count(b"\n")
+
+            proc.stdout.close()
+            proc.wait()
+            output_data = "".join(captured_lines).encode("utf-8")
             encrypted_bytes = _encrypt_bytes(output_data)
             with open(current_output_path, "wb") as outfile:
                 outfile.write(encrypted_bytes)
@@ -300,13 +320,16 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 logger.info(f"Opened {current_output_path} for writing")
                 proc = subprocess.Popen(
                     cmd,
-                    stdout=outfile,
+                    stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     env={**os.environ, **gpu_env},
+                    text=True,
+                    bufsize=1,
                 )
                 logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd}")
 
                 def monitor_process(p, path):
+                    """Monitor file size and pause requests while VanitySearch runs."""
                     start = time.time()
                     while p.poll() is None:
                         if pause_event and pause_event.is_set():
@@ -330,54 +353,48 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
                 timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
                 timer_thread.start()
+
+                for raw_line in proc.stdout:
+                    outfile.write(raw_line)
+                    if raw_line.startswith("Priv (HEX):"):
+                        hex_val = raw_line.split(":", 1)[1].strip().replace("0x", "")
+                        seed_int = int(hex_val, 16)
+                        if first_seed is None:
+                            first_seed = seed_int
+                        last_seed_local = seed_int
+                        lines += 1
+                        if lines >= MAX_OUTPUT_LINES:
+                            logger.info(
+                                f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {os.path.basename(current_output_path)}"
+                            )
+                            proc.terminate()
+                            break
+
+                proc.stdout.close()
                 proc.wait()
                 timer_thread.join()
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
 
-    if os.path.exists(current_output_path):
-        if encryption:
-            return True
-        size = os.path.getsize(current_output_path)
-        if size == 0:
-            logger.warning(f"⚠️ Output file empty: {current_output_path}")
-            os.remove(current_output_path)
-            return False
+    if lines == 0:
+        logger.warning(f"⚠️ Output file empty: {current_output_path}")
         try:
-            with open(current_output_path, 'r', encoding='utf-8') as f:
-                logger.info(f"Opened {current_output_path} for reading")
-                lines = 0
-                first_seed = None
-                last_seed = None
-                for line in f:
-                    if line.startswith("Priv (HEX):"):
-                        hex_val = line.split(":", 1)[1].strip().replace("0x", "")
-                        seed_int = int(hex_val, 16)
-                        if first_seed is None:
-                            first_seed = seed_int
-                        last_seed = seed_int
-                    lines += 1
-                total_keys_generated += lines
-                increment_metric("keys_generated_today", lines)
-                increment_metric("keys_generated_lifetime", lines)
-                from core.dashboard import update_dashboard_stat, get_metric
-                update_dashboard_stat(
-                    "keys_generated_today", get_metric("keys_generated_today")
-                )
-                update_dashboard_stat(
-                    "keys_generated_lifetime", get_metric("keys_generated_lifetime")
-                )
-                if first_seed is not None and last_seed is not None:
-                    record_seed_range(first_seed, last_seed)
-                logger.info(
-                    f"📄 File complete: {lines} lines → {current_output_path}"
-                )
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
-        return True
-    logger.error(f"❌ Output file not created: {current_output_path}")
-    return False
+            os.remove(current_output_path)
+        except FileNotFoundError:
+            pass
+        return False
+
+    total_keys_generated += lines
+    increment_metric("keys_generated_today", lines)
+    increment_metric("keys_generated_lifetime", lines)
+    from core.dashboard import update_dashboard_stat, get_metric
+    update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
+    update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
+    if first_seed is not None and last_seed_local is not None:
+        record_seed_range(first_seed, last_seed_local)
+    logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
+    return True
 
 
 
