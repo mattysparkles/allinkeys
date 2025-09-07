@@ -71,6 +71,7 @@ from core.dashboard import (
 import core.dashboard as dashboard_core
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
+from utils.file_utils import start_daily_cleanup, cleanup_old_files
 
 
 def display_logo():
@@ -535,6 +536,12 @@ def run_allinkeys(args):
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(CSV_DIR, exist_ok=True)
     start_listener()
+    if getattr(args, "purge", False):
+        removed = cleanup_old_files()
+        log_message(
+            f"\U0001F9F9 Purged {removed} file(s) older than {settings.RETENTION_DAYS} days from downloads"
+        )
+        return
     os.environ.setdefault("PYOPENCL_COMPILER_OUTPUT", "1")
     display_logo()
 
@@ -542,6 +549,7 @@ def run_allinkeys(args):
     test_csv = os.path.join(DOWNLOAD_DIR, "test_alerts.csv")
     if not os.path.exists(test_csv):
         generate_test_csv()
+    start_daily_cleanup()
 
     # Initialize shared metrics manager and create events from it so they can be
     # passed safely to worker processes spawned via ``spawn``.
@@ -645,6 +653,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-downloads", action="store_true", help="Skip downloading balance files")
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
+    parser.add_argument("--purge", action="store_true", help="Delete old downloaded files and exit")
     parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
     parser.add_argument("--only", type=_parse_only, dest="only", help="Restrict to coin flow(s). Comma-separated list.")
     parser.add_argument("-only", type=_parse_only, dest="only_legacy", help=argparse.SUPPRESS)

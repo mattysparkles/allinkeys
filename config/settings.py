@@ -45,6 +45,9 @@ CSV_CHECKPOINT_STATE = os.path.join(LOG_DIR, "csv_checker_state.json")
 DOWNLOAD_DIR = DOWNLOADS_DIR
 CHECKPOINT_FILE = os.path.join(BASE_DIR, "checkpoint.json")
 
+# Number of days to keep downloaded files before purging
+RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
+
 # === BTC-only mode settings ===
 ALL_BTC_ADDRESSES_URL = "http://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"
 ALL_BTC_ADDRESSES_DIR = os.path.join(BASE_DIR, "all_btc_addresses")

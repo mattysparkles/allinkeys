@@ -86,6 +86,7 @@ ENABLE_ALERTS = True
 ENABLE_BACKLOG_CONVERSION = True
 CHECKPOINT_INTERVAL_SECONDS = 30
 PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
+RETENTION_DAYS = 30  # how long to keep downloaded files
 ```
 
 ---
@@ -118,6 +119,7 @@ The default run will:
 | `--skip-downloads` | Skip downloading balance files |
 | `--headless` | Run without any GUI components |
 | `--match-test` | Trigger a fake match alert on startup |
+| `--purge` | Delete old downloaded files and exit |
 | `--only <coins>` | Restrict processing to coin flow(s); comma-separated list |
 | `--addr-format {compressed,uncompressed}` | BTC-only: choose address format |
 | `--compressed` / `--uncompressed` | BTC-only convenience flags overriding `--addr-format` |
