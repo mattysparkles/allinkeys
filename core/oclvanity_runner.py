@@ -21,6 +21,9 @@ def run_oclvanitygen(pattern: str, output_path: str, timeout: int = 60, pause_ev
         logger.info("Keygen paused; skipping OCLVanityGen job")
         return False
 
+    if not OCLVANITYGEN_PATH or not os.path.exists(OCLVANITYGEN_PATH):
+        raise FileNotFoundError("OCLVanityGen binary not found.")
+
     cmd = [OCLVANITYGEN_PATH, pattern]
     update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
     logger.info(f"Executing: {' '.join(cmd)}")

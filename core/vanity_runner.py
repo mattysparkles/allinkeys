@@ -84,14 +84,24 @@ _SELECTED_BINARY: str = VANITYSEARCH_BIN_CPU or ""
 
 
 def resolve_vanitysearch_binary(backend: str) -> str:
-    """Return the VanitySearch binary path for ``backend``."""
+    """Return the VanitySearch binary path for ``backend``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no suitable binary is found for the requested ``backend``.
+    """
     if backend == "cuda":
-        return VANITYSEARCH_BIN_CUDA or find_vanitysearch_binary()
-    if backend == "opencl":
-        return VANITYSEARCH_BIN_OPENCL
-    if backend == "oclvanitygen":
-        return OCLVANITYGEN_PATH
-    return VANITYSEARCH_BIN_CPU or find_vanitysearch_binary()
+        path = VANITYSEARCH_BIN_CUDA or find_vanitysearch_binary()
+    elif backend == "opencl":
+        path = VANITYSEARCH_BIN_OPENCL
+    elif backend == "oclvanitygen":
+        path = OCLVANITYGEN_PATH
+    else:
+        path = VANITYSEARCH_BIN_CPU or find_vanitysearch_binary()
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError("VanitySearch binary not found.")
+    return path
 
 
 def probe_device() -> Tuple[str, Optional[int], str, str]:
@@ -118,7 +128,10 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
                         device_id, device_name = devices[cand][0]
                         break
 
-    binary = resolve_vanitysearch_binary(backend)
+    try:
+        binary = resolve_vanitysearch_binary(backend)
+    except FileNotFoundError:
+        binary = None
     if backend in ("cuda", "opencl", "oclvanitygen") and (
         not binary or not os.path.exists(binary)
     ):
@@ -126,17 +139,28 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
         backend = "cpu"
         device_id = None
         device_name = "CPU"
-        binary = resolve_vanitysearch_binary("cpu")
+        try:
+            binary = resolve_vanitysearch_binary("cpu")
+        except FileNotFoundError as e:
+            logger.error(str(e))
+            raise
 
     if backend != "cpu" and FORCE_CPU_FALLBACK:
         _warn_once("cpu_forced", "GPU available but FORCE_CPU_FALLBACK=True; using CPU")
         backend = "cpu"
         device_id = None
         device_name = "CPU"
-        binary = resolve_vanitysearch_binary("cpu")
+        try:
+            binary = resolve_vanitysearch_binary("cpu")
+        except FileNotFoundError as e:
+            logger.error(str(e))
+            raise
 
     if backend == "cpu" and GPU_BACKEND != "cpu":
         _warn_once("cpu_fallback", "GPU backend requested but CPU binary selected")
+
+    if not binary or not os.path.exists(binary):
+        raise FileNotFoundError("VanitySearch binary not found.")
 
     _SELECTED_BACKEND = backend
     _SELECTED_DEVICE_ID = device_id
