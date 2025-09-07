@@ -113,6 +113,29 @@ ENABLE_ALERTS = True
 ENABLE_BACKLOG_CONVERSION = True
 CHECKPOINT_INTERVAL_SECONDS = 30
 PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
+RETENTION_DAYS = 30  # how long to keep downloaded files
+```
+
+### 🌐 Path Customization
+
+AllInKeys stores logs, downloads and output under the repository root by default. You can override these locations with environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ALLINKEYS_BASE_DIR` | repo root | Base directory used for relative paths |
+| `ALLINKEYS_LOG_DIR` | `BASE_DIR/logs` | Where log files and checkpoints are written |
+| `ALLINKEYS_CSV_DIR` | `BASE_DIR/output/csv` | Converted CSV output |
+| `ALLINKEYS_DOWNLOADS_DIR` | `BASE_DIR/Downloads` | Downloaded address lists |
+| `ALLINKEYS_MATCHES_DIR` | `BASE_DIR/matches` | Archive of matches and alerts |
+| `ALLINKEYS_VANITY_TXT_DIR` | `BASE_DIR/vanity_output` | VanitySearch text batches |
+| `ALLINKEYS_MNEMONIC_TXT_DIR` | `BASE_DIR/mnemonic_output` | Mnemonic mode output |
+
+Example:
+
+```bash
+export ALLINKEYS_LOG_DIR=/var/tmp/allinkeys/logs
+export ALLINKEYS_CSV_DIR=/data/allinkeys/csv
+python main.py
 ```
 
 ---
@@ -146,6 +169,7 @@ The default run will:
 | `--skip-downloads` | Skip downloading balance files |
 | `--headless` | Run without any GUI components |
 | `--match-test` | Trigger a fake match alert on startup |
+| `--purge` | Delete old downloaded files and exit |
 | `--only <coins>` | Restrict processing to coin flow(s); comma-separated list |
 | `--addr-format {compressed,uncompressed}` | BTC-only: choose address format |
 | `--compressed` / `--uncompressed` | BTC-only convenience flags overriding `--addr-format` |
@@ -236,6 +260,33 @@ Additional options mirror the specification:
 - 🏠 Home Assistant integration
 - ☁️ Upload match files to iCloud, Dropbox, Google Drive
 
+### Rate limiting
+
+Each alert channel can enforce its own cooldown. Set `DEFAULT_ALERT_RATE_LIMIT`
+(in seconds) in your `.env` to apply a global limit or override a specific
+channel with `<CHANNEL>_ALERT_RATE_LIMIT` — for example,
+`EMAIL_ALERT_RATE_LIMIT=120` limits email alerts to once every two minutes.
+
+### API key rotation
+
+Some services allow multiple API keys. Provide comma‑separated lists in the
+`.env` using the plural form of the variable name:
+
+```env
+TELEGRAM_BOT_TOKENS=key1,key2
+TWILIO_SIDS=sid1,sid2
+TWILIO_AUTH_TOKENS=token1,token2
+```
+
+At runtime you can rotate to the next key without restarting:
+
+```python
+from config import settings
+settings.rotate_api_keys()
+```
+
+Future alerts will use the new credentials automatically.
+
 ---
 
 ## 🔐 Example: Add Your PGP Key
@@ -250,6 +301,14 @@ Then set in `settings.py`:
 ENABLE_PGP = True
 PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
 ```
+
+---
+
+## 🛡️ Security Options
+
+- Set `OUTPUT_ENCRYPTION=pgp` to stream VanitySearch and match logs through your PGP public key (`PGP_PUBLIC_KEY_PATH`).
+- Set `OUTPUT_ENCRYPTION=aes` with `AES_PASSPHRASE` to AES‑GCM encrypt those files.
+- Use `secure_delete(path)` from `utils.file_utils` to overwrite and remove sensitive data.
 
 ---
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import json
 import csv
@@ -7,14 +9,24 @@ import threading
 import queue
 import subprocess
 import traceback
+from typing import Any, Dict, Optional, List
+
 try:
-    from twilio.rest import Client
+    from twilio.rest import Client  # type: ignore[import-not-found]
 except Exception:  # handle missing twilio dependency
     Client = None
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 import base64
 from datetime import datetime
+
+import gettext
+
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+locale_dir = os.path.join(BASE_DIR, 'locale')
+lang = os.environ.get('LANG', 'en')[:2]
+translation = gettext.translation('allinkeys', localedir=locale_dir, languages=[lang], fallback=True)
+_ = translation.gettext
 
 from config.settings import ENABLE_ALERTS, DOWNLOADS_DIR, REDACT_SENSITIVE_DATA_IN_ALERTS
 from config.coin_definitions import coin_columns
@@ -31,7 +43,7 @@ from config.settings import (
     ENABLE_PGP_ENCRYPTION, PGP_RECIPIENT, PGP_KEYRING_PATH
 )
 
-from core.logger import log_message
+from core.logger import get_logger
 from core.dashboard import get_metric
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 from core.utils.alert_helpers import (
@@ -42,7 +54,7 @@ from core.utils.alert_helpers import (
 )
 
 # runtime alert flags that can be toggled from the GUI
-ALERT_FLAGS = {
+ALERT_FLAGS: Dict[str, bool] = {
     "ENABLE_AUDIO_ALERT_LOCAL": ENABLE_AUDIO_ALERT_LOCAL,
     "ENABLE_DESKTOP_WINDOW_ALERT": ENABLE_DESKTOP_WINDOW_ALERT,
     "ENABLE_PGP": ENABLE_PGP,
@@ -69,7 +81,7 @@ FLAG_LABELS = {
 }
 
 # Mapping of alert channels for metrics tracking
-ALERT_CHANNELS = [
+ALERT_CHANNELS: List[str] = [
     "audio",
     "email",
     "telegram",
@@ -83,12 +95,40 @@ ALERT_CHANNELS = [
     "home_assistant",
 ]
 
+# Per-service rate limit (seconds). Override defaults via environment variables like
+# ``EMAIL_ALERT_RATE_LIMIT`` or set ``DEFAULT_ALERT_RATE_LIMIT`` for all channels.
+DEFAULT_ALERT_RATE_LIMIT = int(os.getenv("DEFAULT_ALERT_RATE_LIMIT", "0"))
+RATE_LIMIT_SECONDS = {
+    channel: int(os.getenv(f"{channel.upper()}_ALERT_RATE_LIMIT", DEFAULT_ALERT_RATE_LIMIT))
+    for channel in ALERT_CHANNELS
+}
+_last_alert_times = {channel: 0.0 for channel in ALERT_CHANNELS}
+
+
+def _rate_limited(channel: str) -> bool:
+    """Return True if the given channel is currently rate limited."""
+    limit = RATE_LIMIT_SECONDS.get(channel, 0)
+    if limit <= 0:
+        return False
+    now = time.time()
+    elapsed = now - _last_alert_times.get(channel, 0)
+    if elapsed < limit:
+        log_message(
+            f"⏳ {channel} alert skipped due to rate limit (wait {int(limit - elapsed)}s)",
+            "INFO",
+        )
+        return True
+    _last_alert_times[channel] = now
+    return False
+
 # Queue for sequential audio alerts
-audio_queue = queue.Queue()
-audio_thread = None
+audio_queue: "queue.Queue[Optional[str]]" = queue.Queue()
+audio_thread: Optional[threading.Thread] = None
+
+logger = get_logger(__name__)
 
 
-def _audio_worker():
+def _audio_worker() -> None:
     """Background worker that plays alert sounds sequentially."""
     from playsound import playsound  # imported here to avoid startup cost
     while True:
@@ -97,12 +137,12 @@ def _audio_worker():
             break
         try:
             playsound(sound)
-            log_message("🔔 Played alert sound.")
+            log_message(_("🔔 Played alert sound."))
         except Exception as exc:
-            log_message(f"❌ Audio alert error: {exc}", "ERROR")
+            log_message(_("❌ Audio alert error: %s") % exc, "ERROR")
 
 
-def _start_audio_worker():
+def _start_audio_worker() -> None:
     global audio_thread
     if audio_thread is None or not audio_thread.is_alive():
         audio_thread = threading.Thread(target=_audio_worker, daemon=True)
@@ -161,19 +201,19 @@ def _show_desktop_popup(alert_type: str):
         flash()
         root.mainloop()
     except Exception as exc:
-        log_message(f"❌ Desktop alert error: {exc}", "ERROR")
+        log_message(_("❌ Desktop alert error: %s") % exc, "ERROR")
 
 
 # ------------------------- PGP SUPPORT -------------------------
 _pgp_ok = False
 
 
-def init_pgp():
+def init_pgp() -> None:
     """Validate that a usable PGP key is available."""
     global _pgp_ok
     if not (ENABLE_PGP_ENCRYPTION and PGP_RECIPIENT):
         log_message(
-            "PGP encryption disabled or recipient not set.",
+            _("PGP encryption disabled or recipient not set."),
             "INFO",
         )
         return
@@ -183,21 +223,22 @@ def init_pgp():
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0 or PGP_RECIPIENT not in res.stdout:
         log_message(
-            "❌ PGP recipient key not found. To import a public key:\n  gpg --import publickey.asc\n  gpg --list-keys\nEnsure PGP_RECIPIENT matches the uid/email shown by --list-keys.",
+            _("❌ PGP recipient key not found. To import a public key:\n  gpg --import publickey.asc\n  gpg --list-keys\nEnsure PGP_RECIPIENT matches the uid/email shown by --list-keys."),
             "ERROR",
         )
         _pgp_ok = False
         return
     _pgp_ok = True
-    log_message(f"🔐 PGP encryption active for {PGP_RECIPIENT}", "INFO")
+    log_message(_("🔐 PGP encryption active for %s") % PGP_RECIPIENT, "INFO")
 
 
-def pgp_encrypt(text: str):
+def pgp_encrypt(text: str) -> Optional[str]:
     if not _pgp_ok:
         return None
     cmd = ["gpg", "--armor", "--encrypt", "-r", PGP_RECIPIENT]
     if PGP_KEYRING_PATH:
         cmd = ["gpg", "--keyring", PGP_KEYRING_PATH, "--armor", "--encrypt", "-r", PGP_RECIPIENT]
+<<<<<<< HEAD
     with subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -210,32 +251,42 @@ def pgp_encrypt(text: str):
             log_message(f"❌ PGP encryption failed: {err}", "ERROR")
             return None
         return out
+=======
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    out, err = proc.communicate(text)
+    if proc.returncode != 0:
+        log_message(_("❌ PGP encryption failed: %s") % err, "ERROR")
+        return None
+    return out
+>>>>>>> origin/codex/externalize-user-facing-strings
 
 
 init_pgp()
 
 
-def send_phone_call_alert(message: str):
+def send_phone_call_alert(message: str) -> None:
     """Send a Twilio phone call if enabled."""
+    if _rate_limited("phone"):
+        return
     if not (ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT") and Client):
         return
     try:
         if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_CALL]):
-            raise ValueError("Missing Twilio call credentials")
+            raise ValueError(_("Missing Twilio call credentials"))
         client = Client(TWILIO_SID, TWILIO_TOKEN)
         client.calls.create(
             twiml=f'<Response><Say>{message}</Say></Response>',
             from_=TWILIO_FROM,
             to=TWILIO_TO_CALL,
         )
-        log_message("📞 Phone call alert triggered.", "INFO")
+        log_message(_("📞 Phone call alert triggered."), "INFO")
         _safe_inc_metric("alerts_sent_today.phone")
         _safe_inc_metric("alerts_sent_lifetime.phone")
     except Exception as exc:
-        log_message(f"❌ Phone call error: {exc}\n{traceback.format_exc()}", "ERROR")
+        log_message(_("❌ Phone call error: %s\n%s") % (exc, traceback.format_exc()), "ERROR")
 
 
-def set_alert_flag(name, value):
+def set_alert_flag(name: str, value: bool) -> None:
     """Update runtime alert flags and reflect changes in settings."""
     ALERT_FLAGS[name] = value
     try:
@@ -247,7 +298,7 @@ def set_alert_flag(name, value):
         pass
 
 
-def alert_match(match_data, test_mode=False):
+def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
     """
     Sends alerts through all enabled channels.
     Accepts either:
@@ -255,11 +306,11 @@ def alert_match(match_data, test_mode=False):
         - A dict with {"encrypted": "<PGP-encoded string>"} for PGP/cloud upload only
     """
     if not isinstance(match_data, dict):
-        log_message("❌ Malformed alert_match call — expected dict.", "ERROR")
+        log_message(_("❌ Malformed alert_match call — expected dict."), "ERROR")
         return
 
     if not ENABLE_ALERTS:
-        log_message("🚫 Alerts are disabled in config.", "INFO")
+        log_message(_("🚫 Alerts are disabled in config."), "INFO")
         return
 
     if get_metric("alerts_sent_today") is None:
@@ -273,9 +324,9 @@ def alert_match(match_data, test_mode=False):
             full_path = os.path.join(MATCH_LOG_DIR, filename)
             with open(full_path, "w") as f:
                 f.write(match_data["encrypted"])
-            log_message(f"☁ Encrypted match stored to: {filename}", "INFO")
+            log_message(_("☁ Encrypted match stored to: %s") % filename, "INFO")
         except Exception as e:
-            log_message(f"❌ Failed to store encrypted match: {e}", "ERROR")
+            log_message(_("❌ Failed to store encrypted match: %s") % e, "ERROR")
         return
 
     safe_data = _redact_sensitive_fields(match_data)
@@ -286,6 +337,7 @@ def alert_match(match_data, test_mode=False):
     privkey_display = safe_data.get("privkey", "N/A")
     alert_type = "TEST MATCH" if test_mode else "MATCH FOUND"
 
+<<<<<<< HEAD
     # Plain text may include sensitive data for optional encryption
     plain_match_text = (
         f"[{timestamp}] {alert_type}!\n"
@@ -302,39 +354,50 @@ def alert_match(match_data, test_mode=False):
     )
     log_message(f"🚨 {alert_type}: {address} (File: {csv_file})")
     encrypted_blob = pgp_encrypt(plain_match_text)
+=======
+    match_text = f"[{timestamp}] {alert_type}!\nCoin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey}"
+    log_message(_("🎯 Match found: %s") % json.dumps(match_data), "INFO")
+    log_message(_("🚨 %s: %s (File: %s)") % (alert_type, address, csv_file))
+    encrypted_blob = pgp_encrypt(match_text)
+>>>>>>> origin/codex/externalize-user-facing-strings
     if encrypted_blob:
         try:
             ts = time.strftime('%Y-%m-%d_%H-%M-%S')
             fname = os.path.join(MATCH_LOG_DIR, f"encrypted_match_{ts}.pgp")
             with open(fname, "w") as ef:
                 ef.write(encrypted_blob)
-            log_message(f"☁ Encrypted match stored to: {os.path.basename(fname)}", "INFO")
+            log_message(_("☁ Encrypted match stored to: %s") % os.path.basename(fname), "INFO")
         except Exception as exc:
-            log_message(f"❌ Failed to store encrypted match: {exc}", "ERROR")
+            log_message(_("❌ Failed to store encrypted match: %s") % exc, "ERROR")
 
     # 🖥️ Desktop Window Alert
-    if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT"):
+    if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT") and not _rate_limited("popup"):
         try:
             threading.Thread(target=_show_desktop_popup, args=(alert_type,), daemon=True).start()
-            log_message("✅ Desktop popup displayed.", "INFO")
+            log_message(_("✅ Desktop popup displayed."), "INFO")
             _safe_inc_metric("alerts_sent_today.popup")
             _safe_inc_metric("alerts_sent_lifetime.popup")
         except Exception as e:
-            log_message(f"❌ Desktop alert error: {e}", "ERROR")
+            log_message(_("❌ Desktop alert error: %s") % e, "ERROR")
 
     # 🔊 Sound Alert (queued)
     skip_audio = test_mode or os.path.basename(csv_file) == "test_alerts.csv"
-    if ALERT_FLAGS.get("ENABLE_AUDIO_ALERT_LOCAL") and not skip_audio:
+    if (
+        ALERT_FLAGS.get("ENABLE_AUDIO_ALERT_LOCAL")
+        and not skip_audio
+        and not _rate_limited("audio")
+    ):
         if os.path.exists(ALERT_SOUND_FILE):
             _start_audio_worker()
             audio_queue.put(ALERT_SOUND_FILE)
             _safe_inc_metric("alerts_sent_today.audio")
             _safe_inc_metric("alerts_sent_lifetime.audio")
         else:
-            log_message(f"❌ Sound file not found: {ALERT_SOUND_FILE}", "ERROR")
+            log_message(_("❌ Sound file not found: %s") % ALERT_SOUND_FILE, "ERROR")
 
     # 📧 Email Alert
     if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED"):
+<<<<<<< HEAD
         if send_email_alert(
             match_text,
             ALERT_EMAIL_FROM,
@@ -353,24 +416,58 @@ def alert_match(match_data, test_mode=False):
         if send_telegram_alert(match_text, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID):
             _safe_inc_metric("alerts_sent_today.telegram")
             _safe_inc_metric("alerts_sent_lifetime.telegram")
+=======
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = ALERT_EMAIL_FROM
+            msg['To'] = ",".join(ALERT_EMAIL_TO) if isinstance(ALERT_EMAIL_TO, list) else ALERT_EMAIL_TO
+            msg['Subject'] = f"AllInKeys {alert_type}"
+            msg.attach(MIMEText(match_text, 'plain'))
+
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
+            server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(msg)
+            server.quit()
+            log_message(_("[ALERT] ✉️ Email sent"), "INFO")
+            _safe_inc_metric("alerts_sent_today.email")
+            _safe_inc_metric("alerts_sent_lifetime.email")
+        except Exception as e:
+            log_message(_("❌ Email alert error: %s") % e, "WARNING")
+
+    # 📲 Telegram Alert
+    if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT") and not _rate_limited("telegram"):
+        try:
+            telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
+            if resp.ok and resp.json().get("ok"):
+                log_message(_("[ALERT] 📟 Telegram sent"), "INFO")
+                _safe_inc_metric("alerts_sent_today.telegram")
+                _safe_inc_metric("alerts_sent_lifetime.telegram")
+            else:
+                log_message(_("❌ Telegram alert failed: %s") % resp.text, "ERROR")
+        except Exception as e:
+            log_message(_("❌ Telegram alert error: %s") % e, "WARNING")
+>>>>>>> origin/codex/externalize-user-facing-strings
 
     # 📱 SMS via Twilio
-    if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client:
+    if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client and not _rate_limited("sms"):
         try:
             if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_SMS]):
-                raise ValueError("Missing Twilio SMS credentials")
+                raise ValueError(_("Missing Twilio SMS credentials"))
             client = Client(TWILIO_SID, TWILIO_TOKEN)
             client.messages.create(body=match_text, from_=TWILIO_FROM, to=TWILIO_TO_SMS)
-            log_message("📲 SMS alert sent.", "INFO")
+            log_message(_("📲 SMS alert sent."), "INFO")
             _safe_inc_metric("alerts_sent_today.sms")
             _safe_inc_metric("alerts_sent_lifetime.sms")
         except Exception as e:
-            log_message(f"❌ SMS alert error: {e}", "WARNING")
+            log_message(_("❌ SMS alert error: %s") % e, "WARNING")
 
     send_phone_call_alert(match_text)
 
     # 💬 Discord Alert
     if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):
+<<<<<<< HEAD
         if send_discord_alert(match_text, DISCORD_WEBHOOK_URL):
             _safe_inc_metric("alerts_sent_today.discord")
             _safe_inc_metric("alerts_sent_lifetime.discord")
@@ -380,9 +477,40 @@ def alert_match(match_data, test_mode=False):
         if send_home_assistant_alert(match_text, HOME_ASSISTANT_URL, HOME_ASSISTANT_TOKEN):
             _safe_inc_metric("alerts_sent_today.home_assistant")
             _safe_inc_metric("alerts_sent_lifetime.home_assistant")
+=======
+        try:
+            data = {"content": match_text}
+            resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
+            if resp.ok:
+                log_message(_("💬 Discord alert sent."), "INFO")
+                _safe_inc_metric("alerts_sent_today.discord")
+                _safe_inc_metric("alerts_sent_lifetime.discord")
+            else:
+                log_message(_("❌ Discord alert failed: %s") % resp.text, "ERROR")
+        except Exception as e:
+            log_message(_("❌ Discord alert error: %s") % e, "ERROR")
+
+    # 🏠 Home Assistant Alert
+    if ALERT_FLAGS.get("ENABLE_HOME_ASSISTANT_ALERT") and not _rate_limited("home_assistant"):
+        try:
+            headers = {
+                "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            payload = {"message": match_text}
+            resp = requests.post(HOME_ASSISTANT_URL, headers=headers, json=payload, timeout=10)
+            if resp.ok:
+                log_message(_("🏠 Home Assistant alert sent."), "INFO")
+                _safe_inc_metric("alerts_sent_today.home_assistant")
+                _safe_inc_metric("alerts_sent_lifetime.home_assistant")
+            else:
+                log_message(_("❌ Home Assistant alert failed: %s") % resp.text, "ERROR")
+        except Exception as e:
+            log_message(_("❌ Home Assistant alert error: %s") % e, "ERROR")
+>>>>>>> origin/codex/externalize-user-facing-strings
 
     # ☁ PGP + Cloud Upload
-    if ALERT_FLAGS.get("ENABLE_CLOUD_UPLOAD"):
+    if ALERT_FLAGS.get("ENABLE_CLOUD_UPLOAD") and not _rate_limited("cloud"):
         try:
             with open(PGP_PUBLIC_KEY_PATH, "rb") as pubkey_file:
                 pubkey = RSA.import_key(pubkey_file.read())
@@ -393,11 +521,11 @@ def alert_match(match_data, test_mode=False):
             full_path = os.path.join(MATCH_LOG_DIR, timestamp_filename)
             with open(full_path, 'w') as f:
                 f.write(b64_encrypted)
-            log_message("☁ Encrypted match uploaded locally.", "INFO")
+            log_message(_("☁ Encrypted match uploaded locally."), "INFO")
             _safe_inc_metric("alerts_sent_today.cloud")
             _safe_inc_metric("alerts_sent_lifetime.cloud")
         except Exception as e:
-            log_message(f"❌ PGP/cloud upload error: {e}", "ERROR")
+            log_message(_("❌ PGP/cloud upload error: %s") % e, "ERROR")
 
     # 📜 Local match log
     try:
@@ -405,25 +533,28 @@ def alert_match(match_data, test_mode=False):
         ts = datetime.utcnow().strftime('%Y-%m-%d')
         log_path = os.path.join(MATCH_LOG_DIR, f"matches_{ts}.log")
         with open(log_path, 'a', encoding='utf-8') as f:
+<<<<<<< HEAD
             f.write(json.dumps(safe_data) + "\n")
         log_message("📝 Match written to local log.", "INFO")
+=======
+            f.write(json.dumps(match_data) + "\n")
+        log_message(_("📝 Match written to local log."), "INFO")
+>>>>>>> origin/codex/externalize-user-facing-strings
         _safe_inc_metric("alerts_sent_today.file")
         _safe_inc_metric("alerts_sent_lifetime.file")
     except Exception as e:
-        log_message(f"❌ Local match logging error: {e}", "ERROR")
+        log_message(_("❌ Local match logging error: %s") % e, "ERROR")
 
 
-def trigger_startup_alerts(shared_metrics=None):
-    """
-    Sends startup alerts through configured channels.
-    """
+def trigger_startup_alerts(shared_metrics: Optional[Dict[str, Any]] = None) -> None:
+    """Send startup alerts through configured channels."""
     from core.worker_bootstrap import ensure_metrics_ready
     try:
         ensure_metrics_ready(shared_metrics)
     except Exception:
         pass
     if not ENABLE_ALERTS:
-        log_message("🚫 Alerts are disabled in config.", "INFO")
+        log_message(_("🚫 Alerts are disabled in config."), "INFO")
         return
 
     _log_alert_consent()
@@ -432,13 +563,13 @@ def trigger_startup_alerts(shared_metrics=None):
     _safe_set_metric("status.alerts", "Running")
     _safe_set_metric("alerts_status", "Running")
     try:
-        log_message("📣 Triggering startup alerts...", "INFO")
+        log_message(_("📣 Triggering startup alerts..."), "INFO")
         # Extend to alert channels if needed
     except Exception as e:
-        log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
+        log_message(_("❌ Failed to trigger startup alerts: %s") % e, "ERROR")
 
 
-def run_test_alerts_from_csv(csv_path=None):
+def run_test_alerts_from_csv(csv_path: Optional[str] = None) -> None:
     """Send test alerts for each address in the CSV file."""
     if csv_path is None:
         csv_path = os.path.join(DOWNLOADS_DIR, "test_alerts.csv")
@@ -447,7 +578,7 @@ def run_test_alerts_from_csv(csv_path=None):
         from core.downloader import generate_test_csv
         csv_path = generate_test_csv()
         if not csv_path or not os.path.exists(csv_path):
-            log_message("⚠️ test_alerts.csv not found and could not be generated.", "WARN")
+            log_message(_("⚠️ test_alerts.csv not found and could not be generated."), "WARN")
             return
 
     with open(csv_path, newline="", encoding="utf-8") as f:
@@ -467,13 +598,13 @@ def run_test_alerts_from_csv(csv_path=None):
                             "privkey": row.get("private_key", "TEST")
                         }
                         alert_match(payload, test_mode=True)
-                        log_message(f"✅ Test alert sent for {addr}", "INFO")
+                        log_message(_("✅ Test alert sent for %s") % addr, "INFO")
             except Exception as exc:
-                log_message(f"❌ Failed sending test alert row {row_num}: {exc}", "ERROR")
+                log_message(_("❌ Failed sending test alert row %s: %s") % (row_num, exc), "ERROR")
 
 
 # Backwards compatibility
-def trigger_test_alerts():
+def trigger_test_alerts() -> None:
     run_test_alerts_from_csv()
 
 

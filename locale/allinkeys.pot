@@ -1,0 +1,379 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-09-07 12:29+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ui/dashboard_gui.py:62
+msgid "ALLINKEYS Live Dashboard"
+msgstr ""
+
+#: ui/dashboard_gui.py:117
+msgid "BTC Address Types"
+msgstr ""
+
+#: ui/dashboard_gui.py:142
+msgid "1 (P2PKH)"
+msgstr ""
+
+#: ui/dashboard_gui.py:149
+msgid "bc1q (P2WPKH)"
+msgstr ""
+
+#: ui/dashboard_gui.py:156
+msgid "bc1p (Taproot)"
+msgstr ""
+
+#: ui/dashboard_gui.py:244
+msgid "Loading..."
+msgstr ""
+
+#: ui/dashboard_gui.py:258
+msgid "🛠️ CSV Conversions In Progress"
+msgstr ""
+
+#: ui/dashboard_gui.py:286
+msgid "Enable Swing Mode"
+msgstr ""
+
+#: ui/dashboard_gui.py:308
+msgid "Alert Methods"
+msgstr ""
+
+#: ui/dashboard_gui.py:325
+msgid "Enable Call Alert (Twilio)"
+msgstr ""
+
+#: ui/dashboard_gui.py:327
+msgid "Enable SMS Alert (Twilio)"
+msgstr ""
+
+#: ui/dashboard_gui.py:348
+msgid "Open Config File"
+msgstr ""
+
+#: ui/dashboard_gui.py:349 ui/dashboard_gui.py:736
+msgid "Reset Metrics"
+msgstr ""
+
+#: ui/dashboard_gui.py:350 ui/dashboard_gui.py:747
+msgid "Reset Lifetime"
+msgstr ""
+
+#: ui/dashboard_gui.py:351 ui/dashboard_gui.py:731
+msgid "Test Alerts"
+msgstr ""
+
+#: ui/dashboard_gui.py:353
+msgid "Delete All Data"
+msgstr ""
+
+#: ui/dashboard_gui.py:356
+msgid ""
+"If you find AllInKeys useful, consider donating! BTC: "
+"18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y"
+msgstr ""
+
+#: ui/dashboard_gui.py:373
+msgid "RUNNING"
+msgstr ""
+
+#: ui/dashboard_gui.py:378
+msgid "PAUSED"
+msgstr ""
+
+#: ui/dashboard_gui.py:383
+msgid "STOPPED"
+msgstr ""
+
+#: ui/dashboard_gui.py:435
+msgid "Start"
+msgstr ""
+
+#: ui/dashboard_gui.py:437
+msgid "Stop"
+msgstr ""
+
+#: ui/dashboard_gui.py:439
+msgid "Pause"
+msgstr ""
+
+#: ui/dashboard_gui.py:441
+msgid "Resume"
+msgstr ""
+
+#: ui/dashboard_gui.py:715
+msgid "Missing Config"
+msgstr ""
+
+#: ui/dashboard_gui.py:715
+#, python-format
+msgid "Could not find: %s"
+msgstr ""
+
+#: ui/dashboard_gui.py:725 ui/dashboard_gui.py:733
+msgid "Error"
+msgstr ""
+
+#: ui/dashboard_gui.py:731
+msgid "Test alerts dispatched. Check logs for details."
+msgstr ""
+
+#: ui/dashboard_gui.py:733
+#, python-format
+msgid "Failed to send test alerts: %s"
+msgstr ""
+
+#: ui/dashboard_gui.py:736
+msgid "Include lifetime stats?"
+msgstr ""
+
+#: ui/dashboard_gui.py:742 ui/dashboard_gui.py:752 ui/dashboard_gui.py:763
+msgid "Invalid Password"
+msgstr ""
+
+#: ui/dashboard_gui.py:742 ui/dashboard_gui.py:752
+msgid "Reset canceled."
+msgstr ""
+
+#: ui/dashboard_gui.py:747
+msgid "Clear all lifetime metrics?"
+msgstr ""
+
+#: ui/dashboard_gui.py:755
+msgid "Confirm Delete"
+msgstr ""
+
+#: ui/dashboard_gui.py:755
+msgid "Permanently delete all key/data files?"
+msgstr ""
+
+#: ui/dashboard_gui.py:756
+msgid "Double Check"
+msgstr ""
+
+#: ui/dashboard_gui.py:756
+msgid "Are you really really sure?"
+msgstr ""
+
+#: ui/dashboard_gui.py:763
+msgid "Deletion canceled."
+msgstr ""
+
+#: ui/dashboard_gui.py:767
+msgid "Enter Password"
+msgstr ""
+
+#: ui/dashboard_gui.py:768
+msgid "Password: "
+msgstr ""
+
+#: ui/dashboard_gui.py:777
+msgid "Submit"
+msgstr ""
+
+#: core/alerts.py:93
+msgid "🔔 Played alert sound."
+msgstr ""
+
+#: core/alerts.py:95
+#, python-format
+msgid "❌ Audio alert error: %s"
+msgstr ""
+
+#: core/alerts.py:136 core/alerts.py:276
+#, python-format
+msgid "❌ Desktop alert error: %s"
+msgstr ""
+
+#: core/alerts.py:148
+msgid "PGP encryption disabled or recipient not set."
+msgstr ""
+
+#: core/alerts.py:158
+msgid ""
+"❌ PGP recipient key not found. To import a public key:\n"
+"  gpg --import publickey.asc\n"
+"  gpg --list-keys\n"
+"Ensure PGP_RECIPIENT matches the uid/email shown by --list-keys."
+msgstr ""
+
+#: core/alerts.py:164
+#, python-format
+msgid "🔐 PGP encryption active for %s"
+msgstr ""
+
+#: core/alerts.py:176
+#, python-format
+msgid "❌ PGP encryption failed: %s"
+msgstr ""
+
+#: core/alerts.py:190
+msgid "Missing Twilio call credentials"
+msgstr ""
+
+#: core/alerts.py:197
+msgid "📞 Phone call alert triggered."
+msgstr ""
+
+#: core/alerts.py:201
+#, python-format
+msgid ""
+"❌ Phone call error: %s\n"
+"%s"
+msgstr ""
+
+#: core/alerts.py:224
+msgid "❌ Malformed alert_match call — expected dict."
+msgstr ""
+
+#: core/alerts.py:228 core/alerts.py:412
+msgid "🚫 Alerts are disabled in config."
+msgstr ""
+
+#: core/alerts.py:242 core/alerts.py:264
+#, python-format
+msgid "☁ Encrypted match stored to: %s"
+msgstr ""
+
+#: core/alerts.py:244 core/alerts.py:266
+#, python-format
+msgid "❌ Failed to store encrypted match: %s"
+msgstr ""
+
+#: core/alerts.py:255
+#, python-format
+msgid "🎯 Match found: %s"
+msgstr ""
+
+#: core/alerts.py:256
+#, python-format
+msgid "🚨 %s: %s (File: %s)"
+msgstr ""
+
+#: core/alerts.py:272
+msgid "✅ Desktop popup displayed."
+msgstr ""
+
+#: core/alerts.py:287
+#, python-format
+msgid "❌ Sound file not found: %s"
+msgstr ""
+
+#: core/alerts.py:303
+msgid "[ALERT] ✉️ Email sent"
+msgstr ""
+
+#: core/alerts.py:307
+#, python-format
+msgid "❌ Email alert error: %s"
+msgstr ""
+
+#: core/alerts.py:315
+msgid "[ALERT] 📟 Telegram sent"
+msgstr ""
+
+#: core/alerts.py:319
+#, python-format
+msgid "❌ Telegram alert failed: %s"
+msgstr ""
+
+#: core/alerts.py:321
+#, python-format
+msgid "❌ Telegram alert error: %s"
+msgstr ""
+
+#: core/alerts.py:327
+msgid "Missing Twilio SMS credentials"
+msgstr ""
+
+#: core/alerts.py:330
+msgid "📲 SMS alert sent."
+msgstr ""
+
+#: core/alerts.py:334
+#, python-format
+msgid "❌ SMS alert error: %s"
+msgstr ""
+
+#: core/alerts.py:344
+msgid "💬 Discord alert sent."
+msgstr ""
+
+#: core/alerts.py:348
+#, python-format
+msgid "❌ Discord alert failed: %s"
+msgstr ""
+
+#: core/alerts.py:350
+#, python-format
+msgid "❌ Discord alert error: %s"
+msgstr ""
+
+#: core/alerts.py:362
+msgid "🏠 Home Assistant alert sent."
+msgstr ""
+
+#: core/alerts.py:366
+#, python-format
+msgid "❌ Home Assistant alert failed: %s"
+msgstr ""
+
+#: core/alerts.py:368
+#, python-format
+msgid "❌ Home Assistant alert error: %s"
+msgstr ""
+
+#: core/alerts.py:382
+msgid "☁ Encrypted match uploaded locally."
+msgstr ""
+
+#: core/alerts.py:386
+#, python-format
+msgid "❌ PGP/cloud upload error: %s"
+msgstr ""
+
+#: core/alerts.py:395
+msgid "📝 Match written to local log."
+msgstr ""
+
+#: core/alerts.py:399
+#, python-format
+msgid "❌ Local match logging error: %s"
+msgstr ""
+
+#: core/alerts.py:419
+msgid "📣 Triggering startup alerts..."
+msgstr ""
+
+#: core/alerts.py:422
+#, python-format
+msgid "❌ Failed to trigger startup alerts: %s"
+msgstr ""
+
+#: core/alerts.py:434
+msgid "⚠️ test_alerts.csv not found and could not be generated."
+msgstr ""
+
+#: core/alerts.py:454
+#, python-format
+msgid "✅ Test alert sent for %s"
+msgstr ""
+
+#: core/alerts.py:456
+#, python-format
+msgid "❌ Failed sending test alert row %s: %s"
+msgstr ""

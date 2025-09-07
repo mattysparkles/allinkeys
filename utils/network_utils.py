@@ -3,7 +3,9 @@ import hashlib
 import requests
 from urllib.parse import urlparse
 
-from core.logger import log_message
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def download_file(

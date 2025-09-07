@@ -1,7 +1,6 @@
 # core/gpu_selector.py
 
 import os
-import time
 import json
 import sys
 import threading

@@ -1,27 +1,22 @@
 # core/keygen.py
 
 import os
-import sys
 import time
 import subprocess
 import threading
-import logging
 import secrets
 import platform
+import base64
 from datetime import datetime
 from collections import deque
 from config.settings import (
     VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
-    BATCH_SIZE,
-    ADDR_PER_FILE,
-    LOGGING_ENABLED,
-    CHECKPOINT_PATH,
     MAX_OUTPUT_FILE_SIZE,
-    MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
     FILES_PER_BATCH,
     find_vanitysearch_binary,
+    PGP_PUBLIC_KEY_PATH,
 )
 
 from config.constants import SECP256K1_ORDER
@@ -29,11 +24,16 @@ from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keyg
 from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 from core.logger import get_logger
 import config.settings as settings
+from utils.pgp_utils import encrypt_with_pgp
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import scrypt
+from Crypto.Random import get_random_bytes
 from core.seed_tracker import (
     seed_in_used_range,
     record_seed_range,
     get_condensed_ranges,
 )
+from core.utils.process import popen_with_retry
 
 
 # Runtime trackers
@@ -63,6 +63,24 @@ logger = get_logger("keygen")
 
 # Tracks whether BTC addresses should be generated in compressed form.
 BTC_COMPRESSED = True
+
+
+def _encrypt_bytes(data: bytes) -> bytes:
+    """Encrypt ``data`` according to OUTPUT_ENCRYPTION env variable."""
+    method = os.getenv("OUTPUT_ENCRYPTION", "").lower()
+    if method == "pgp":
+        encrypted = encrypt_with_pgp(data.decode("utf-8"), PGP_PUBLIC_KEY_PATH)
+        return encrypted.encode("utf-8")
+    if method == "aes":
+        passphrase = os.getenv("AES_PASSPHRASE", "")
+        if not passphrase:
+            raise RuntimeError("AES_PASSPHRASE not set")
+        salt = get_random_bytes(16)
+        key = scrypt(passphrase.encode(), salt, 32, 2**14, 8, 1)
+        cipher = AES.new(key, AES.MODE_GCM)
+        ciphertext, tag = cipher.encrypt_and_digest(data)
+        return base64.b64encode(salt + cipher.nonce + tag + ciphertext)
+    return data
 
 
 def run_btc_only(
@@ -230,6 +248,11 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     if pause_event and pause_event.is_set():
         logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
         return False
+    encryption = os.getenv("OUTPUT_ENCRYPTION", "").lower()
+
+    lines = 0
+    first_seed = None
+    last_seed_local = None
 
     lines = 0
     first_seed = None
@@ -246,7 +269,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 text=True,
                 bufsize=1,
             )
-            logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd}")
+            captured: list[bytes] = []
 
             def monitor_process(p, path):
                 """Monitor file size and pause requests while VanitySearch runs."""
@@ -447,7 +470,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
 
     except KeyboardInterrupt:
         logger.info("🛑 Keygen loop interrupted by user. Exiting cleanly.")
-    except Exception as e:
+    except Exception:
         # Log full stack trace for any unexpected failure
         logger.exception("❌ Unexpected error in keygen loop")
     finally:

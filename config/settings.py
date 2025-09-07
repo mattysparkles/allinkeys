@@ -5,51 +5,89 @@ Auto-merged to restore full functionality.
 
 import os
 import shutil
+from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+from typing import Dict
 
 load_dotenv()
-# --- Paths ---
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_DIR = os.path.join(ROOT_DIR, "logs")
-...
+
+
+# --------------------- API KEY ROTATION ---------------------
+_API_KEY_STATES: Dict[str, Dict[str, object]] = {}
+
+
+def _init_api_key(name: str) -> str:
+    """Load API key(s) for ``name`` supporting comma-separated pools.
+
+    The plural environment variable (``<NAME>S``) takes precedence and may
+    contain a comma-separated list of keys.  If absent, the singular
+    ``<NAME>`` is used.  The first key becomes the active value.
+    """
+    list_var = f"{name}S"
+    keys = [k.strip() for k in os.getenv(list_var, "").split(",") if k.strip()]
+    if not keys:
+        single = os.getenv(name, "")
+        keys = [single] if single else [""]
+    _API_KEY_STATES[name] = {"keys": keys, "index": 0}
+    os.environ[name] = keys[0]
+    return keys[0]
+
+
+def rotate_api_keys():
+    """Advance to the next API key for all services."""
+    for env_name, state in _API_KEY_STATES.items():
+        state["index"] = (state["index"] + 1) % len(state["keys"])
+        new_val = state["keys"][state["index"]]
+        globals()[env_name] = new_val
+        os.environ[env_name] = new_val
+        if env_name == "TWILIO_AUTH_TOKEN":
+            globals()["TWILIO_TOKEN"] = new_val
+            os.environ["TWILIO_TOKEN"] = new_val
+
 # ===================== 🔌 SYSTEM PATHS ==========================
 # Root of the repository
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = env_path("ALLINKEYS_BASE_DIR", Path(__file__).resolve().parents[1])
 # Directory for all log files
-LOG_DIR = os.path.join(BASE_DIR, "logs")
+LOG_DIR = env_path("ALLINKEYS_LOG_DIR", BASE_DIR / "logs")
 # Location where generated CSVs are stored
-CSV_DIR = os.path.join(BASE_DIR, "output", "csv")
+CSV_DIR = env_path("ALLINKEYS_CSV_DIR", BASE_DIR / "output" / "csv")
 # Duplicate to keep legacy modules working
-CSV_OUTPUT_DIR = os.path.join(BASE_DIR, "output", "csv")
+CSV_OUTPUT_DIR = env_path("ALLINKEYS_CSV_OUTPUT_DIR", CSV_DIR)
 # Location for downloaded funded address lists
-DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
-FULL_DIR = os.path.join(DOWNLOADS_DIR, "full")
-UNIQUE_DIR = os.path.join(DOWNLOADS_DIR, "unique")
+DOWNLOADS_DIR = env_path("ALLINKEYS_DOWNLOADS_DIR", BASE_DIR / "Downloads")
+FULL_DIR = env_path("ALLINKEYS_FULL_DIR", DOWNLOADS_DIR / "full")
+UNIQUE_DIR = env_path("ALLINKEYS_UNIQUE_DIR", DOWNLOADS_DIR / "unique")
 # Where matches and encrypted alerts are archived
-MATCHES_DIR = os.path.join(BASE_DIR, "matches")
+MATCHES_DIR = env_path("ALLINKEYS_MATCHES_DIR", BASE_DIR / "matches")
 # VanitySearch text outputs
-VANITY_TXT_DIR = os.path.join(BASE_DIR, "vanity_output")
+VANITY_TXT_DIR = env_path("ALLINKEYS_VANITY_TXT_DIR", BASE_DIR / "vanity_output")
 VANITY_OUTPUT_DIR = VANITY_TXT_DIR  # legacy alias
 # Mnemonic mode text outputs
-MNEMONIC_TXT_DIR = os.path.join(BASE_DIR, "mnemonic_output")
+MNEMONIC_TXT_DIR = env_path("ALLINKEYS_MNEMONIC_TXT_DIR", BASE_DIR / "mnemonic_output")
 # Local audio clips for alerts
-SOUND_CLIPS_DIR = os.path.join(BASE_DIR, "alerts", "sounds")
-CHECKPOINT_PATH = os.path.join(LOG_DIR, "restore_checkpoint.json")
+SOUND_CLIPS_DIR = env_path("ALLINKEYS_SOUND_CLIPS_DIR", BASE_DIR / "alerts" / "sounds")
+CHECKPOINT_PATH = env_path("ALLINKEYS_CHECKPOINT_PATH", LOG_DIR / "restore_checkpoint.json")
 # Track which CSVs have been processed
-CHECKED_CSV_LOG = os.path.join(LOG_DIR, "checked_csvs.txt")
-RECHECKED_CSV_LOG = os.path.join(LOG_DIR, "rechecked_csvs.txt")
+CHECKED_CSV_LOG = env_path("ALLINKEYS_CHECKED_CSV_LOG", LOG_DIR / "checked_csvs.txt")
+RECHECKED_CSV_LOG = env_path("ALLINKEYS_RECHECKED_CSV_LOG", LOG_DIR / "rechecked_csvs.txt")
 # Track per-file progress for the CSV checker
-CSV_CHECKPOINT_STATE = os.path.join(LOG_DIR, "csv_checker_state.json")
+CSV_CHECKPOINT_STATE = env_path("ALLINKEYS_CSV_CHECKPOINT_STATE", LOG_DIR / "csv_checker_state.json")
 # Alias for backward compatibility
 DOWNLOAD_DIR = DOWNLOADS_DIR
-CHECKPOINT_FILE = os.path.join(BASE_DIR, "checkpoint.json")
+CHECKPOINT_FILE = env_path("ALLINKEYS_CHECKPOINT_FILE", BASE_DIR / "checkpoint.json")
+
+# Number of days to keep downloaded files before purging
+RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
 
 # === BTC-only mode settings ===
 ALL_BTC_ADDRESSES_URL = "https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"
 ALL_BTC_ADDRESSES_DIR = os.path.join(BASE_DIR, "all_btc_addresses")
 ALL_BTC_RANGES_COUNT = 20
-ALL_BTC_GZ_LOCAL = os.path.join(ALL_BTC_ADDRESSES_DIR, "all_Bitcoin_addresses_ever_used_sorted.txt.gz")
+ALL_BTC_GZ_LOCAL = env_path(
+    "ALLINKEYS_ALL_BTC_GZ_LOCAL",
+    ALL_BTC_ADDRESSES_DIR / "all_Bitcoin_addresses_ever_used_sorted.txt.gz",
+)
 BTC_RANGE_FILE_PATTERN = "btc_range_{:02d}.txt"  # 00..19
 
 # Backlog pause control (creation vs. consumption)
@@ -159,11 +197,14 @@ def find_oclvanity_binary(base_name: str):
     return None
 
 
-VANITYSEARCH_PATH = find_vanitysearch_binary()
+_vanitysearch = find_vanitysearch_binary()
+VANITYSEARCH_PATH = Path(_vanitysearch) if _vanitysearch else None
 # OpenCL/AMD variants from Vanitygen++
-OCLVANITYGEN_PATH = find_oclvanity_binary("oclvanitygen")
-OCLVANITYMINER_PATH = find_oclvanity_binary("oclvanityminer")
-KEYCONV_PATH = os.path.join(BASE_DIR, "bin", "keyconv.exe")
+_oclvanitygen = find_oclvanity_binary("oclvanitygen")
+OCLVANITYGEN_PATH = Path(_oclvanitygen) if _oclvanitygen else None
+_oclvanityminer = find_oclvanity_binary("oclvanityminer")
+OCLVANITYMINER_PATH = Path(_oclvanityminer) if _oclvanityminer else None
+KEYCONV_PATH = env_path("ALLINKEYS_KEYCONV_PATH", BASE_DIR / "bin" / "keyconv.exe")
 MAX_KEYS_PER_FILE = 100_000  #Deprecated
 # Output file rotation config (for VanitySearch stream)
 VANITY_ROTATE_LINES = 200_000
@@ -224,12 +265,16 @@ LOGO_ASCII = LOGO_ART
 
 
 # ===================== 🔐 PGP SETTINGS ==========================
-PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "sparkles_public_key.asc")
+PGP_PUBLIC_KEY_PATH = env_path(
+    "ALLINKEYS_PGP_PUBLIC_KEY_PATH", BASE_DIR / "sparkles_public_key.asc"
+)
 
 # ===================== 🎧 ALERT SETTINGS ==========================
 ALERT_PHRASE = "The Beacons Have Been Lit, Gondor Calls for Aid!"
 ENABLE_AUDIO_ALERT_LOCAL = True
-ALERT_SOUND_FILE = os.path.join(SOUND_CLIPS_DIR, "gondor-calls-for-aid.mp3")
+ALERT_SOUND_FILE = env_path(
+    "ALLINKEYS_ALERT_SOUND_FILE", SOUND_CLIPS_DIR / "gondor-calls-for-aid.mp3"
+)
 ENABLE_DESKTOP_WINDOW_ALERT = True
 ALERT_POPUP_COLOR_1 = "#FF0000"
 ALERT_POPUP_COLOR_2 = "#000000"
@@ -414,10 +459,12 @@ DELETE_SYSTEM_LOGS = True
 DELETE_CSV_CHECKING_LOGS = True
 
 # ===================== 📜 LOGGING ================================
-LOG_LEVEL = "INFO" # Options include: INFO, DEBUG, TRACE,  
+LOG_LEVEL = "INFO" # Options include: INFO, DEBUG, TRACE,
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
 LOGGING_ENABLED = True  # or False if you want to disable it
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 
 
 # ===================== 🔒 SECURITY ==========================
@@ -458,7 +505,9 @@ REDACT_SENSITIVE_DATA_IN_ALERTS = True
 
 # === LOCAL AUDIO ALERT ===
 ENABLE_AUDIO_ALERT_LOCAL = True
-ALERT_SOUND_FILE = os.path.join(SOUND_CLIPS_DIR, "gondor-calls-for-aid.mp3")  # Must exist or alert will be skipped
+ALERT_SOUND_FILE = env_path(
+    "ALLINKEYS_ALERT_SOUND_FILE", SOUND_CLIPS_DIR / "gondor-calls-for-aid.mp3"
+)  # Must exist or alert will be skipped
 
 # === DESKTOP POP-UP WINDOW ALERT ===
 ENABLE_DESKTOP_WINDOW_ALERT = True
@@ -468,7 +517,10 @@ ALERT_PHRASE = "The Beacons Have Been Lit, Gondor Calls for Aid!"  # Message sho
 
 # === PGP ENCRYPTED MATCH ALERT OUTPUT ===
 ENABLE_PGP = False
-PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "Sparkles-allinkeys_0x3A94D30E_public.asc")  # Must be a valid ASCII armored key file
+PGP_PUBLIC_KEY_PATH = env_path(
+    "ALLINKEYS_PGP_PUBLIC_KEY_PATH",
+    BASE_DIR / "Sparkles-allinkeys_0x3A94D30E_public.asc",
+)  # Must be a valid ASCII armored key file
 
 # === EMAIL ALERT CONFIGURATION ===
 ALERT_EMAIL_ENABLED = True
@@ -491,14 +543,14 @@ ALERT_EMAIL_TO = ALERT_EMAIL_RECIPIENTS  # DONT CHANGE HERE CHANGE ALERT_EMAIL_R
 # === TELEGRAM BOT ALERT CONFIGURATION ===
 ALERT_TELEGRAM_ENABLED = True
 ENABLE_TELEGRAM_ALERT = ALERT_TELEGRAM_ENABLED # alias for backward compatibility dont modify
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_TOKEN = _init_api_key("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # === SMS VIA TWILIO ===
 ALERT_SMS_ENABLED = True
 ENABLE_SMS_ALERT = ALERT_SMS_ENABLED # alias for backward compatibility dont modify
-TWILIO_SID = os.getenv("TWILIO_SID", "")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_SID = _init_api_key("TWILIO_SID")
+TWILIO_AUTH_TOKEN = _init_api_key("TWILIO_AUTH_TOKEN")
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
 TWILIO_TO_NUMBER = os.getenv("TWILIO_TO_NUMBER", "")
 TWILIO_TO = TWILIO_TO_NUMBER # Alias do not change
@@ -512,14 +564,14 @@ TWILIO_TO_CALL = TWILIO_CALL_TO_NUMBER # Alias do not change
 # === DISCORD WEBHOOK ALERTS ===
 ALERT_DISCORD_ENABLED = False
 ENABLE_DISCORD_ALERT = ALERT_DISCORD_ENABLED # Alias do not change
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+DISCORD_WEBHOOK_URL = _init_api_key("DISCORD_WEBHOOK_URL")
 
 # === HOME ASSISTANT / IoT WEBHOOK ===
 ALERT_HOME_ASSISTANT_ENABLED = False
 ENABLE_HOME_ASSISTANT_ALERT = ALERT_HOME_ASSISTANT_ENABLED # Alias do not change
 HOME_ASSISTANT_WEBHOOK = os.getenv("HOME_ASSISTANT_WEBHOOK", "")
 HOME_ASSISTANT_URL = HOME_ASSISTANT_WEBHOOK # Alias do not change
-HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN", "")
+HOME_ASSISTANT_TOKEN = _init_api_key("HOME_ASSISTANT_TOKEN")
 
 # === CLOUD STORAGE MATCH BACKUPS ===
 
@@ -605,6 +657,7 @@ STATS_TO_DISPLAY = {
     "btc_ranges_last_updated": True,
     "btc_ranges_files_ready": True,
     "btc_ranges_updated_today": True,
+    "download_progress": True,
     "btc_only_files_checked_today": True,
     "btc_only_matches_found_today": True,
     "vanitysearch_current_mkeys": True,
@@ -662,6 +715,7 @@ METRICS_LABEL_MAP = {
     "btc_ranges_last_updated": "BTC Ranges Last Updated",
     "btc_ranges_files_ready": "BTC Ranges Ready",
     "btc_ranges_updated_today": "BTC Ranges Updated",
+    "download_progress": "Download Progress",
     "btc_only_files_checked_today": "BTC Files Checked Today",
     "btc_only_matches_found_today": "BTC Matches Today",
     "vanitysearch_current_mkeys": "VanitySearch MKeys/s",
