@@ -113,10 +113,36 @@ def find_vanitysearch_binary():
     return None
 
 
+def find_oclvanity_binary(base_name: str):
+    """Return path to ``base_name`` for the host OS."""
+    bin_dir = os.path.join(BASE_DIR, "bin")
+    if os.name == "nt":
+        candidates = [
+            os.path.join(bin_dir, f"{base_name}.exe"),
+            os.path.join(bin_dir, f"{base_name}.EXE"),
+            f"{base_name}.exe",
+            f"{base_name}.EXE",
+        ]
+    else:
+        candidates = [
+            os.path.join(bin_dir, base_name),
+            base_name,
+        ]
+    for cand in candidates:
+        if os.path.isabs(cand) and os.path.isfile(cand):
+            return cand
+        found = shutil.which(cand)
+        if found:
+            return found
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
 VANITYSEARCH_PATH = find_vanitysearch_binary()
 # OpenCL/AMD variants from Vanitygen++
-OCLVANITYGEN_PATH = os.path.join(BASE_DIR, "bin", "oclvanitygen.exe")
-OCLVANITYMINER_PATH = os.path.join(BASE_DIR, "bin", "oclvanityminer.exe")
+OCLVANITYGEN_PATH = find_oclvanity_binary("oclvanitygen")
+OCLVANITYMINER_PATH = find_oclvanity_binary("oclvanityminer")
 KEYCONV_PATH = os.path.join(BASE_DIR, "bin", "keyconv.exe")
 MAX_KEYS_PER_FILE = 100_000  #Deprecated
 # Output file rotation config (for VanitySearch stream)

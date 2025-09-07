@@ -216,7 +216,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     exe_path = find_vanitysearch_binary()
     if not exe_path:
         logger.error("VanitySearch binary not found.")
-        return False
+        raise FileNotFoundError("VanitySearch binary not found.")
     cmd = [exe_path, "-s", hex_seed_full, "-o", current_output_path]
     if use_gpu:
         cmd.append("-gpu")  # Enable CUDA acceleration
