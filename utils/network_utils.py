@@ -1,4 +1,4 @@
-import requests
+import requests  # type: ignore[import-untyped]
 from urllib.parse import urlparse
 
 from core.logger import log_message

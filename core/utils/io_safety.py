@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Tuple, TextIO
+from typing import Tuple, TextIO, cast
 
 
 def atomic_open(path: str, mode: str = "w", encoding: str = "utf-8") -> Tuple[str, TextIO]:
@@ -13,7 +13,7 @@ def atomic_open(path: str, mode: str = "w", encoding: str = "utf-8") -> Tuple[st
     base_name = os.path.basename(path)
     tmp_name = f".{base_name}.tmp-{os.getpid()}-{int(time.time()*1000)}"
     tmp_path = os.path.join(dir_name, tmp_name)
-    handle = open(tmp_path, mode, encoding=encoding)
+    handle = cast(TextIO, open(tmp_path, mode, encoding=encoding))
     return tmp_path, handle
 
 

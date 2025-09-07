@@ -1,20 +1,25 @@
-import requests
+from __future__ import annotations
+
+import requests  # type: ignore[import-untyped]
+from typing import Optional
+
 from config.settings import TOKENVIEW_API_KEY
 from core.logger import log_message
 
 TOKENVIEW_URL = "https://services.tokenview.io/vipapi/addr/{coin}/{address}"
 
-def fetch_live_balance(address, coin):
+
+def fetch_live_balance(address: str, coin: str) -> Optional[float]:
     """Fetch the current balance for a given address using the TokenView API."""
     url = TOKENVIEW_URL.format(coin=coin, address=address)
-    headers = {}
+    headers: dict[str, str] = {}
     if TOKENVIEW_API_KEY:
         headers["token"] = TOKENVIEW_API_KEY
     try:
         resp = requests.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        bal_str = None
+        bal_str: Optional[str] = None
         if isinstance(data, dict):
             bal_str = (
                 data.get("data", {}).get("balance")

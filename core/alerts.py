@@ -1,22 +1,26 @@
+from __future__ import annotations
+
 import os
 import json
 import csv
 csv.field_size_limit(2**30)  # allow very large CSV fields
 import time
 import smtplib
-import requests
+import requests  # type: ignore[import-untyped]
 import threading
 import queue
 import subprocess
 import traceback
+from typing import Any, Dict, Optional
+
 try:
-    from twilio.rest import Client
+    from twilio.rest import Client  # type: ignore[import-not-found]
 except Exception:  # handle missing twilio dependency
     Client = None
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
+from Crypto.PublicKey import RSA  # type: ignore[import-not-found]
+from Crypto.Cipher import PKCS1_OAEP  # type: ignore[import-not-found]
 import base64
 from datetime import datetime
 
@@ -39,8 +43,10 @@ from core.logger import log_message
 from core.dashboard import get_metric
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 
+from typing import List
+
 # runtime alert flags that can be toggled from the GUI
-ALERT_FLAGS = {
+ALERT_FLAGS: Dict[str, bool] = {
     "ENABLE_AUDIO_ALERT_LOCAL": ENABLE_AUDIO_ALERT_LOCAL,
     "ENABLE_DESKTOP_WINDOW_ALERT": ENABLE_DESKTOP_WINDOW_ALERT,
     "ENABLE_PGP": ENABLE_PGP,
@@ -54,7 +60,7 @@ ALERT_FLAGS = {
 }
 
 # Mapping of alert channels for metrics tracking
-ALERT_CHANNELS = [
+ALERT_CHANNELS: List[str] = [
     "audio",
     "email",
     "telegram",
@@ -69,11 +75,11 @@ ALERT_CHANNELS = [
 ]
 
 # Queue for sequential audio alerts
-audio_queue = queue.Queue()
-audio_thread = None
+audio_queue: "queue.Queue[Optional[str]]" = queue.Queue()
+audio_thread: Optional[threading.Thread] = None
 
 
-def _audio_worker():
+def _audio_worker() -> None:
     """Background worker that plays alert sounds sequentially."""
     from playsound import playsound  # imported here to avoid startup cost
     while True:
@@ -83,18 +89,18 @@ def _audio_worker():
         try:
             playsound(sound)
             log_message("🔔 Played alert sound.")
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover - extremely rare
             log_message(f"❌ Audio alert error: {exc}", "ERROR")
 
 
-def _start_audio_worker():
+def _start_audio_worker() -> None:
     global audio_thread
     if audio_thread is None or not audio_thread.is_alive():
         audio_thread = threading.Thread(target=_audio_worker, daemon=True)
         audio_thread.start()
 
 
-def _show_desktop_popup(alert_type: str):
+def _show_desktop_popup(alert_type: str) -> None:
     """Display the desktop popup without blocking other alerts."""
     try:
         import tkinter as tk
@@ -132,7 +138,7 @@ def _show_desktop_popup(alert_type: str):
 _pgp_ok = False
 
 
-def init_pgp():
+def init_pgp() -> None:
     """Validate that a usable PGP key is available."""
     global _pgp_ok
     if not (ENABLE_PGP_ENCRYPTION and PGP_RECIPIENT):
@@ -156,7 +162,7 @@ def init_pgp():
     log_message(f"🔐 PGP encryption active for {PGP_RECIPIENT}", "INFO")
 
 
-def pgp_encrypt(text: str):
+def pgp_encrypt(text: str) -> Optional[str]:
     if not _pgp_ok:
         return None
     cmd = ["gpg", "--armor", "--encrypt", "-r", PGP_RECIPIENT]
@@ -173,14 +179,14 @@ def pgp_encrypt(text: str):
 init_pgp()
 
 
-def send_phone_call_alert(message: str):
+def send_phone_call_alert(message: str) -> None:
     """Send a Twilio phone call if enabled."""
     if not (ALERT_FLAGS.get("ENABLE_PHONE_CALL_ALERT") and Client):
         return
     try:
         if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO_CALL]):
             raise ValueError("Missing Twilio call credentials")
-        client = Client(TWILIO_SID, TWILIO_TOKEN)
+        client = Client(TWILIO_SID, TWILIO_TOKEN)  # type: ignore[operator]
         client.calls.create(
             twiml=f'<Response><Say>{message}</Say></Response>',
             from_=TWILIO_FROM,
@@ -189,11 +195,11 @@ def send_phone_call_alert(message: str):
         log_message("📞 Phone call alert triggered.", "INFO")
         _safe_inc_metric("alerts_sent_today.phone")
         _safe_inc_metric("alerts_sent_lifetime.phone")
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover - network dependent
         log_message(f"❌ Phone call error: {exc}\n{traceback.format_exc()}", "ERROR")
 
 
-def set_alert_flag(name, value):
+def set_alert_flag(name: str, value: bool) -> None:
     """Update runtime alert flags and reflect changes in settings."""
     ALERT_FLAGS[name] = value
     try:
@@ -205,7 +211,7 @@ def set_alert_flag(name, value):
         pass
 
 
-def alert_match(match_data, test_mode=False):
+def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
     """
     Sends alerts through all enabled channels.
     Accepts either:
@@ -391,10 +397,8 @@ def alert_match(match_data, test_mode=False):
         log_message(f"❌ Local match logging error: {e}", "ERROR")
 
 
-def trigger_startup_alerts(shared_metrics=None):
-    """
-    Sends startup alerts through configured channels.
-    """
+def trigger_startup_alerts(shared_metrics: Optional[Dict[str, Any]] = None) -> None:
+    """Send startup alerts through configured channels."""
     from core.worker_bootstrap import ensure_metrics_ready
     try:
         ensure_metrics_ready(shared_metrics)
@@ -414,7 +418,7 @@ def trigger_startup_alerts(shared_metrics=None):
         log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
 
 
-def run_test_alerts_from_csv(csv_path=None):
+def run_test_alerts_from_csv(csv_path: Optional[str] = None) -> None:
     """Send test alerts for each address in the CSV file."""
     if csv_path is None:
         csv_path = os.path.join(DOWNLOADS_DIR, "test_alerts.csv")
@@ -449,7 +453,7 @@ def run_test_alerts_from_csv(csv_path=None):
 
 
 # Backwards compatibility
-def trigger_test_alerts():
+def trigger_test_alerts() -> None:
     run_test_alerts_from_csv()
 
 
