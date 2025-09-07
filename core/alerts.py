@@ -164,12 +164,18 @@ def pgp_encrypt(text: str):
     cmd = ["gpg", "--armor", "--encrypt", "-r", PGP_RECIPIENT]
     if PGP_KEYRING_PATH:
         cmd = ["gpg", "--keyring", PGP_KEYRING_PATH, "--armor", "--encrypt", "-r", PGP_RECIPIENT]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    out, err = proc.communicate(text)
-    if proc.returncode != 0:
-        log_message(f"❌ PGP encryption failed: {err}", "ERROR")
-        return None
-    return out
+    with subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as proc:
+        out, err = proc.communicate(text)
+        if proc.returncode != 0:
+            log_message(f"❌ PGP encryption failed: {err}", "ERROR")
+            return None
+        return out
 
 
 init_pgp()
