@@ -23,6 +23,7 @@ sys.modules.setdefault('ui.dashboard_gui', types.SimpleNamespace(start_dashboard
 sys.modules.setdefault('core.gpu_selector', types.SimpleNamespace(assign_gpu_roles=lambda *a, **k: None, get_vanitysearch_gpu_ids=lambda: [], get_altcoin_gpu_ids=lambda: [], get_gpu_assignments=lambda: {}))
 sys.modules.setdefault('core.keygen', types.SimpleNamespace(run_btc_only=lambda *a, **k: None))
 sys.modules.setdefault('core.btc_only_checker', types.SimpleNamespace(btc_only_checker_loop=lambda *a, **k: None))
+sys.modules.setdefault('core.telemetry', types.SimpleNamespace(start_telemetry=lambda *a, **k: None))
 
 from utils.puzzle import get_puzzle_info
 import main

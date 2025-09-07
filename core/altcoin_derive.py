@@ -24,6 +24,7 @@ import multiprocessing
 import io
 import pathlib
 from queue import Empty
+from contextlib import ExitStack
 
 try:
     import psutil
@@ -57,7 +58,7 @@ from config.settings import (
     EXCLUDE_ETH_FROM_DERIVE,
 )
 from core.logger import log_message
-from core.dashboard import update_dashboard_stat, get_metric
+from core.dashboard import update_dashboard_stat, get_metric, record_rate
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 import core.checkpoint as checkpoint
 from core.gpu_selector import get_altcoin_gpu_ids, list_gpus
@@ -407,127 +408,163 @@ def load_kernel_source(device):
 def derive_addresses_gpu(hex_keys, context=None):
     """Derive addresses using the GPU if available."""
 
-    if context is None:
+    created_context = context is None
+    if created_context:
         context, device = get_gpu_context_for_altcoin()
     else:
         device = context.devices[0]
-    # Enable profiling so we can time kernel execution
-    queue = cl.CommandQueue(context, properties=cl.command_queue_properties.PROFILING_ENABLE)
 
-    # NVIDIA cards require a slightly different kernel without AMD-specific
-    # flags.  Choose the appropriate source based on the device in use.
-    kernel_code = load_kernel_source(device)
+    with ExitStack() as stack:
+        if created_context:
+            stack.callback(context.release)
 
-    program = cl.Program(context, kernel_code)
-    try:
-        program.build()
-        log_message(f"OpenCL kernel compiled for {device.name}", "INFO")
-        # Log any compiler messages for debugging
+        # Enable profiling so we can time kernel execution
+        queue = cl.CommandQueue(
+            context, properties=cl.command_queue_properties.PROFILING_ENABLE
+        )
+        stack.callback(queue.release)
+
+        # NVIDIA cards require a slightly different kernel without AMD-specific
+        # flags.  Choose the appropriate source based on the device in use.
+        kernel_code = load_kernel_source(device)
+
+        program = cl.Program(context, kernel_code)
+        stack.callback(program.release)
         try:
-            build_log = program.get_build_info(device, cl.program_build_info.LOG)
-            if build_log.strip():
-                log_message(f"Kernel build log ({device.name}): {build_log.strip()}", "DEBUG")
-        except Exception:
-            log_message("Failed to retrieve kernel build log", "DEBUG", exc_info=True)
-    except Exception as build_err:
-        # Capture and report the build log from each device to aid debugging
-        for dev in context.devices:
+            program.build()
+            log_message(f"OpenCL kernel compiled for {device.name}", "INFO")
+            # Log any compiler messages for debugging
             try:
-                log = program.get_build_info(dev, cl.program_build_info.LOG)
-                log_message(f"Kernel build log ({dev.name}): {log}", "ERROR")
+                build_log = program.get_build_info(
+                    device, cl.program_build_info.LOG
+                )
+                if build_log.strip():
+                    log_message(
+                        f"Kernel build log ({device.name}): {build_log.strip()}",
+                        "DEBUG",
+                    )
             except Exception:
                 log_message(
-                    f"Failed to retrieve build log for {getattr(dev, 'name', 'unknown device')}",
-                    "DEBUG",
-                    exc_info=True,
+                    "Failed to retrieve kernel build log", "DEBUG", exc_info=True
                 )
-        log_message("❌ OpenCL build failed", "ERROR", exc_info=True)
-        raise RuntimeError(f"OpenCL kernel build failed: {build_err}")
+        except Exception as build_err:
+            # Capture and report the build log from each device to aid debugging
+            for dev in context.devices:
+                try:
+                    log = program.get_build_info(
+                        dev, cl.program_build_info.LOG
+                    )
+                    log_message(f"Kernel build log ({dev.name}): {log}", "ERROR")
+                except Exception:
+                    log_message(
+                        f"Failed to retrieve build log for {getattr(dev, 'name', 'unknown device')}",
+                        "DEBUG",
+                        exc_info=True,
+                    )
+            log_message("❌ OpenCL build failed", "ERROR", exc_info=True)
+            raise RuntimeError(f"OpenCL kernel build failed: {build_err}")
 
-    kernel_hash160 = cl.Kernel(program, "hash160")
+        kernel_hash160 = cl.Kernel(program, "hash160")
+        stack.callback(kernel_hash160.release)
 
-    key_bytes = [bytes.fromhex(k.lstrip("0x").zfill(64)) for k in hex_keys]
-    count = len(key_bytes)
-    log_message(f"[GPU] Deriving {count} keys (work items: {count})", "DEBUG")
+        key_bytes = [bytes.fromhex(k.lstrip("0x").zfill(64)) for k in hex_keys]
+        count = len(key_bytes)
+        log_message(f"[GPU] Deriving {count} keys (work items: {count})", "DEBUG")
 
-    # Generate public keys on CPU
-    pub_c_list = []
-    pub_u_list = []
-    for priv in key_bytes:
-        sk = SigningKey.from_string(priv, curve=SECP256k1)
-        vk = sk.get_verifying_key()
-        vk_bytes = vk.to_string()
-        x = vk_bytes[:32]
-        y = vk_bytes[32:]
-        prefix = b"\x03" if (y[-1] % 2) else b"\x02"
-        pub_c_list.append(prefix + x)
-        pub_u_list.append(b"\x04" + x + y)
+        # Generate public keys on CPU
+        pub_c_list = []
+        pub_u_list = []
+        for priv in key_bytes:
+            sk = SigningKey.from_string(priv, curve=SECP256k1)
+            vk = sk.get_verifying_key()
+            vk_bytes = vk.to_string()
+            x = vk_bytes[:32]
+            y = vk_bytes[32:]
+            prefix = b"\x03" if (y[-1] % 2) else b"\x02"
+            pub_c_list.append(prefix + x)
+            pub_u_list.append(b"\x04" + x + y)
 
-    mf = cl.mem_flags
+        mf = cl.mem_flags
 
-    comp_flat = b"".join(pub_c_list)
-    uncomp_flat = b"".join(pub_u_list)
+        comp_flat = b"".join(pub_c_list)
+        uncomp_flat = b"".join(pub_u_list)
 
-    comp_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=comp_flat)
-    uncomp_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=uncomp_flat)
+        comp_buf = cl.Buffer(
+            context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=comp_flat
+        )
+        stack.callback(comp_buf.release)
+        uncomp_buf = cl.Buffer(
+            context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=uncomp_flat
+        )
+        stack.callback(uncomp_buf.release)
 
-    out_comp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
-    out_uncomp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
+        out_comp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
+        stack.callback(out_comp_buf.release)
+        out_uncomp_buf = cl.Buffer(context, mf.WRITE_ONLY, 20 * count)
+        stack.callback(out_uncomp_buf.release)
 
-    start_gpu = time.perf_counter()
-    kernel_hash160.set_args(comp_buf, out_comp_buf, np.uint32(33))
-    event_comp = cl.enqueue_nd_range_kernel(queue, kernel_hash160, (count,), None)
+        start_gpu = time.perf_counter()
+        kernel_hash160.set_args(comp_buf, out_comp_buf, np.uint32(33))
+        event_comp = cl.enqueue_nd_range_kernel(
+            queue, kernel_hash160, (count,), None
+        )
 
-    kernel_hash160.set_args(uncomp_buf, out_uncomp_buf, np.uint32(65))
-    event_uncomp = cl.enqueue_nd_range_kernel(queue, kernel_hash160, (count,), None)
+        kernel_hash160.set_args(uncomp_buf, out_uncomp_buf, np.uint32(65))
+        event_uncomp = cl.enqueue_nd_range_kernel(
+            queue, kernel_hash160, (count,), None
+        )
 
-    hash_comp = np.empty((count, 20), dtype=np.uint8)
-    hash_uncomp = np.empty((count, 20), dtype=np.uint8)
-    cl.enqueue_copy(queue, hash_comp, out_comp_buf)
-    cl.enqueue_copy(queue, hash_uncomp, out_uncomp_buf)
-    queue.finish()
+        hash_comp = np.empty((count, 20), dtype=np.uint8)
+        hash_uncomp = np.empty((count, 20), dtype=np.uint8)
+        cl.enqueue_copy(queue, hash_comp, out_comp_buf)
+        cl.enqueue_copy(queue, hash_uncomp, out_uncomp_buf)
+        queue.finish()
 
-    end_gpu = time.perf_counter()
-    comp_ms = (event_comp.profile.end - event_comp.profile.start) / 1e6
-    uncomp_ms = (event_uncomp.profile.end - event_uncomp.profile.start) / 1e6
-    log_message(
-        f"[GPU] Kernel times - compressed:{comp_ms:.3f}ms uncompressed:{uncomp_ms:.3f}ms total:{end_gpu - start_gpu:.3f}s",
-        "DEBUG",
-    )
+        end_gpu = time.perf_counter()
+        comp_ms = (event_comp.profile.end - event_comp.profile.start) / 1e6
+        uncomp_ms = (event_uncomp.profile.end - event_uncomp.profile.start) / 1e6
+        log_message(
+            f"[GPU] Kernel times - compressed:{comp_ms:.3f}ms uncompressed:{uncomp_ms:.3f}ms total:{end_gpu - start_gpu:.3f}s",
+            "DEBUG",
+        )
 
-    results = []
-    for idx in range(count):
-        try:
-            pubkey_compressed = pub_c_list[idx]
+        results = []
+        for idx in range(count):
+            try:
+                pubkey_compressed = pub_c_list[idx]
 
-            hash160_c = bytes(hash_comp[idx])
-            hash160_u = bytes(hash_uncomp[idx])
+                hash160_c = bytes(hash_comp[idx])
+                hash160_u = bytes(hash_uncomp[idx])
 
-            result = {
-                "btc_C": b58(b"\x00", hash160_c),
-                "btc_U": b58(b"\x00", hash160_u),
-                "ltc_C": b58(b"\x30", hash160_c),
-                "ltc_U": b58(b"\x30", hash160_u),
-                "doge_C": b58(b"\x1e", hash160_c),
-                "doge_U": b58(b"\x1e", hash160_u),
-                "dash_C": b58(b"\x4c", hash160_c),
-                "dash_U": b58(b"\x4c", hash160_u),
-                "bch_C": cashaddr_encode("bitcoincash", hash160_c) if BCH_CASHADDR_ENABLED else b58(b"\x00", hash160_c),
-                "bch_U": cashaddr_encode("bitcoincash", hash160_u) if BCH_CASHADDR_ENABLED else b58(b"\x00", hash160_u),
-                "rvn_C": b58(b"\x3c", hash160_c),
-                "rvn_U": b58(b"\x3c", hash160_u),
-                "pep_C": b58(b"\x37", hash160_c),
-                "pep_U": b58(b"\x37", hash160_u),
-            }
-            if not EXCLUDE_ETH_FROM_DERIVE:
-                result["eth"] = "0x" + keccak(pubkey_compressed[1:])[-20:].hex()
+                result = {
+                    "btc_C": b58(b"\x00", hash160_c),
+                    "btc_U": b58(b"\x00", hash160_u),
+                    "ltc_C": b58(b"\x30", hash160_c),
+                    "ltc_U": b58(b"\x30", hash160_u),
+                    "doge_C": b58(b"\x1e", hash160_c),
+                    "doge_U": b58(b"\x1e", hash160_u),
+                    "dash_C": b58(b"\x4c", hash160_c),
+                    "dash_U": b58(b"\x4c", hash160_u),
+                    "bch_C": cashaddr_encode("bitcoincash", hash160_c)
+                    if BCH_CASHADDR_ENABLED
+                    else b58(b"\x00", hash160_c),
+                    "bch_U": cashaddr_encode("bitcoincash", hash160_u)
+                    if BCH_CASHADDR_ENABLED
+                    else b58(b"\x00", hash160_u),
+                    "rvn_C": b58(b"\x3c", hash160_c),
+                    "rvn_U": b58(b"\x3c", hash160_u),
+                    "pep_C": b58(b"\x37", hash160_c),
+                    "pep_U": b58(b"\x37", hash160_u),
+                }
+                if not EXCLUDE_ETH_FROM_DERIVE:
+                    result["eth"] = "0x" + keccak(pubkey_compressed[1:])[-20:].hex()
 
-            results.append(result)
+                results.append(result)
 
-        except Exception as e:
-            results.append({"error": str(e)})
+            except Exception as e:
+                results.append({"error": str(e)})
 
-    return results
+        return results
 
 
 def hash160_prefix_gpu(pubkeys, prefix, context=None):
@@ -540,34 +577,51 @@ def hash160_prefix_gpu(pubkeys, prefix, context=None):
     comparison is needed.
     """
 
-    if context is None:
+    created_context = context is None
+    if created_context:
         context, device = get_gpu_context_for_altcoin()
     else:
         device = context.devices[0]
 
-    queue = cl.CommandQueue(context)
-    source = load_kernel_source(device)
-    program = cl.Program(context, source).build()
-    kernel = cl.Kernel(program, "hash160_prefix")
+    with ExitStack() as stack:
+        if created_context:
+            stack.callback(context.release)
+        queue = cl.CommandQueue(context)
+        stack.callback(queue.release)
+        source = load_kernel_source(device)
+        program = cl.Program(context, source)
+        stack.callback(program.release)
+        program.build()
+        kernel = cl.Kernel(program, "hash160_prefix")
+        stack.callback(kernel.release)
 
-    count = len(pubkeys)
-    if not count:
-        return []
+        count = len(pubkeys)
+        if not count:
+            return []
 
-    input_size = len(pubkeys[0])
-    mf = cl.mem_flags
+        input_size = len(pubkeys[0])
+        mf = cl.mem_flags
 
-    in_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=b"".join(pubkeys))
-    prefix_buf = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=prefix)
-    match_buf = cl.Buffer(context, mf.WRITE_ONLY, 4 * count)
+        in_buf = cl.Buffer(
+            context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=b"".join(pubkeys)
+        )
+        stack.callback(in_buf.release)
+        prefix_buf = cl.Buffer(
+            context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=prefix
+        )
+        stack.callback(prefix_buf.release)
+        match_buf = cl.Buffer(context, mf.WRITE_ONLY, 4 * count)
+        stack.callback(match_buf.release)
 
-    kernel.set_args(in_buf, np.uint32(input_size), prefix_buf, np.uint32(len(prefix)), match_buf)
-    cl.enqueue_nd_range_kernel(queue, kernel, (count,), None)
+        kernel.set_args(
+            in_buf, np.uint32(input_size), prefix_buf, np.uint32(len(prefix)), match_buf
+        )
+        cl.enqueue_nd_range_kernel(queue, kernel, (count,), None)
 
-    matches = np.empty(count, dtype=np.uint32)
-    cl.enqueue_copy(queue, matches, match_buf)
-    queue.finish()
-    return matches.tolist()
+        matches = np.empty(count, dtype=np.uint32)
+        cl.enqueue_copy(queue, matches, match_buf)
+        queue.finish()
+        return matches.tolist()
 
 
 def derive_addresses_cpu(hex_keys):
@@ -966,6 +1020,8 @@ def convert_txt_to_csv(
                 log_message(f"📈 Generated {count} {coin.upper()} addresses", "DEBUG")
 
             total_dur = time.perf_counter() - start_total
+            addresses_per_sec = rows_written / total_dur if total_dur > 0 else 0
+            record_rate("altcoin_addresses_per_sec", addresses_per_sec)
             log_message(
                 f"[PERF] File {filename} load:{perf_stats['load']:.2f}s derive:{perf_stats['derive']:.2f}s write:{perf_stats['write']:.2f}s total:{total_dur:.2f}s",
                 "DEBUG",
@@ -1139,53 +1195,17 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     from core.dashboard import get_pause_event
 
     pause_logged = False
-
-    while not safe_event_is_set(shared_shutdown_event):
-        if safe_event_is_set(get_pause_event("altcoin")):
-            if not pause_logged:
-                log_message("⏸️ Altcoin derive paused. Waiting to resume...", "INFO")
-                pause_logged = True
-            time.sleep(1)
-            continue
-        elif pause_logged:
-            log_message("▶️ Altcoin derive resumed.", "INFO")
-            pause_logged = False
-        try:
-            all_txt = [
-                f
-                for f in list_vanity_txt_files()
-                if f not in processed
-                and f not in queued
-                and ".tmp-" not in f
-                and safe_nonempty(os.path.join(VANITY_OUTPUT_DIR, f))
-            ]
-
-            safe_update_dashboard_stat("backlog_files_queued", len(all_txt) + len(queued))
-            log_message(
-                f"[QUEUE] workers:{sum(1 for p in processes.values() if p)} queued:{len(all_txt) + len(queued)}",
-                "DEBUG",
-            )
-            if psutil:
-                proc = psutil.Process()
-                mem_mb = proc.memory_info().rss / (1024 * 1024)
-                log_message(f"[MEM] RSS {mem_mb:.1f} MB", "DEBUG")
-            if durations:
-                avg = sum(durations) / len(durations)
-                eta_sec = avg * (len(all_txt) + len(queued))
-                hrs = int(eta_sec // 3600)
-                mins = int((eta_sec % 3600) // 60)
-                secs = int(eta_sec % 60)
-                safe_update_dashboard_stat(
-                    {
-                        "backlog_avg_time": f"{avg:.2f}s",
-                        "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
-                    }
-                )
-
-            effective_gpus = gpu_ids_all if (gpu_flag is None or gpu_flag.value) else []
-            if not effective_gpus:
-                time.sleep(3)
+    try:
+        while not safe_event_is_set(shared_shutdown_event):
+            if safe_event_is_set(get_pause_event("altcoin")):
+                if not pause_logged:
+                    log_message("⏸️ Altcoin derive paused. Waiting to resume...", "INFO")
+                    pause_logged = True
+                time.sleep(1)
                 continue
+            elif pause_logged:
+                log_message("▶️ Altcoin derive resumed.", "INFO")
+                pause_logged = False
 
             # Fill per-GPU queues with pending files
             for gid in effective_gpus:
@@ -1227,60 +1247,145 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                             "ERROR",
                             exc_info=True,
                         )
-
             try:
-                while True:
-                    txt_file, dur, rows, err, gid = result_q.get_nowait()
-                    queued.discard(txt_file)
-                    base = os.path.splitext(txt_file)[0]
-                    if gid is not None:
-                        base = f"{base}_gpu{gid}"
-                    progress = dict(safe_get_metric("backlog_progress", {}))
-                    if base in progress:
-                        progress.pop(base, None)
-                        safe_update_dashboard_stat("backlog_progress", progress)
-                    if err:
-                        log_message(f"❌ Failed to convert {txt_file}: {err}", "ERROR")
-                    else:
-                        processed.add(txt_file)
-                        durations.append(dur)
-                        safe_increment_metric("altcoin_files_converted", 1)
-                        if rows:
-                            safe_increment_metric("derived_addresses_today", rows)
-                        safe_increment_metric("backlog_files_completed", 1)
-                        if dur > 0:
-                            rps = rows / dur
-                            log_message(
-                                f"[STATS] {txt_file} → {rows} rows in {dur:.2f}s ({rps:.1f} rows/s)",
-                                "DEBUG",
-                            )
-                        if len(durations) % 10 == 0:
-                            avg_dur = sum(durations) / len(durations)
-                            log_message(
-                                f"[STATS] Avg time per file: {avg_dur:.2f}s over {len(durations)} files",
-                                "DEBUG",
-                            )
-                    # Clean up the finished process for this GPU
-                    proc = processes.get(gid)
-                    if proc:
+                all_txt = [
+                    f
+                    for f in list_vanity_txt_files()
+                    if f not in processed
+                    and f not in queued
+                    and ".tmp-" not in f
+                    and safe_nonempty(os.path.join(VANITY_OUTPUT_DIR, f))
+                ]
+
+                safe_update_dashboard_stat("backlog_files_queued", len(all_txt) + len(queued))
+                log_message(
+                    f"[QUEUE] workers:{sum(1 for p in processes.values() if p)} queued:{len(all_txt) + len(queued)}",
+                    "DEBUG",
+                )
+                if psutil:
+                    proc = psutil.Process()
+                    mem_mb = proc.memory_info().rss / (1024 * 1024)
+                    log_message(f"[MEM] RSS {mem_mb:.1f} MB", "DEBUG")
+                if durations:
+                    avg = sum(durations) / len(durations)
+                    eta_sec = avg * (len(all_txt) + len(queued))
+                    hrs = int(eta_sec // 3600)
+                    mins = int((eta_sec % 3600) // 60)
+                    secs = int(eta_sec % 60)
+                    safe_update_dashboard_stat(
+                        {
+                            "backlog_avg_time": f"{avg:.2f}s",
+                            "backlog_eta": f"{hrs:02}:{mins:02}:{secs:02}",
+                        }
+                    )
+
+                effective_gpus = gpu_ids_all if (gpu_flag is None or gpu_flag.value) else []
+                if not effective_gpus:
+                    time.sleep(3)
+                    continue
+
+                # Fill per-GPU queues with pending files
+                for gid in effective_gpus:
+                    if not gpu_queues[gid] and all_txt:
+                        gpu_queues[gid].append(all_txt.pop(0))
+
+                # Launch a dedicated subprocess per GPU so each device works in parallel
+                # without sharing file handles or GPU contexts.
+                for gid in effective_gpus:
+                    if processes[gid] is None and gpu_queues[gid]:
+                        txt = gpu_queues[gid].pop(0)
+                        log_message(
+                            f"[QUEUE] Launching {txt} on GPU {gid if gid is not None else 'CPU'}",
+                            "DEBUG",
+                        )
+                        p = multiprocessing.Process(
+                            target=_convert_file_worker,
+                            args=(
+                                txt,
+                                _unwrap_event(pause_event),
+                                _unwrap_event(shared_shutdown_event),
+                                gid,
+                                result_q,
+                            ),
+                            name=f"AltcoinWorker-{txt}",
+                        )
+                        p.daemon = True
+                        p.start()
+                        log_message(
+                            f"Spawned altcoin worker PID {p.pid} for {txt} on GPU {gid if gid is not None else 'CPU'}",
+                            "INFO",
+                        )
+                        processes[gid] = p
+                        queued.add(txt)
+
+                try:
+                    while True:
+                        txt_file, dur, rows, err, gid = result_q.get_nowait()
+                        queued.discard(txt_file)
+                        base = os.path.splitext(txt_file)[0]
+                        if gid is not None:
+                            base = f"{base}_gpu{gid}"
+                        progress = dict(safe_get_metric("backlog_progress", {}))
+                        if base in progress:
+                            progress.pop(base, None)
+                            safe_update_dashboard_stat("backlog_progress", progress)
+                        if err:
+                            log_message(f"❌ Failed to convert {txt_file}: {err}", "ERROR")
+                        else:
+                            processed.add(txt_file)
+                            durations.append(dur)
+                            safe_increment_metric("altcoin_files_converted", 1)
+                            if rows:
+                                safe_increment_metric("derived_addresses_today", rows)
+                            safe_increment_metric("backlog_files_completed", 1)
+                            if dur > 0:
+                                rps = rows / dur
+                                log_message(
+                                    f"[STATS] {txt_file} → {rows} rows in {dur:.2f}s ({rps:.1f} rows/s)",
+                                    "DEBUG",
+                                )
+                            if len(durations) % 10 == 0:
+                                avg_dur = sum(durations) / len(durations)
+                                log_message(
+                                    f"[STATS] Avg time per file: {avg_dur:.2f}s over {len(durations)} files",
+                                    "DEBUG",
+                                )
+                        # Clean up the finished process for this GPU
+                        proc = processes.get(gid)
+                        if proc:
+                            proc.join()
+                            processes[gid] = None
+                except Empty:
+                    pass
+
+                # Remove any dead processes that didn't report back
+                for gid, proc in list(processes.items()):
+                    if proc and not proc.is_alive():
                         proc.join()
                         processes[gid] = None
-            except Empty:
-                pass
 
-            # Remove any dead processes that didn't report back
-            for gid, proc in list(processes.items()):
-                if proc and not proc.is_alive():
+                safe_update_dashboard_stat(
+                    "backlog_current_file", next(iter(queued), "")
+                )
+                if not any(processes.values()) and not all_txt:
+                    time.sleep(3)
+            except Exception as e:
+                log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR", exc_info=True)
+    finally:
+        for proc in processes.values():
+            if proc:
+                try:
+                    proc.join(timeout=5)
+                except Exception:
+                    pass
+                if proc.is_alive():
+                    proc.terminate()
                     proc.join()
-                    processes[gid] = None
-
-            safe_update_dashboard_stat(
-                "backlog_current_file", next(iter(queued), "")
-            )
-            if not any(processes.values()) and not all_txt:
-                time.sleep(3)
-        except Exception as e:
-            log_message(f"❌ Error in altcoin conversion loop: {safe_str(e)}", "ERROR", exc_info=True)
+        result_q.close()
+        try:
+            result_q.join_thread()
+        except Exception:
+            pass
 
     log_message("✅ Altcoin derive loop exited cleanly.", "INFO")
     _safe_set_metric("status.altcoin", "Stopped")
