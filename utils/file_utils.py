@@ -3,7 +3,7 @@ import time
 import threading
 from glob import glob
 
-from config.settings import DOWNLOADS_DIR, FULL_DIR, UNIQUE_DIR, RETENTION_DAYS
+from config.settings import DOWNLOADS_DIR, RETENTION_DAYS
 from core.logger import log_message
 
 
