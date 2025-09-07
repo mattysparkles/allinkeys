@@ -3,6 +3,8 @@
 import os
 import time
 import json
+import sys
+import threading
 try:
     import pyopencl as cl
 except Exception:  # pragma: no cover - optional dependency
@@ -109,6 +111,33 @@ def auto_assign_best(gpus):
                     assigned_gpus["altcoin_derive"].append(g)
 
 
+def _input_with_timeout(prompt: str, timeout: int) -> str | None:
+    """Read input from ``stdin`` but give up after ``timeout`` seconds.
+
+    ``signal.alarm`` is unavailable on some platforms (e.g. Windows) so a
+    background thread is used to implement a portable timeout.  ``None`` is
+    returned when no input is received before the deadline.
+    """
+
+    if not sys.stdin.isatty():
+        return None
+
+    result: list[str] = []
+
+    def worker() -> None:
+        try:
+            result.append(input(prompt))
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        return None
+    return result[0] if result else None
+
+
 def prompt_user_to_choose(gpus):
     print("🧠 Available GPUs:")
     for i, g in enumerate(gpus):
@@ -118,43 +147,20 @@ def prompt_user_to_choose(gpus):
     print("Enter GPU indices separated by commas (e.g., 0 or 1,2).")
     print(f"You have {SELECTION_TIMEOUT} seconds to respond or default will be chosen.\n")
 
-    try:
-        import signal
+    vs_input = _input_with_timeout("Select GPU(s) for VanitySearch: ", SELECTION_TIMEOUT)
+    ad_input = _input_with_timeout("Select GPU(s) for Altcoin Derive: ", SELECTION_TIMEOUT)
 
-        def timeout_handler(signum, frame):
-            raise TimeoutError
-
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(SELECTION_TIMEOUT)
-
+    if vs_input is None and ad_input is None:
+        print("\n⏱️ No response in time. Defaulting to best configuration.")
+        auto_assign_best(gpus)
+    else:
         try:
-            vs_input = input("Select GPU(s) for VanitySearch: ").strip()
-            ad_input = input("Select GPU(s) for Altcoin Derive: ").strip()
-            signal.alarm(0)
-
-            vs_indices = [int(i.strip()) for i in vs_input.split(",") if i.strip().isdigit()]
-            ad_indices = [int(i.strip()) for i in ad_input.split(",") if i.strip().isdigit()]
+            vs_indices = [int(i.strip()) for i in (vs_input or "").split(",") if i.strip().isdigit()]
+            ad_indices = [int(i.strip()) for i in (ad_input or "").split(",") if i.strip().isdigit()]
             ad_indices = [i for i in ad_indices if i not in vs_indices]
 
             assigned_gpus["vanitysearch"] = [gpus[i] for i in vs_indices if i < len(gpus)]
             assigned_gpus["altcoin_derive"] = [gpus[i] for i in ad_indices if i < len(gpus)]
-
-        except TimeoutError:
-            print("\n⏱️ No response in time. Defaulting to best configuration.")
-            auto_assign_best(gpus)
-
-    except (ImportError, AttributeError, OSError):
-        try:
-            vs_input = input("Select GPU(s) for VanitySearch: ").strip()
-            ad_input = input("Select GPU(s) for Altcoin Derive: ").strip()
-
-            vs_indices = [int(i.strip()) for i in vs_input.split(",") if i.strip().isdigit()]
-            ad_indices = [int(i.strip()) for i in ad_input.split(",") if i.strip().isdigit()]
-            ad_indices = [i for i in ad_indices if i not in vs_indices]
-
-            assigned_gpus["vanitysearch"] = [gpus[i] for i in vs_indices if i < len(gpus)]
-            assigned_gpus["altcoin_derive"] = [gpus[i] for i in ad_indices if i < len(gpus)]
-
         except Exception as e:
             print(f"⚠️ Invalid input, defaulting: {e}")
             auto_assign_best(gpus)
