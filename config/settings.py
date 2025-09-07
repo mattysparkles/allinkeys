@@ -46,7 +46,7 @@ DOWNLOAD_DIR = DOWNLOADS_DIR
 CHECKPOINT_FILE = os.path.join(BASE_DIR, "checkpoint.json")
 
 # === BTC-only mode settings ===
-ALL_BTC_ADDRESSES_URL = "http://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"
+ALL_BTC_ADDRESSES_URL = "https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"
 ALL_BTC_ADDRESSES_DIR = os.path.join(BASE_DIR, "all_btc_addresses")
 ALL_BTC_RANGES_COUNT = 20
 ALL_BTC_GZ_LOCAL = os.path.join(ALL_BTC_ADDRESSES_DIR, "all_Bitcoin_addresses_ever_used_sorted.txt.gz")
@@ -62,6 +62,14 @@ BACKLOG_RESUME_THRESHOLD = int(
 # Warning rate-limit (seconds), per event name
 PAUSE_WARNING_RATELIMIT_SECONDS = int(
     os.getenv("PAUSE_WARNING_RATELIMIT_SECONDS", "30")
+)
+
+# Polling intervals for status updates
+METRICS_POLL_INTERVAL_SECONDS = int(
+    os.getenv("METRICS_POLL_INTERVAL_SECONDS", "3")
+)
+BACKLOG_MONITOR_INTERVAL_SECONDS = int(
+    os.getenv("BACKLOG_MONITOR_INTERVAL_SECONDS", "2")
 )
 
 # Legacy alias for backward compatibility
@@ -406,16 +414,22 @@ DELETE_SYSTEM_LOGS = True
 DELETE_CSV_CHECKING_LOGS = True
 
 # ===================== 📜 LOGGING ================================
-LOG_LEVEL = "INFO" # Options include: INFO, DEBUG, TRACE,  
+LOG_LEVEL = "INFO" # Options include: INFO, DEBUG, TRACE,
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
 LOGGING_ENABLED = True  # or False if you want to disable it
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 
 
 # ===================== 🔒 SECURITY ==========================
-DASHBOARD_RESET_PASSWORD = os.getenv("DASHBOARD_RESET_PASSWORD", "")
+# The dashboard password is stored as a salted hash to avoid keeping
+# plaintext secrets in memory or on disk.  ``DASHBOARD_PASSWORD_HASH`` can be
+# supplied via environment variable or ``--dashboard-password`` CLI flag.
+DASHBOARD_PASSWORD_HASH = os.getenv("DASHBOARD_PASSWORD_HASH", "")
 DELETE_CONFIRMATION_PASSWORD = os.getenv("DELETE_CONFIRMATION_PASSWORD", "")
-DASHBOARD_PASSWORD = DASHBOARD_RESET_PASSWORD  # Alias for UI compatibility
+# Backward compatible alias used by the GUI module
+DASHBOARD_PASSWORD = DASHBOARD_PASSWORD_HASH
 
 # ===================== ❤️ DONATION INFO ==========================
 SHOW_DONATION_MESSAGE = True
@@ -440,6 +454,9 @@ DONATION_ADDRESSES = {
 # ===================== 🔔 ALERTS + NOTIFICATIONS ====================
 
 ENABLE_ALERTS = True  # Master toggle
+
+# Hide sensitive information like seeds or private keys in outgoing alert bodies
+REDACT_SENSITIVE_DATA_IN_ALERTS = True
 
 # === LOCAL AUDIO ALERT ===
 ENABLE_AUDIO_ALERT_LOCAL = True

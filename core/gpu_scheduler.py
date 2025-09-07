@@ -1,8 +1,9 @@
 """GPU scheduling and dynamic reassignment utilities."""
 
-import time
 import os
 import multiprocessing
+import threading
+import time
 
 try:
     import pyopencl as cl
@@ -18,8 +19,12 @@ from config.settings import (
     GPU_STRATEGY,
     GPU_VENDOR,
     VANITY_OUTPUT_DIR,
+    BACKLOG_MONITOR_INTERVAL_SECONDS,
 )
-from core.logger import log_message
+from core.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 # Alias VanitySearch output directory as the input backlog for altcoin derive
@@ -75,14 +80,12 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
 
     vendor, name = _detect_gpu_vendor()
     if name:
-        log_message(
-            f"[GPU Scheduler] ⚙️ Detected GPU: {name} (vendor={vendor}) using for altcoin derive.",
-            "INFO",
+        logger.info(
+            f"[GPU Scheduler] ⚙️ Detected GPU: {name} (vendor={vendor}) using for altcoin derive."
         )
     else:
-        log_message(
-            "[GPU Scheduler] ⚠️ No compatible GPU detected, falling back to CPU.",
-            "WARNING",
+        logger.warning(
+            "[GPU Scheduler] ⚠️ No compatible GPU detected, falling back to CPU."
         )
         vanity_flag.value = 0
         altcoin_flag.value = 0
@@ -92,7 +95,11 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
     # Record the current scheduling strategy for the dashboard
     _safe_set_metric("gpu_strategy", "swing" if SWING_MODE else "static")
 
-    while shutdown_event is None or not shutdown_event.is_set():
+    stop_event = shutdown_event or threading.Event()
+
+    def poll():
+        if stop_event.is_set():
+            return
         try:
             swing_mode = shared_metrics.get("swing_mode", SWING_MODE)
         except Exception:
@@ -113,9 +120,8 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                     vanity_flag.value = 0
                     altcoin_flag.value = 1
                     assignment_flag.value = 1
-                    log_message(
-                        "[GPU Scheduler] 🚦 100+ backlog files — prioritizing altcoin derive on all GPUs...",
-                        "INFO",
+                    logger.info(
+                        "[GPU Scheduler] 🚦 100+ backlog files — prioritizing altcoin derive on all GPUs..."
                     )
                     _safe_set_metric("vanity_gpu_on", False)
                     _safe_set_metric("altcoin_gpu_on", True)
@@ -125,9 +131,8 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                     vanity_flag.value = 1
                     altcoin_flag.value = 0
                     assignment_flag.value = 0
-                    log_message(
-                        "[GPU Scheduler] ✅ Backlog under 100 files — resuming vanity GPU usage...",
-                        "INFO",
+                    logger.info(
+                        "[GPU Scheduler] ✅ Backlog under 100 files — resuming vanity GPU usage..."
                     )
                     _safe_set_metric("vanity_gpu_on", True)
                     _safe_set_metric("altcoin_gpu_on", False)
@@ -140,7 +145,13 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
             _safe_set_metric("vanity_gpu_on", bool(vanity_flag.value))
             _safe_set_metric("altcoin_gpu_on", bool(altcoin_flag.value))
 
-        time.sleep(2)
+        if not stop_event.is_set():
+            threading.Timer(BACKLOG_MONITOR_INTERVAL_SECONDS, poll).start()
+
+    poll()
+    if not stop_event.is_set():
+        time.sleep(BACKLOG_MONITOR_INTERVAL_SECONDS)
+    stop_event.wait()
 
 
 def start_scheduler(shared_metrics, shutdown_event):
