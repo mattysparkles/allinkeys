@@ -12,28 +12,32 @@ from config.settings import (
     BTC_RANGE_FILE_PATTERN,
 )
 from core.dashboard import set_metric
-from utils.network_utils import get_with_https_fallback
+from utils.network_utils import download_file
+from config.constants import DOWNLOAD_SHA256
 
 
 def download_with_progress(url: str, dest_path: str, logger) -> None:
-    """Stream HTTP download with progress metrics."""
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    r = get_with_https_fallback(url, stream=True, timeout=30)
-    total = int(r.headers.get("Content-Length", 0))
-    if total:
-        set_metric("btc_ranges_download_size_bytes", total)
-    downloaded = 0
-    with open(dest_path, "wb") as f:
-        for chunk in r.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                f.write(chunk)
-                downloaded += len(chunk)
-                set_metric("btc_ranges_download_progress_bytes", downloaded)
-                if total:
-                    pct = downloaded * 100 / total
-                    logger.info(f"Downloading BTC addresses {downloaded}/{total} bytes ({pct:.2f}%)")
-                else:
-                    logger.info(f"Downloading BTC addresses {downloaded} bytes")
+    """Download with progress metrics and checksum verification."""
+
+    def _progress(downloaded: int, total: int) -> None:
+        set_metric("btc_ranges_download_progress_bytes", downloaded)
+        if total:
+            set_metric("btc_ranges_download_size_bytes", total)
+            pct = downloaded * 100 / total
+            logger.info(
+                f"Downloading BTC addresses {downloaded}/{total} bytes ({pct:.2f}%)"
+            )
+        else:
+            logger.info(f"Downloading BTC addresses {downloaded} bytes")
+
+    download_file(
+        url,
+        dest_path,
+        expected_sha256=DOWNLOAD_SHA256.get(url),
+        chunk_size=1024 * 1024,
+        progress_cb=_progress,
+        timeout=30,
+    )
     logger.info("BTC address download complete")
 
 
