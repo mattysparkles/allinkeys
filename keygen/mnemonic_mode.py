@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import struct
 import random
+import threading
 from typing import Dict, List, Optional, Set
 
 from ecdsa import SECP256k1
@@ -29,7 +30,7 @@ from .deriv_paths import SUPPORTED_COINS, resolve_paths
 from .encoders_mnemonic import encode_privkey, privkey_to_pubkey
 from gpu.mnemonic_opencl import available_devices, pbkdf2_sha512
 from utils.file_utils import find_latest_funded_file
-from core.dashboard import increment_metric, update_dashboard_stat, get_metric
+from core.dashboard import increment_metric, update_dashboard_stat, get_metric, init_dashboard_manager
 
 # ---------------------------------------------------------------------------
 # Word list helpers
@@ -197,6 +198,16 @@ def run_mnemonic_mode(args) -> None:
     wordlist = load_wordlist(args.custom_words_file, language=language)
     num_words = args.num_words or 12
     rng = random.Random(args.rng_seed)
+
+    init_dashboard_manager()
+    if (
+        settings.ENABLE_DASHBOARD
+        and not getattr(args, "no_dashboard", False)
+        and not getattr(args, "headless", False)
+    ):
+        from ui.dashboard_gui import start_dashboard
+
+        threading.Thread(target=start_dashboard, daemon=True).start()
 
     # Determine coins
     if getattr(args, "allcoins", False):
