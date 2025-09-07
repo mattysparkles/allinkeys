@@ -468,7 +468,7 @@ def run_only_mode(args):
         # mirrors the behaviour of the full application and ensures the
         # ``gpu_assignments.json`` file is always created.
         from core.gpu_selector import assign_gpu_roles
-        assign_gpu_roles()
+        assign_gpu_roles(getattr(args, "gpu_index", None))
 
         shared_metrics = init_dashboard_manager()
         shutdown_keygen = multiprocessing.Event()
@@ -538,7 +538,7 @@ def run_allinkeys(args):
     os.environ.setdefault("PYOPENCL_COMPILER_OUTPUT", "1")
     display_logo()
 
-    assign_gpu_roles()
+    assign_gpu_roles(getattr(args, "gpu_index", None))
     test_csv = os.path.join(DOWNLOAD_DIR, "test_alerts.csv")
     if not os.path.exists(test_csv):
         generate_test_csv()
@@ -650,6 +650,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-only", type=_parse_only, dest="only_legacy", help=argparse.SUPPRESS)
     parser.add_argument("--puzzle", type=int, help="Run BTC puzzle mode for given puzzle number")
     parser.add_argument("--chunk", type=int, help="Puzzle mode: claim specific chunk index")
+    parser.add_argument("--gpu-index", type=int, help="Force use of a specific GPU device index")
     puzzle_group = parser.add_mutually_exclusive_group()
     puzzle_group.add_argument("--every", action="store_true", help="Puzzle mode: keep generic '1**' prefix")
     puzzle_group.add_argument("--target", action="store_true", help="Puzzle mode: target puzzle address (default)")
