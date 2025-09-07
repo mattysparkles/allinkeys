@@ -57,7 +57,7 @@ from config.settings import (
     EXCLUDE_ETH_FROM_DERIVE,
 )
 from core.logger import log_message
-from core.dashboard import update_dashboard_stat, get_metric
+from core.dashboard import update_dashboard_stat, get_metric, record_rate
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 import core.checkpoint as checkpoint
 from core.gpu_selector import get_altcoin_gpu_ids, list_gpus
@@ -965,6 +965,8 @@ def convert_txt_to_csv(
                 log_message(f"📈 Generated {count} {coin.upper()} addresses", "DEBUG")
 
             total_dur = time.perf_counter() - start_total
+            addresses_per_sec = rows_written / total_dur if total_dur > 0 else 0
+            record_rate("altcoin_addresses_per_sec", addresses_per_sec)
             log_message(
                 f"[PERF] File {filename} load:{perf_stats['load']:.2f}s derive:{perf_stats['derive']:.2f}s write:{perf_stats['write']:.2f}s total:{total_dur:.2f}s",
                 "DEBUG",
