@@ -19,7 +19,6 @@ numpy
 cryptography
 bitcoinaddress
 twilio
-playsound
 GPUtil
 eth-account
 python-dotenv
