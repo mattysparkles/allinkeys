@@ -1,6 +1,8 @@
 import requests
 from config.settings import TOKENVIEW_API_KEY
-from core.logger import log_message
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 
 TOKENVIEW_URL = "https://services.tokenview.io/vipapi/addr/{coin}/{address}"
 
@@ -26,5 +28,5 @@ def fetch_live_balance(address, coin):
             except (TypeError, ValueError):
                 pass
     except Exception as exc:
-        log_message(f"⚠️ Failed to fetch balance for {address}: {exc}", "WARN")
+        logger.warning(f"⚠️ Failed to fetch balance for {address}: {exc}")
     return None

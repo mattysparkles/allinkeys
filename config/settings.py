@@ -406,10 +406,12 @@ DELETE_SYSTEM_LOGS = True
 DELETE_CSV_CHECKING_LOGS = True
 
 # ===================== 📜 LOGGING ================================
-LOG_LEVEL = "INFO" # Options include: INFO, DEBUG, TRACE,  
+LOG_LEVEL = "INFO" # Options include: INFO, DEBUG, TRACE,
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
 LOGGING_ENABLED = True  # or False if you want to disable it
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 
 
 # ===================== 🔒 SECURITY ==========================

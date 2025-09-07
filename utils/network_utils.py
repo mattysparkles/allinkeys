@@ -1,7 +1,9 @@
 import requests
 from urllib.parse import urlparse
 
-from core.logger import log_message
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_with_https_fallback(url: str, **kwargs) -> requests.Response:
@@ -14,9 +16,8 @@ def get_with_https_fallback(url: str, **kwargs) -> requests.Response:
         parsed = urlparse(url)
         if parsed.scheme == "https" and parsed.netloc.endswith("loyce.club"):
             fallback_url = url.replace("https://", "http://", 1)
-            log_message(
-                f"HTTPS request failed for {url}, falling back to {fallback_url}",
-                "WARN",
+            logger.warning(
+                f"HTTPS request failed for {url}, falling back to {fallback_url}"
             )
             r = requests.get(fallback_url, **kwargs)
             r.raise_for_status()

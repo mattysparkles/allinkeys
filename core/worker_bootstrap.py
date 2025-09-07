@@ -1,6 +1,8 @@
 import time
 
-from core.logger import log_message
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 
 try:
     from core.dashboard import init_shared_metrics, set_metric, increment_metric
@@ -21,10 +23,10 @@ def ensure_metrics_ready(shared_dict=None):
         init_shared_metrics(shared_dict)  # safe if already inited elsewhere
         set_metric("_worker_heartbeat", int(time.time()))
         _metrics_ready["ok"] = True
-        log_message("[worker_bootstrap] Shared metrics initialized", "DEBUG")
+        logger.debug("[worker_bootstrap] Shared metrics initialized")
         return True
     except Exception as e:
-        log_message(f"[worker_bootstrap] Metrics not ready: {e}", "WARNING")
+        logger.warning(f"[worker_bootstrap] Metrics not ready: {e}")
         return False
 
 def _safe_set_metric(name, value):
