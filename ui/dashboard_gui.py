@@ -6,11 +6,18 @@ import tkinter as tk
 from tkinter import messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
+import gettext
 
 # Add repo root so `config` package can be imported reliably
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, 'config'))
+
+locale_dir = os.path.join(BASE_DIR, 'locale')
+lang = os.environ.get('LANG', 'en')[:2]
+translation = gettext.translation('allinkeys', localedir=locale_dir, languages=[lang], fallback=True)
+_ = translation.gettext
+
 import settings
 
 from config.settings import (
@@ -52,7 +59,7 @@ from core.dashboard import (
 class DashboardGUI:
     def __init__(self, master):
         self.master = master
-        self.master.title("ALLINKEYS Live Dashboard")
+        self.master.title(_("ALLINKEYS Live Dashboard"))
         self.metrics = {}
         self.prev_values = {}
         self.prev_numeric = {}
@@ -107,7 +114,7 @@ class DashboardGUI:
             logo_label = tk.Label(logo_frame, text=LOGO_ASCII, font=("Courier", 7), justify="center")
             logo_label.pack()
 
-        addr_frame = ttk.LabelFrame(self.container, text="BTC Address Types")
+        addr_frame = ttk.LabelFrame(self.container, text=_("BTC Address Types"))
         addr_frame.pack(fill="x", padx=10, pady=5)
         addr_frame.grid_columnconfigure(0, weight=1)
         addr_frame.grid_columnconfigure(1, weight=1)
@@ -132,21 +139,21 @@ class DashboardGUI:
 
         ttk.Radiobutton(
             addr_frame,
-            text="1 (P2PKH)",
+            text=_("1 (P2PKH)"),
             variable=self.addr_type_var,
             value='p2pkh',
             command=_select_addr_type,
         ).grid(row=0, column=0, sticky="w")
         ttk.Radiobutton(
             addr_frame,
-            text="bc1q (P2WPKH)",
+            text=_("bc1q (P2WPKH)"),
             variable=self.addr_type_var,
             value='p2wpkh',
             command=_select_addr_type,
         ).grid(row=0, column=1, sticky="w")
         ttk.Radiobutton(
             addr_frame,
-            text="bc1p (Taproot)",
+            text=_("bc1p (Taproot)"),
             variable=self.addr_type_var,
             value='taproot',
             command=_select_addr_type,
@@ -213,7 +220,7 @@ class DashboardGUI:
             if not keys:
                 continue
             parent = column_frames[group]
-            frame = ttk.LabelFrame(parent, text=group)
+            frame = ttk.LabelFrame(parent, text=_(group))
             frame.pack(fill="both", expand=True, pady=10)
             frame.grid_columnconfigure(1, weight=1)
             SMALL_FONT_KEYS = {"addresses_checked_today", "addresses_checked_lifetime", "matches_found_lifetime"}
@@ -234,7 +241,7 @@ class DashboardGUI:
                     font_opt = SMALL_FONT if key in SMALL_FONT_KEYS else FONT
                     lbl = tk.Label(
                         frame,
-                        text="Loading...",
+                        text=_("Loading..."),
                         fg="white",
                         bg="#222222",
                         font=font_opt,
@@ -248,7 +255,7 @@ class DashboardGUI:
                 bp_row = len(keys)
                 ttk.Label(
                     frame,
-                    text="🛠️ CSV Conversions In Progress",
+                    text=_("🛠️ CSV Conversions In Progress"),
                     anchor="w",
                     justify="left",
                     font=FONT,
@@ -276,7 +283,7 @@ class DashboardGUI:
         self.gpu_swing_mode_enabled = tk.BooleanVar(value=(GPU_STRATEGY == "swing"))
         self.swing_mode_button = ttk.Checkbutton(
             self.section_frame,
-            text="Enable Swing Mode",
+            text=_("Enable Swing Mode"),
             variable=self.gpu_swing_mode_enabled,
             command=self.toggle_swing_mode,
         )
@@ -298,7 +305,7 @@ class DashboardGUI:
 
         # Alert Configuration Checkboxes
         if SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES:
-            alert_frame = ttk.LabelFrame(self.container, text="Alert Methods")
+            alert_frame = ttk.LabelFrame(self.container, text=_("Alert Methods"))
             alert_frame.pack(fill="x", padx=10, pady=(5, 0))
 
             from core import alerts
@@ -313,11 +320,11 @@ class DashboardGUI:
                     lambda *_, n=name, v=var: self.on_checkbox_toggle(n, v.get())
                 )
                 self.checkbox_vars[name] = var
-                label_text = name
+                label_text = _(name)
                 if name == "ENABLE_PHONE_CALL_ALERT":
-                    label_text = "Enable Call Alert (Twilio)"
+                    label_text = _("Enable Call Alert (Twilio)")
                 elif name == "ENABLE_SMS_ALERT":
-                    label_text = "Enable SMS Alert (Twilio)"
+                    label_text = _("Enable SMS Alert (Twilio)")
                 cb = tk.Checkbutton(alert_frame, text=label_text, variable=var)
                 cb.grid(row=row, column=col, sticky="w", padx=(0, 2))
                 if ALERT_CREDENTIAL_WARNINGS.get(name):
@@ -338,19 +345,19 @@ class DashboardGUI:
         bottom_frame.pack(pady=10)
 
         if OPEN_CONFIG_FILE_FROM_DASHBOARD:
-            ttk.Button(bottom_frame, text="Open Config File", command=self.open_config_file).pack(side="left", padx=5)
-        ttk.Button(bottom_frame, text="Reset Metrics", command=self.reset_metrics_prompt).pack(side="left", padx=5)
-        ttk.Button(bottom_frame, text="Reset Lifetime", command=self.reset_lifetime_prompt).pack(side="left", padx=5)
-        ttk.Button(bottom_frame, text="Test Alerts", command=self.test_alerts).pack(side="left", padx=5)
+            ttk.Button(bottom_frame, text=_("Open Config File"), command=self.open_config_file).pack(side="left", padx=5)
+        ttk.Button(bottom_frame, text=_("Reset Metrics"), command=self.reset_metrics_prompt).pack(side="left", padx=5)
+        ttk.Button(bottom_frame, text=_("Reset Lifetime"), command=self.reset_lifetime_prompt).pack(side="left", padx=5)
+        ttk.Button(bottom_frame, text=_("Test Alerts"), command=self.test_alerts).pack(side="left", padx=5)
         if SHOW_DELETE_DASHBOARD_DATA_BUTTON:
-            ttk.Button(bottom_frame, text="Delete All Data", command=self.delete_data_prompt).pack(side="left", padx=5)
+            ttk.Button(bottom_frame, text=_("Delete All Data"), command=self.delete_data_prompt).pack(side="left", padx=5)
 
         if SHOW_DONATION_MESSAGE:
-            msg = "If you find AllInKeys useful, consider donating! BTC: 18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y"
+            msg = _("If you find AllInKeys useful, consider donating! BTC: 18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y")
             ttk.Label(self.container, text=msg, font=("Segoe UI", 9, "italic"), foreground="gray").pack(pady=(0, 10))
 
     def _group_button_set(self, parent, label, col):
-        sub_frame = ttk.LabelFrame(parent, text=label)
+        sub_frame = ttk.LabelFrame(parent, text=_(label))
         sub_frame.grid(row=0, column=col, padx=5)
         # Default to running so buttons show correct state until metrics sync
         self.module_states[label] = "running"
@@ -360,20 +367,20 @@ class DashboardGUI:
         def update_buttons():
             state = self.module_states[label]
             for bname, btn in btns.items():
-                btn.config(text=bname, bootstyle="secondary", state=tk.NORMAL)
+                btn.config(text=_(bname), bootstyle="secondary", state=tk.NORMAL)
 
             if state == "running":
-                btns["Start"].config(text="RUNNING", bootstyle="success", state=tk.DISABLED)
+                btns["Start"].config(text=_("RUNNING"), bootstyle="success", state=tk.DISABLED)
                 btns["Resume"].config(state=tk.DISABLED)
                 btns["Pause"].config(state=tk.NORMAL)
                 btns["Stop"].config(state=tk.NORMAL)
             elif state == "paused":
-                btns["Pause"].config(text="PAUSED", bootstyle="warning", state=tk.DISABLED)
+                btns["Pause"].config(text=_("PAUSED"), bootstyle="warning", state=tk.DISABLED)
                 btns["Resume"].config(state=tk.NORMAL)
                 btns["Start"].config(state=tk.DISABLED)
                 btns["Stop"].config(state=tk.NORMAL)
             elif state == "stopped":
-                btns["Stop"].config(text="STOPPED", bootstyle="danger", state=tk.DISABLED)
+                btns["Stop"].config(text=_("STOPPED"), bootstyle="danger", state=tk.DISABLED)
                 btns["Start"].config(state=tk.NORMAL)
                 btns["Pause"].config(state=tk.DISABLED)
                 btns["Resume"].config(state=tk.DISABLED)
@@ -425,13 +432,13 @@ class DashboardGUI:
 
         mapped = key_map.get(label.lower(), label.lower())
 
-        btns["Start"] = ttk.Button(sub_frame, text="Start", width=8,
+        btns["Start"] = ttk.Button(sub_frame, text=_("Start"), width=8,
                                    command=lambda: set_state("running"))
-        btns["Stop"] = ttk.Button(sub_frame, text="Stop", width=8,
+        btns["Stop"] = ttk.Button(sub_frame, text=_("Stop"), width=8,
                                   command=lambda: set_state("stopped"))
-        btns["Pause"] = ttk.Button(sub_frame, text="Pause", width=8,
+        btns["Pause"] = ttk.Button(sub_frame, text=_("Pause"), width=8,
                                    command=lambda m=mapped, lbl=label: self.handle_pause_resume(m, lbl))
-        btns["Resume"] = ttk.Button(sub_frame, text="Resume", width=8,
+        btns["Resume"] = ttk.Button(sub_frame, text=_("Resume"), width=8,
                                     command=lambda m=mapped, lbl=label: self.handle_pause_resume(m, lbl))
 
         btns["Start"].grid(row=0, column=0)
@@ -705,7 +712,7 @@ class DashboardGUI:
 
     def open_config_file(self):
         if not os.path.exists(CONFIG_FILE_PATH):
-            messagebox.showerror("Missing Config", f"Could not find: {CONFIG_FILE_PATH}")
+            messagebox.showerror(_("Missing Config"), _("Could not find: %s") % CONFIG_FILE_PATH)
             return
         try:
             if sys.platform.startswith("win"):
@@ -715,50 +722,50 @@ class DashboardGUI:
             else:
                 subprocess.Popen(["xdg-open", CONFIG_FILE_PATH])
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            messagebox.showerror(_("Error"), str(e))
 
     def test_alerts(self):
         try:
             from core.alerts import run_test_alerts_from_csv
             run_test_alerts_from_csv()
-            messagebox.showinfo("Test Alerts", "Test alerts dispatched. Check logs for details.")
+            messagebox.showinfo(_("Test Alerts"), _("Test alerts dispatched. Check logs for details."))
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to send test alerts: {e}")
+            messagebox.showerror(_("Error"), _("Failed to send test alerts: %s") % e)
 
     def reset_metrics_prompt(self):
-        resp = messagebox.askyesno("Reset Metrics", "Include lifetime stats?")
+        resp = messagebox.askyesno(_("Reset Metrics"), _("Include lifetime stats?"))
         if resp:
             pw = self.prompt_password()
             if pw == DASHBOARD_PASSWORD:
                 reset_all_metrics()
             else:
-                messagebox.showerror("Invalid Password", "Reset canceled.")
+                messagebox.showerror(_("Invalid Password"), _("Reset canceled."))
         else:
             reset_all_metrics()
 
     def reset_lifetime_prompt(self):
-        if messagebox.askyesno("Reset Lifetime", "Clear all lifetime metrics?"):
+        if messagebox.askyesno(_("Reset Lifetime"), _("Clear all lifetime metrics?")):
             pw = self.prompt_password()
             if pw == DASHBOARD_PASSWORD:
                 reset_lifetime_metrics()
             else:
-                messagebox.showerror("Invalid Password", "Reset canceled.")
+                messagebox.showerror(_("Invalid Password"), _("Reset canceled."))
 
     def delete_data_prompt(self):
-        if messagebox.askyesno("Confirm Delete", "Permanently delete all key/data files?"):
-            really = messagebox.askyesno("Double Check", "Are you really really sure?")
+        if messagebox.askyesno(_("Confirm Delete"), _("Permanently delete all key/data files?")):
+            really = messagebox.askyesno(_("Double Check"), _("Are you really really sure?"))
             if really:
                 pw = self.prompt_password()
                 if pw == DASHBOARD_PASSWORD:
                     print("[GUI] Deleting all data...")
                     # Here add actual deletion logic based on flags like DELETE_VANITY_SEARCH_LOGS
                 else:
-                    messagebox.showerror("Invalid Password", "Deletion canceled.")
+                    messagebox.showerror(_("Invalid Password"), _("Deletion canceled."))
 
     def prompt_password(self):
         pw_window = tk.Toplevel(self.master)
-        pw_window.title("Enter Password")
-        tk.Label(pw_window, text="Password: ").grid(row=0, column=0)
+        pw_window.title(_("Enter Password"))
+        tk.Label(pw_window, text=_("Password: ")).grid(row=0, column=0)
         pw_entry = tk.Entry(pw_window, show="*")
         pw_entry.grid(row=0, column=1)
         result = []
@@ -767,7 +774,7 @@ class DashboardGUI:
             result.append(pw_entry.get())
             pw_window.destroy()
 
-        tk.Button(pw_window, text="Submit", command=submit_pw).grid(row=1, column=0, columnspan=2)
+        tk.Button(pw_window, text=_("Submit"), command=submit_pw).grid(row=1, column=0, columnspan=2)
         self.master.wait_window(pw_window)
         return result[0] if result else ""
 
