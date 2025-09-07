@@ -47,7 +47,6 @@ sys.modules.setdefault(
 )
 sys.modules.setdefault('core.keygen', types.SimpleNamespace(run_btc_only=lambda *a, **k: None))
 sys.modules.setdefault('core.btc_only_checker', types.SimpleNamespace(btc_only_checker_loop=lambda *a, **k: None))
-sys.modules.setdefault('core.telemetry', types.SimpleNamespace(start_telemetry=lambda *a, **k: None))
 
 import keygen.mnemonic_mode as mnemonic_mode
 from keygen.mnemonic_mode import (

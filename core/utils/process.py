@@ -1,83 +1,63 @@
 import subprocess
+import multiprocessing
 import time
-from typing import Sequence
-from multiprocessing import Process
+from typing import Iterable, Optional, Mapping, Any
+
+from core.dashboard import increment_metric, update_dashboard_stat
+
+
+def _record_failure(module: str, error: Exception) -> None:
+    """Record a process launch failure for ``module``."""
+    increment_metric(f"process_failures.{module}")
+    update_dashboard_stat(f"process_last_error.{module}", str(error))
 
 
 def popen_with_retry(
-    cmd: Sequence[str],
+    cmd: Iterable[str],
     *,
-    attempts: int = 3,
-    base_delay: float = 1.0,
-    module: str = "general",
-    **kwargs,
+    module: str,
+    retries: int = 3,
+    backoff: float = 0.5,
+    **kwargs: Any,
 ) -> subprocess.Popen:
-    """Launch a subprocess with retry and exponential backoff.
-
-    Parameters
-    ----------
-    cmd: Sequence[str]
-        Command and arguments for ``subprocess.Popen``.
-    attempts: int
-        Number of attempts before giving up. Defaults to 3.
-    base_delay: float
-        Initial delay in seconds for exponential backoff. Defaults to 1.0.
-    module: str
-        Module name for dashboard metrics.
-    **kwargs:
-        Extra keyword arguments forwarded to ``subprocess.Popen``.
-    """
-    last_exc: Exception | None = None
-    for attempt in range(1, attempts + 1):
+    """Launch a subprocess with retries and exponential backoff."""
+    attempt = 0
+    while True:
         try:
             return subprocess.Popen(cmd, **kwargs)
-        except Exception as exc:  # pragma: no cover - rare failure
-            last_exc = exc
-            try:
-                from core.dashboard import increment_metric, update_dashboard_stat
-
-                increment_metric(f"popen_failures.{module}")
-                update_dashboard_stat(
-                    f"last_popen_error.{module}", str(exc)
-                )
-            except Exception:
-                pass
-            if attempt == attempts:
-                if last_exc:
-                    raise last_exc
-            time.sleep(base_delay * (2 ** (attempt - 1)))
-    if last_exc:
-        raise last_exc
+        except Exception as exc:  # pragma: no cover - rare
+            _record_failure(module, exc)
+            attempt += 1
+            if attempt >= retries:
+                raise
+            time.sleep(backoff)
+            backoff *= 2
 
 
 def start_process_with_retry(
-    proc: Process,
     *,
-    attempts: int = 3,
-    base_delay: float = 1.0,
-    module: str = "general",
-) -> Process:
-    """Start a ``multiprocessing.Process`` with retry/backoff."""
-    last_exc: Exception | None = None
-    for attempt in range(1, attempts + 1):
+    module: str,
+    target,
+    args: tuple = (),
+    kwargs: Optional[Mapping[str, Any]] = None,
+    name: Optional[str] = None,
+    daemon: Optional[bool] = None,
+    retries: int = 3,
+    backoff: float = 0.5,
+) -> multiprocessing.Process:
+    """Start a ``multiprocessing.Process`` with retries."""
+    attempt = 0
+    while True:
         try:
-            proc.start()
-            return proc
-        except Exception as exc:  # pragma: no cover - rare failure
-            last_exc = exc
-            try:
-                from core.dashboard import increment_metric, update_dashboard_stat
-
-                increment_metric(f"popen_failures.{module}")
-                update_dashboard_stat(
-                    f"last_popen_error.{module}", str(exc)
-                )
-            except Exception:
-                pass
-            if attempt == attempts:
-                if last_exc:
-                    raise last_exc
-            time.sleep(base_delay * (2 ** (attempt - 1)))
-    if last_exc:
-        raise last_exc
-    return proc
+            p = multiprocessing.Process(target=target, args=args, kwargs=kwargs or {}, name=name)
+            if daemon is not None:
+                p.daemon = daemon
+            p.start()
+            return p
+        except Exception as exc:  # pragma: no cover - rare
+            _record_failure(module, exc)
+            attempt += 1
+            if attempt >= retries:
+                raise
+            time.sleep(backoff)
+            backoff *= 2

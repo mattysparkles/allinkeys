@@ -3,6 +3,8 @@ import json
 import csv
 csv.field_size_limit(2**30)  # allow very large CSV fields
 import time
+import smtplib
+import requests
 import threading
 import queue
 import subprocess
@@ -11,12 +13,14 @@ try:
     from twilio.rest import Client
 except Exception:  # handle missing twilio dependency
     Client = None
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 import base64
 from datetime import datetime
 
-from config.settings import ENABLE_ALERTS, DOWNLOADS_DIR, REDACT_SENSITIVE_DATA_IN_ALERTS
+from config.settings import ENABLE_ALERTS, DOWNLOADS_DIR
 from config.coin_definitions import coin_columns
 from config.settings import (
     ALERT_SOUND_FILE, ALERT_POPUP_COLOR_1, ALERT_POPUP_COLOR_2, ALERT_PHRASE,
@@ -34,12 +38,6 @@ from config.settings import (
 from core.logger import log_message
 from core.dashboard import get_metric
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
-from core.utils.alert_helpers import (
-    send_email_alert,
-    send_telegram_alert,
-    send_discord_alert,
-    send_home_assistant_alert,
-)
 
 # runtime alert flags that can be toggled from the GUI
 ALERT_FLAGS = {
@@ -53,19 +51,6 @@ ALERT_FLAGS = {
     "ENABLE_DISCORD_ALERT": ENABLE_DISCORD_ALERT,
     "ENABLE_HOME_ASSISTANT_ALERT": ENABLE_HOME_ASSISTANT_ALERT,
     "ENABLE_CLOUD_UPLOAD": ENABLE_CLOUD_UPLOAD,
-}
-
-FLAG_LABELS = {
-    "ENABLE_AUDIO_ALERT_LOCAL": "audio",
-    "ENABLE_DESKTOP_WINDOW_ALERT": "popup",
-    "ENABLE_PGP": "pgp",
-    "ALERT_EMAIL_ENABLED": "email",
-    "ENABLE_TELEGRAM_ALERT": "telegram",
-    "ENABLE_SMS_ALERT": "sms",
-    "ENABLE_PHONE_CALL_ALERT": "phone",
-    "ENABLE_DISCORD_ALERT": "discord",
-    "ENABLE_HOME_ASSISTANT_ALERT": "home_assistant",
-    "ENABLE_CLOUD_UPLOAD": "cloud",
 }
 
 # Mapping of alert channels for metrics tracking
@@ -107,27 +92,6 @@ def _start_audio_worker():
     if audio_thread is None or not audio_thread.is_alive():
         audio_thread = threading.Thread(target=_audio_worker, daemon=True)
         audio_thread.start()
-
-
-def _redact_sensitive_fields(data: dict) -> dict:
-    """Return a copy of ``data`` with seeds/private keys redacted."""
-    if not REDACT_SENSITIVE_DATA_IN_ALERTS:
-        return data
-    redacted = {}
-    for key, value in data.items():
-        if any(token in key.lower() for token in ("priv", "seed", "mnemonic", "wif")) and str(value).upper() not in {"N/A", "TEST"}:
-            redacted[key] = "[REDACTED]"
-        else:
-            redacted[key] = value
-    return redacted
-
-
-def _log_alert_consent():
-    """Log which alert channels are enabled at startup."""
-    for flag, enabled in ALERT_FLAGS.items():
-        channel = FLAG_LABELS.get(flag, flag)
-        status = "ENABLED" if enabled else "disabled"
-        log_message(f"Consent for {channel} alerts: {status}", "INFO")
 
 
 def _show_desktop_popup(alert_type: str):
@@ -198,18 +162,12 @@ def pgp_encrypt(text: str):
     cmd = ["gpg", "--armor", "--encrypt", "-r", PGP_RECIPIENT]
     if PGP_KEYRING_PATH:
         cmd = ["gpg", "--keyring", PGP_KEYRING_PATH, "--armor", "--encrypt", "-r", PGP_RECIPIENT]
-    with subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    ) as proc:
-        out, err = proc.communicate(text)
-        if proc.returncode != 0:
-            log_message(f"❌ PGP encryption failed: {err}", "ERROR")
-            return None
-        return out
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    out, err = proc.communicate(text)
+    if proc.returncode != 0:
+        log_message(f"❌ PGP encryption failed: {err}", "ERROR")
+        return None
+    return out
 
 
 init_pgp()
@@ -278,30 +236,17 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ Failed to store encrypted match: {e}", "ERROR")
         return
 
-    safe_data = _redact_sensitive_fields(match_data)
-    timestamp = safe_data.get("timestamp") or time.strftime('%Y-%m-%d %H:%M:%S')
-    coin = safe_data.get("coin", "BTC")
-    address = safe_data.get("address", safe_data.get("btc_U", "unknown"))
-    csv_file = safe_data.get("csv_file", "unknown")
-    privkey_display = safe_data.get("privkey", "N/A")
+    timestamp = match_data.get("timestamp") or time.strftime('%Y-%m-%d %H:%M:%S')
+    coin = match_data.get("coin", "BTC")
+    address = match_data.get("address", match_data.get("btc_U", "unknown"))
+    csv_file = match_data.get("csv_file", "unknown")
+    privkey = match_data.get("privkey", "N/A")
     alert_type = "TEST MATCH" if test_mode else "MATCH FOUND"
 
-    # Plain text may include sensitive data for optional encryption
-    plain_match_text = (
-        f"[{timestamp}] {alert_type}!\n"
-        f"Coin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {match_data.get('privkey', 'N/A')}"
-    )
-    match_text = (
-        f"[{timestamp}] {alert_type}!\n"
-        f"Coin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey_display}"
-    )
-
-    log_message(
-        f"🎯 Match found: {json.dumps(safe_data if REDACT_SENSITIVE_DATA_IN_ALERTS else match_data)}",
-        "INFO",
-    )
+    match_text = f"[{timestamp}] {alert_type}!\nCoin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey}"
+    log_message(f"🎯 Match found: {json.dumps(match_data)}", "INFO")
     log_message(f"🚨 {alert_type}: {address} (File: {csv_file})")
-    encrypted_blob = pgp_encrypt(plain_match_text)
+    encrypted_blob = pgp_encrypt(match_text)
     if encrypted_blob:
         try:
             ts = time.strftime('%Y-%m-%d_%H-%M-%S')
@@ -335,24 +280,37 @@ def alert_match(match_data, test_mode=False):
 
     # 📧 Email Alert
     if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED"):
-        if send_email_alert(
-            match_text,
-            ALERT_EMAIL_FROM,
-            ALERT_EMAIL_TO,
-            f"AllInKeys {alert_type}",
-            SMTP_SERVER,
-            SMTP_PORT,
-            SMTP_USERNAME,
-            SMTP_PASSWORD,
-        ):
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = ALERT_EMAIL_FROM
+            msg['To'] = ",".join(ALERT_EMAIL_TO) if isinstance(ALERT_EMAIL_TO, list) else ALERT_EMAIL_TO
+            msg['Subject'] = f"AllInKeys {alert_type}"
+            msg.attach(MIMEText(match_text, 'plain'))
+
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
+            server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(msg)
+            server.quit()
+            log_message("[ALERT] ✉️ Email sent", "INFO")
             _safe_inc_metric("alerts_sent_today.email")
             _safe_inc_metric("alerts_sent_lifetime.email")
+        except Exception as e:
+            log_message(f"❌ Email alert error: {e}", "WARNING")
 
     # 📲 Telegram Alert
     if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT"):
-        if send_telegram_alert(match_text, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID):
-            _safe_inc_metric("alerts_sent_today.telegram")
-            _safe_inc_metric("alerts_sent_lifetime.telegram")
+        try:
+            telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
+            if resp.ok and resp.json().get("ok"):
+                log_message("[ALERT] 📟 Telegram sent", "INFO")
+                _safe_inc_metric("alerts_sent_today.telegram")
+                _safe_inc_metric("alerts_sent_lifetime.telegram")
+            else:
+                log_message(f"❌ Telegram alert failed: {resp.text}", "ERROR")
+        except Exception as e:
+            log_message(f"❌ Telegram alert error: {e}", "WARNING")
 
     # 📱 SMS via Twilio
     if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client:
@@ -371,15 +329,35 @@ def alert_match(match_data, test_mode=False):
 
     # 💬 Discord Alert
     if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):
-        if send_discord_alert(match_text, DISCORD_WEBHOOK_URL):
-            _safe_inc_metric("alerts_sent_today.discord")
-            _safe_inc_metric("alerts_sent_lifetime.discord")
+        try:
+            data = {"content": match_text}
+            resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
+            if resp.ok:
+                log_message("💬 Discord alert sent.", "INFO")
+                _safe_inc_metric("alerts_sent_today.discord")
+                _safe_inc_metric("alerts_sent_lifetime.discord")
+            else:
+                log_message(f"❌ Discord alert failed: {resp.text}", "ERROR")
+        except Exception as e:
+            log_message(f"❌ Discord alert error: {e}", "ERROR")
 
     # 🏠 Home Assistant Alert
     if ALERT_FLAGS.get("ENABLE_HOME_ASSISTANT_ALERT"):
-        if send_home_assistant_alert(match_text, HOME_ASSISTANT_URL, HOME_ASSISTANT_TOKEN):
-            _safe_inc_metric("alerts_sent_today.home_assistant")
-            _safe_inc_metric("alerts_sent_lifetime.home_assistant")
+        try:
+            headers = {
+                "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            payload = {"message": match_text}
+            resp = requests.post(HOME_ASSISTANT_URL, headers=headers, json=payload, timeout=10)
+            if resp.ok:
+                log_message("🏠 Home Assistant alert sent.", "INFO")
+                _safe_inc_metric("alerts_sent_today.home_assistant")
+                _safe_inc_metric("alerts_sent_lifetime.home_assistant")
+            else:
+                log_message(f"❌ Home Assistant alert failed: {resp.text}", "ERROR")
+        except Exception as e:
+            log_message(f"❌ Home Assistant alert error: {e}", "ERROR")
 
     # ☁ PGP + Cloud Upload
     if ALERT_FLAGS.get("ENABLE_CLOUD_UPLOAD"):
@@ -405,7 +383,7 @@ def alert_match(match_data, test_mode=False):
         ts = datetime.utcnow().strftime('%Y-%m-%d')
         log_path = os.path.join(MATCH_LOG_DIR, f"matches_{ts}.log")
         with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(safe_data) + "\n")
+            f.write(json.dumps(match_data) + "\n")
         log_message("📝 Match written to local log.", "INFO")
         _safe_inc_metric("alerts_sent_today.file")
         _safe_inc_metric("alerts_sent_lifetime.file")
@@ -425,8 +403,6 @@ def trigger_startup_alerts(shared_metrics=None):
     if not ENABLE_ALERTS:
         log_message("🚫 Alerts are disabled in config.", "INFO")
         return
-
-    _log_alert_consent()
 
     # Ensure dashboard reflects that alerts are active on startup
     _safe_set_metric("status.alerts", "Running")

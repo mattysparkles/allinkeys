@@ -6,7 +6,6 @@ import os
 import csv
 import time
 import json
-import sqlite3
 from datetime import datetime
 
 from config.settings import (
@@ -25,25 +24,11 @@ from core.alerts import alert_match
 from config.coin_definitions import coin_columns
 from core.logger import get_logger
 from utils.pgp_utils import encrypt_with_pgp
-from core.dashboard import update_dashboard_stat, get_metric, record_rate
+from core.dashboard import update_dashboard_stat, get_metric
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 from utils.balance_checker import fetch_live_balance
 from core.downloader import load_btc_funded_multi
-
-# Limit CSV field sizes to avoid parser blowups
 csv.field_size_limit(100 * 1024 * 1024)  # 100MB limit to prevent field errors
-
-# When funded lists are too large for RAM we spill them into a sqlite database
-ADDRESS_DB_PATH = os.path.join(DOWNLOADS_DIR, "address_cache.sqlite")
-ADDRESS_DB_CONN = None
-
-
-def _get_address_db():
-    """Return a singleton SQLite connection for funded address lookups."""
-    global ADDRESS_DB_CONN
-    if ADDRESS_DB_CONN is None:
-        ADDRESS_DB_CONN = sqlite3.connect(ADDRESS_DB_PATH, check_same_thread=False)
-    return ADDRESS_DB_CONN
 
 MATCHED_CSV_DIR = os.path.join(CSV_DIR, "matched_csv")
 os.makedirs(MATCHED_CSV_DIR, exist_ok=True)
@@ -57,27 +42,6 @@ MAX_HISTORY_SIZE = 10
 # Track processed CSVs in-memory to avoid tiny marker files on disk
 CHECKED_CACHE = set()
 RECHECKED_CACHE = set()
-
-
-class SQLiteAddressSet:
-    """Thin wrapper over a SQLite table providing ``in`` checks like a set."""
-
-    def __init__(self, conn, table):
-        self.conn = conn
-        self.table = table
-
-    def __contains__(self, item):
-        cur = self.conn.execute(
-            f"SELECT 1 FROM {self.table} WHERE addr=? LIMIT 1", (item,)
-        )
-        return cur.fetchone() is not None
-
-    def __len__(self):  # pragma: no cover - lightweight helper
-        cur = self.conn.execute(f"SELECT COUNT(*) FROM {self.table}")
-        return cur.fetchone()[0]
-
-    def __bool__(self):  # pragma: no cover
-        return bool(len(self))
 
 def load_csv_state():
     """Load CSV checkpoint state to resume partially processed files."""
@@ -193,61 +157,10 @@ def scan_csv_for_oversized_lines(csv_path, threshold=10_000_000):
     except Exception:
         logger.exception(f"Failed scanning {csv_path}")
 
-
-def _load_addresses_to_db(file_path, table):
-    """Load addresses into a SQLite table and return a wrapper for membership checks."""
-    conn = _get_address_db()
-    conn.execute(f"DROP TABLE IF EXISTS {table}")
-    conn.execute(f"CREATE TABLE {table} (addr TEXT PRIMARY KEY)")
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            addr = normalize_address(line.strip())
-            if addr:
-                conn.execute(f"INSERT OR IGNORE INTO {table}(addr) VALUES (?)", (addr,))
-    conn.commit()
-    return SQLiteAddressSet(conn, table)
-
-
-def load_funded_addresses(file_path, memory_limit=None, table="addr_cache"):
-    """Load funded addresses respecting memory limits.
-
-    If the file size exceeds ``memory_limit`` (in MB), addresses are stored in a
-    SQLite table instead of an in-memory ``set``. Returns either a ``set`` or a
-    :class:`SQLiteAddressSet` depending on the strategy used.
-    """
-    if memory_limit and os.path.getsize(file_path) > memory_limit * 1024 * 1024:
-        return _load_addresses_to_db(file_path, table)
+def load_funded_addresses(file_path):
+    """Load funded addresses using UTF-8 decoding and normalize them."""
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         return {normalize_address(line.strip()) for line in f}
-
-
-def load_btc_addresses(file_path, memory_limit=None):
-    """Load BTC funded addresses with optional SQLite fallback by type."""
-    if memory_limit and os.path.getsize(file_path) > memory_limit * 1024 * 1024:
-        conn = _get_address_db()
-        tables = {
-            "p2pkh": "btc_p2pkh",
-            "p2sh": "btc_p2sh",
-            "bech32": "btc_bech32",
-        }
-        for t in tables.values():
-            conn.execute(f"DROP TABLE IF EXISTS {t}")
-            conn.execute(f"CREATE TABLE {t} (addr TEXT PRIMARY KEY)")
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                addr = line.strip()
-                if not addr:
-                    continue
-                if addr.startswith("1"):
-                    conn.execute("INSERT OR IGNORE INTO btc_p2pkh(addr) VALUES (?)", (addr,))
-                elif addr.startswith("3"):
-                    conn.execute("INSERT OR IGNORE INTO btc_p2sh(addr) VALUES (?)", (addr,))
-                elif addr.lower().startswith("bc1"):
-                    addr = addr.lower() if NORMALIZE_BECH32_LOWER else addr
-                    conn.execute("INSERT OR IGNORE INTO btc_bech32(addr) VALUES (?)", (addr,))
-        conn.commit()
-        return {k: SQLiteAddressSet(conn, t) for k, t in tables.items()}
-    return load_btc_funded_multi(file_path)
 
 def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode=False, pause_event=None, shutdown_event=None, start_row=0, state=None):
     """Scan ``csv_file`` for funded address matches.
@@ -467,8 +380,6 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                 _safe_inc_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
         update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
         update_dashboard_stat("addresses_checked_lifetime", get_metric("addresses_checked_lifetime"))
-        rows_per_sec = rows_scanned / duration_sec if duration_sec > 0 else 0
-        record_rate("csv_checker.rows_per_sec", rows_per_sec)
 
         logger.info(f"✅ {'Recheck' if recheck else 'Check'} complete: {len(new_matches)} matches found")
         logger.info(f"📄 {filename}: {rows_scanned:,} rows scanned | {len(new_matches)} unique matches | ⏱️ Time: {duration_sec:.2f}s")
@@ -505,8 +416,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
 
 from core.logger import initialize_logging
 
-def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=None,
-                      safe_mode=False, memory_limit=None, log_q=None):
+def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False, log_q=None):
     initialize_logging(log_q)
     from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
@@ -532,9 +442,9 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         if full_path:
             logger.info(f"🔎 Using funded list {os.path.basename(full_path)} for {coin.upper()}.")
             if coin == 'btc':
-                address_sets[coin] = load_btc_addresses(full_path, memory_limit)
+                address_sets[coin] = load_btc_funded_multi(full_path)
             else:
-                address_sets[coin] = load_funded_addresses(full_path, memory_limit, table=f"{coin}_addr")
+                address_sets[coin] = load_funded_addresses(full_path)
         else:
             logger.warning(f"⚠️ No funded list found for {coin.upper()} in DOWNLOADS_DIR")
 
@@ -578,8 +488,7 @@ def check_csvs_day_one(shared_metrics=None, shutdown_event=None, pause_event=Non
         logger.warning("Failed to update csv_check thread health", exc_info=True)
 
 
-def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None,
-               safe_mode=False, memory_limit=None, log_q=None):
+def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None, safe_mode=False, log_q=None):
     initialize_logging(log_q)
     from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
@@ -604,9 +513,9 @@ def check_csvs(shared_metrics=None, shutdown_event=None, pause_event=None,
         if unique_path:
             logger.info(f"🔎 Using unique list {os.path.basename(unique_path)} for {coin.upper()}.")
             if coin == 'btc':
-                address_sets[coin] = load_btc_addresses(unique_path, memory_limit)
+                address_sets[coin] = load_btc_funded_multi(unique_path)
             else:
-                address_sets[coin] = load_funded_addresses(unique_path, memory_limit, table=f"{coin}_addr")
+                address_sets[coin] = load_funded_addresses(unique_path)
         else:
             logger.warning(f"⚠️ No unique list found for {coin.upper()} in DOWNLOADS_DIR")
 
@@ -669,12 +578,6 @@ if __name__ == "__main__":
     parser.add_argument("--safe", action="store_true", help="Enable safe CSV parsing")
     parser.add_argument("--scan", metavar="CSV", help="Scan specified CSV for oversized lines")
     parser.add_argument("--threshold", type=int, default=10_000_000, help="Byte threshold for --scan")
-    parser.add_argument(
-        "--memory-limit",
-        type=int,
-        default=None,
-        help="Max MB to keep funded lists in memory before using disk-backed lookup",
-    )
     args = parser.parse_args()
 
     from core.logger import start_listener, log_queue
@@ -682,6 +585,6 @@ if __name__ == "__main__":
     if args.scan:
         scan_csv_for_oversized_lines(args.scan, threshold=args.threshold)
     elif args.recheck:
-        check_csvs(safe_mode=args.safe, memory_limit=args.memory_limit, log_q=log_queue)
+        check_csvs(safe_mode=args.safe, log_q=log_queue)
     else:
-        check_csvs_day_one(safe_mode=args.safe, memory_limit=args.memory_limit, log_q=log_queue)
+        check_csvs_day_one(safe_mode=args.safe, log_q=log_queue)

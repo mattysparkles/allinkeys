@@ -28,13 +28,13 @@ from config.constants import SECP256K1_ORDER
 from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keygen_checkpoint as save_checkpoint
 from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 from core.logger import get_logger
+from core.utils.process import popen_with_retry
 import config.settings as settings
 from core.seed_tracker import (
     seed_in_used_range,
     record_seed_range,
     get_condensed_ranges,
 )
-from core.utils.process import popen_with_retry
 
 
 # Runtime trackers
@@ -232,22 +232,16 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
         return False
 
-    lines = 0
-    first_seed = None
-    last_seed_local = None
-
     try:
         with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
             logger.info(f"Opened {current_output_path} for writing")
             # Launch VanitySearch as a subprocess and stream output to the file
             proc = popen_with_retry(
                 cmd,
-                stdout=subprocess.PIPE,
+                module="keygen",
+                stdout=outfile,
                 stderr=subprocess.STDOUT,
                 env={**os.environ, **gpu_env},
-                text=True,
-                bufsize=1,
-                module="keygen",
             )
             logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd}")
 
@@ -260,6 +254,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                         p.terminate()
                         break
                     if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                        # Periodically rotate output files so they don't grow without bound
                         logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
                         p.terminate()
                         break
@@ -271,53 +266,59 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                             p.terminate()
                             break
                     except FileNotFoundError:
+                        # File might not exist yet; log at debug and retry
                         logger.debug("Output file not yet created during monitoring")
                     time.sleep(1)
 
             timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
             timer_thread.start()
-
-            for raw_line in proc.stdout:
-                outfile.write(raw_line)
-                if raw_line.startswith("Priv (HEX):"):
-                    hex_val = raw_line.split(":", 1)[1].strip().replace("0x", "")
-                    seed_int = int(hex_val, 16)
-                    if first_seed is None:
-                        first_seed = seed_int
-                    last_seed_local = seed_int
-                    lines += 1
-                    if lines >= MAX_OUTPUT_LINES:
-                        logger.info(
-                            f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {os.path.basename(current_output_path)}"
-                        )
-                        proc.terminate()
-                        break
-
-            proc.stdout.close()
             proc.wait()
             timer_thread.join()
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
 
-    if lines == 0:
-        logger.warning(f"⚠️ Output file empty: {current_output_path}")
-        try:
+    if os.path.exists(current_output_path):
+        size = os.path.getsize(current_output_path)
+        if size == 0:
+            logger.warning(f"⚠️ Output file empty: {current_output_path}")
             os.remove(current_output_path)
-        except FileNotFoundError:
-            pass
+            return False
+        try:
+            with open(current_output_path, 'r', encoding='utf-8') as f:
+                logger.info(f"Opened {current_output_path} for reading")
+                lines = 0
+                first_seed = None
+                last_seed = None
+                for line in f:
+                    if line.startswith("Priv (HEX):"):
+                        hex_val = line.split(":", 1)[1].strip().replace("0x", "")
+                        seed_int = int(hex_val, 16)
+                        if first_seed is None:
+                            first_seed = seed_int
+                        last_seed = seed_int
+                        lines += 1
+                total_keys_generated += lines
+                increment_metric("keys_generated_today", lines)
+                increment_metric("keys_generated_lifetime", lines)
+                from core.dashboard import update_dashboard_stat, get_metric
+                update_dashboard_stat(
+                    "keys_generated_today", get_metric("keys_generated_today")
+                )
+                update_dashboard_stat(
+                    "keys_generated_lifetime", get_metric("keys_generated_lifetime")
+                )
+                if first_seed is not None and last_seed is not None:
+                    record_seed_range(first_seed, last_seed)
+                logger.info(
+                    f"📄 File complete: {lines} lines → {current_output_path}"
+                )
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
+        return True
+    else:
+        logger.error(f"❌ Output file not created: {current_output_path}")
         return False
-
-    total_keys_generated += lines
-    increment_metric("keys_generated_today", lines)
-    increment_metric("keys_generated_lifetime", lines)
-    from core.dashboard import update_dashboard_stat, get_metric
-    update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
-    update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
-    if first_seed is not None and last_seed_local is not None:
-        record_seed_range(first_seed, last_seed_local)
-    logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
-    return True
 
 
 

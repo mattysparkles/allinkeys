@@ -71,7 +71,6 @@ from core.dashboard import (
 import core.dashboard as dashboard_core
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
-from core.telemetry import start_telemetry
 
 
 def display_logo():
@@ -104,21 +103,16 @@ from core.gpu_selector import (
 )
 
 
-def metrics_updater(shared_metrics=None, shutdown_event=None):
-    from core.worker_bootstrap import ensure_metrics_ready
+def metrics_updater(shared_metrics=None):
+    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
     try:
         ensure_metrics_ready(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] ensure_metrics_ready failed in {__name__}: {e}", flush=True)
+    global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
     last_kps = 0.0
-    stop_event = shutdown_event or threading.Event()
-
-    def update():
-        nonlocal last_kps
-        if stop_event.is_set():
-            return
-        global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
+    while True:
         try:
             from core.dashboard import reset_daily_metrics_if_needed
             reset_daily_metrics_if_needed()
@@ -255,11 +249,7 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
             log_message(f"📊 Metrics updated: {stats}", "DEBUG")
         except Exception as e:
             log_message(f"❌ Error in metrics updater: {e}", "ERROR")
-        if not stop_event.is_set():
-            threading.Timer(settings.METRICS_POLL_INTERVAL_SECONDS, update).start()
-
-    update()
-    stop_event.wait()
+        time.sleep(3)
 
 
 def should_skip_download_today(download_dir):
@@ -397,7 +387,7 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
             log_message(f"❌ Failed to start checkpoint saver: {e}", "ERROR")
 
     try:
-        p = Process(target=metrics_updater, args=(shared_metrics, shutdown_events.get('metrics')))
+        p = Process(target=metrics_updater, args=(shared_metrics,))
         p.daemon = True
         p.start()
         log_message("[Started] Metrics updater", "INFO")
@@ -478,21 +468,20 @@ def run_only_mode(args):
         # mirrors the behaviour of the full application and ensures the
         # ``gpu_assignments.json`` file is always created.
         from core.gpu_selector import assign_gpu_roles
-        assign_gpu_roles(getattr(args, "gpu_index", None))
+        assign_gpu_roles()
 
         shared_metrics = init_dashboard_manager()
         shutdown_keygen = multiprocessing.Event()
         pause_keygen = multiprocessing.Event()
         shutdown_btc = multiprocessing.Event()
         pause_btc = multiprocessing.Event()
-        shutdown_metrics = multiprocessing.Event()
         vanity_gpu_flag = multiprocessing.Value('i', 1)
 
         processes = []
         from core.logger import log_queue
 
         # Background metrics collector so the GUI has real-time stats
-        p = Process(target=metrics_updater, args=(shared_metrics, shutdown_metrics))
+        p = Process(target=metrics_updater, args=(shared_metrics,))
         p.daemon = True
         p.start()
         processes.append(p)
@@ -526,7 +515,6 @@ def run_only_mode(args):
         finally:
             shutdown_keygen.set()
             shutdown_btc.set()
-            shutdown_metrics.set()
             for proc in processes:
                 if proc.is_alive():
                     proc.terminate()
@@ -550,7 +538,7 @@ def run_allinkeys(args):
     os.environ.setdefault("PYOPENCL_COMPILER_OUTPUT", "1")
     display_logo()
 
-    assign_gpu_roles(getattr(args, "gpu_index", None))
+    assign_gpu_roles()
     test_csv = os.path.join(DOWNLOAD_DIR, "test_alerts.csv")
     if not os.path.exists(test_csv):
         generate_test_csv()
@@ -565,14 +553,11 @@ def run_allinkeys(args):
     # worker processes start up or exit.  Events are created once here and then
     # shared with child processes.
     shutdown_event = multiprocessing.Event()
-    if not getattr(args, "no_telemetry", False):
-        start_telemetry(shutdown_event)
     shutdown_events = {
         'keygen': multiprocessing.Event(),
         'altcoin': multiprocessing.Event(),
         'csv_check': multiprocessing.Event(),
         'csv_recheck': multiprocessing.Event(),
-        'metrics': multiprocessing.Event(),
     }
     pause_events = {
         'keygen': multiprocessing.Event(),
@@ -585,7 +570,6 @@ def run_allinkeys(args):
     for name, ev in pause_events.items():
         register_control_events(shutdown_events.get(name), ev, module=name)
         pause_events[name] = get_pause_event(name)
-    register_control_events(shutdown_events.get('metrics'), None, module='metrics')
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -658,17 +642,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="AllInKeys Modular Runner")
     parser.add_argument("--skip-backlog", action="store_true", help="Skip backlog conversion on startup")
     parser.add_argument("--no-dashboard", action="store_true", help="Don't launch GUI dashboard")
-    parser.add_argument("--dashboard-password", help="Password required to access the dashboard")
     parser.add_argument("--skip-downloads", action="store_true", help="Skip downloading balance files")
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
-    parser.add_argument("--no-telemetry", action="store_true", help="Disable telemetry reporting")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
     parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
     parser.add_argument("--only", type=_parse_only, dest="only", help="Restrict to coin flow(s). Comma-separated list.")
     parser.add_argument("-only", type=_parse_only, dest="only_legacy", help=argparse.SUPPRESS)
     parser.add_argument("--puzzle", type=int, help="Run BTC puzzle mode for given puzzle number")
     parser.add_argument("--chunk", type=int, help="Puzzle mode: claim specific chunk index")
-    parser.add_argument("--gpu-index", type=int, help="Force use of a specific GPU device index")
     puzzle_group = parser.add_mutually_exclusive_group()
     puzzle_group.add_argument("--every", action="store_true", help="Puzzle mode: keep generic '1**' prefix")
     puzzle_group.add_argument("--target", action="store_true", help="Puzzle mode: target puzzle address (default)")
@@ -686,173 +667,47 @@ def build_parser() -> argparse.ArgumentParser:
     # ------------------------------------------------------------------
     # Mnemonic mode flags
     # ------------------------------------------------------------------
-    mnemonic_group = parser.add_argument_group(
-        "Mnemonic Mode",
-        "Generate BIP-39 mnemonic phrases and derive addresses without running VanitySearch",
-    )
-    mnemonic_group.add_argument(
-        "--mnemonic",
-        action="store_true",
-        help="Enable mnemonic generation mode (skip VanitySearch)",
-    )
+    parser.add_argument("--mnemonic", action="store_true", help="Enable mnemonic generation mode")
     for i in range(3, 26):
-        mnemonic_group.add_argument(
+        parser.add_argument(
             f"--{i}words",
             dest="num_words",
             action="store_const",
             const=i,
-            help=f"Generate {i}-word mnemonic phrase",
+            help=f"Generate {i}-word mnemonics",
         )
 
-    mnemonic_group.add_argument(
-        "--bip39",
-        action="store_true",
-        help="Use the default BIP39 English wordlist",
-    )
-    mnemonic_group.add_argument(
-        "--custom-words-file",
-        help="Path to a custom word list for mnemonic generation",
-    )
-    lang_group = mnemonic_group.add_mutually_exclusive_group()
-    lang_group.add_argument(
-        "--spanish",
-        action="store_true",
-        help="Use BIP39 Spanish wordlist",
-    )
-    lang_group.add_argument(
-        "--french",
-        action="store_true",
-        help="Use BIP39 French wordlist",
-    )
-    lang_group.add_argument(
-        "--italian",
-        action="store_true",
-        help="Use BIP39 Italian wordlist",
-    )
-    lang_group.add_argument(
-        "--japanese",
-        action="store_true",
-        help="Use BIP39 Japanese wordlist",
-    )
-    lang_group.add_argument(
-        "--korean",
-        action="store_true",
-        help="Use BIP39 Korean wordlist",
-    )
-    lang_group.add_argument(
-        "--czech",
-        action="store_true",
-        help="Use BIP39 Czech wordlist",
-    )
-    lang_group.add_argument(
-        "--portuguese",
-        action="store_true",
-        help="Use BIP39 Portuguese wordlist",
-    )
-    lang_group.add_argument(
-        "--chinese",
-        action="store_true",
-        help="Use BIP39 Traditional Chinese wordlist",
-    )
-    lang_group.add_argument(
-        "--chinese-simple",
-        action="store_true",
-        help="Use BIP39 Simplified Chinese wordlist",
-    )
-    mnemonic_group.add_argument(
-        "--coins",
-        type=_parse_only,
-        help="Comma-separated list of coins to derive (e.g., btc,eth)",
-    )
-    mnemonic_group.add_argument(
-        "--allcoins",
-        action="store_true",
-        help="Derive all supported coins",
-    )
-    mnemonic_group.add_argument(
-        "--atomic",
-        action="store_true",
-        help="Use Atomic wallet derivation paths",
-    )
-    mnemonic_group.add_argument(
-        "--coinomi",
-        action="store_true",
-        help="Use Coinomi wallet paths",
-    )
-    mnemonic_group.add_argument(
-        "--ledger",
-        action="store_true",
-        help="Use Ledger wallet paths",
-    )
-    mnemonic_group.add_argument(
-        "--trust",
-        action="store_true",
-        help="Use Trust wallet paths",
-    )
-    mnemonic_group.add_argument(
-        "--trezor",
-        action="store_true",
-        help="Use Trezor wallet paths",
-    )
-    mnemonic_group.add_argument(
-        "--path",
-        dest="global_path",
-        help="Custom derivation path for all coins",
-    )
+    parser.add_argument("--bip39", action="store_true", help="Use BIP39 English wordlist (default)")
+    parser.add_argument("--custom-words-file", help="Path to custom word list for mnemonic generation")
+    lang_group = parser.add_mutually_exclusive_group()
+    lang_group.add_argument("--spanish", action="store_true", help="Use BIP39 Spanish wordlist")
+    lang_group.add_argument("--french", action="store_true", help="Use BIP39 French wordlist")
+    lang_group.add_argument("--italian", action="store_true", help="Use BIP39 Italian wordlist")
+    lang_group.add_argument("--japanese", action="store_true", help="Use BIP39 Japanese wordlist")
+    lang_group.add_argument("--korean", action="store_true", help="Use BIP39 Korean wordlist")
+    lang_group.add_argument("--czech", action="store_true", help="Use BIP39 Czech wordlist")
+    lang_group.add_argument("--portuguese", action="store_true", help="Use BIP39 Portuguese wordlist")
+    lang_group.add_argument("--chinese", action="store_true", help="Use BIP39 Traditional Chinese wordlist")
+    lang_group.add_argument("--chinese-simple", action="store_true", help="Use BIP39 Simplified Chinese wordlist")
+    parser.add_argument("--coins", type=_parse_only, help="Comma separated list of coins to derive")
+    parser.add_argument("--allcoins", action="store_true", help="Derive all supported coins")
+    parser.add_argument("--atomic", action="store_true", help="Use Atomic wallet derivation paths")
+    parser.add_argument("--coinomi", action="store_true", help="Use Coinomi wallet paths")
+    parser.add_argument("--ledger", action="store_true", help="Use Ledger wallet paths")
+    parser.add_argument("--trust", action="store_true", help="Use Trust wallet paths")
+    parser.add_argument("--trezor", action="store_true", help="Use Trezor wallet paths")
+    parser.add_argument("--path", dest="global_path", help="Custom derivation path for all coins")
     for _coin in ["btc", "bch", "ltc", "eth", "dash", "doge", "pep", "rvn"]:
-        mnemonic_group.add_argument(
-            f"--{_coin}-path",
-            dest=f"{_coin}_path",
-            help=f"Custom derivation path for {_coin.upper()}",
-        )
-    mnemonic_group.add_argument(
-        "--gpu",
-        action="store_true",
-        help="Enable OpenCL acceleration if available",
-    )
-    mnemonic_group.add_argument(
-        "--gpu-id",
-        type=int,
-        help="Select specific GPU device for mnemonic mode",
-    )
-    mnemonic_group.add_argument(
-        "--no-gpu",
-        action="store_true",
-        help="Force the CPU implementation",
-    )
-    mnemonic_group.add_argument(
-        "--rng-seed",
-        type=int,
-        help="Deterministic RNG seed for mnemonics",
-    )
-    mnemonic_group.add_argument(
-        "--passphrase",
-        default="",
-        help="Optional BIP39 passphrase",
-    )
-    mnemonic_group.add_argument(
-        "--rate-limit",
-        type=int,
-        help="Throttle derivations per second",
-    )
-    mnemonic_group.add_argument(
-        "--batch-size",
-        type=int,
-        default=1,
-        help="Mnemonic mode batch size",
-    )
-    mnemonic_group.add_argument(
-        "--threads",
-        type=int,
-        default=1,
-        help="CPU threads for mnemonic mode",
-    )
-    mnemonic_group.add_argument(
-        "--progress-interval",
-        type=int,
-        default=10,
-        help="Progress update interval in seconds",
-    )
+        parser.add_argument(f"--{_coin}-path", dest=f"{_coin}_path", help=f"Custom derivation path for {_coin.upper()}")
+    parser.add_argument("--gpu", action="store_true", help="Enable OpenCL acceleration if available")
+    parser.add_argument("--gpu-id", type=int, help="Select specific GPU device for mnemonic mode")
+    parser.add_argument("--no-gpu", action="store_true", help="Force CPU implementation")
+    parser.add_argument("--rng-seed", type=int, help="Deterministic RNG seed for mnemonics")
+    parser.add_argument("--passphrase", default="", help="Optional BIP39 passphrase")
+    parser.add_argument("--rate-limit", type=int, help="Throttle derivations per second")
+    parser.add_argument("--batch-size", type=int, default=1, help="Mnemonic mode batch size")
+    parser.add_argument("--threads", type=int, default=1, help="CPU threads for mnemonic mode")
+    parser.add_argument("--progress-interval", type=int, default=10, help="Progress update interval")
     return parser
 
 
@@ -860,9 +715,6 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point used by ``__main__`` and tests."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    if getattr(args, "dashboard_password", None):
-        from utils.auth import hash_password
-        settings.DASHBOARD_PASSWORD_HASH = hash_password(args.dashboard_password)
     handle_deprecated_flags(args)
     if getattr(args, "mnemonic", False):
         # Lazy import to keep startup fast for other modes

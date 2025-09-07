@@ -23,7 +23,7 @@ from config.settings import (
     ALERT_OPTIONS,
     ALERT_CHECKBOXES,
     ALERT_CREDENTIAL_WARNINGS,
-    DASHBOARD_PASSWORD_HASH,
+    DASHBOARD_PASSWORD,
     SHOW_ALERTS_SUCCESSFULLY_CONFIGURED_TYPES,
     SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES,
     SHOW_CONTROL_BUTTONS_MAIN,
@@ -40,8 +40,6 @@ from config.settings import (
     ENABLE_P2WPKH,
     ENABLE_TAPROOT,
 )
-
-from utils.auth import verify_password
 
 from core.dashboard import (
     get_current_metrics,
@@ -731,7 +729,7 @@ class DashboardGUI:
         resp = messagebox.askyesno("Reset Metrics", "Include lifetime stats?")
         if resp:
             pw = self.prompt_password()
-            if self.check_password(pw):
+            if pw == DASHBOARD_PASSWORD:
                 reset_all_metrics()
             else:
                 messagebox.showerror("Invalid Password", "Reset canceled.")
@@ -741,7 +739,7 @@ class DashboardGUI:
     def reset_lifetime_prompt(self):
         if messagebox.askyesno("Reset Lifetime", "Clear all lifetime metrics?"):
             pw = self.prompt_password()
-            if self.check_password(pw):
+            if pw == DASHBOARD_PASSWORD:
                 reset_lifetime_metrics()
             else:
                 messagebox.showerror("Invalid Password", "Reset canceled.")
@@ -751,7 +749,7 @@ class DashboardGUI:
             really = messagebox.askyesno("Double Check", "Are you really really sure?")
             if really:
                 pw = self.prompt_password()
-                if self.check_password(pw):
+                if pw == DASHBOARD_PASSWORD:
                     print("[GUI] Deleting all data...")
                     # Here add actual deletion logic based on flags like DELETE_VANITY_SEARCH_LOGS
                 else:
@@ -773,29 +771,10 @@ class DashboardGUI:
         self.master.wait_window(pw_window)
         return result[0] if result else ""
 
-    def check_password(self, pw: str) -> bool:
-        """Return ``True`` if ``pw`` matches ``DASHBOARD_PASSWORD_HASH``.
-
-        If no dashboard password has been configured, any password is accepted
-        so the feature remains optional.
-        """
-        if not DASHBOARD_PASSWORD_HASH:
-            return True
-        return verify_password(pw, DASHBOARD_PASSWORD_HASH)
-
 
 def start_dashboard():
     root = ttk.Window(themename="darkly")
     root.geometry("900x600")
-    if DASHBOARD_PASSWORD_HASH:
-        root.withdraw()
-        from tkinter import simpledialog
-        pw = simpledialog.askstring("Dashboard Login", "Password:", show="*", parent=root)
-        if not pw or not verify_password(pw, DASHBOARD_PASSWORD_HASH):
-            messagebox.showerror("Authentication", "Invalid password")
-            root.destroy()
-            return
-        root.deiconify()
     app = DashboardGUI(root)
     root.mainloop()
 

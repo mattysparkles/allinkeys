@@ -46,7 +46,7 @@ DOWNLOAD_DIR = DOWNLOADS_DIR
 CHECKPOINT_FILE = os.path.join(BASE_DIR, "checkpoint.json")
 
 # === BTC-only mode settings ===
-ALL_BTC_ADDRESSES_URL = "https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"
+ALL_BTC_ADDRESSES_URL = "http://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"
 ALL_BTC_ADDRESSES_DIR = os.path.join(BASE_DIR, "all_btc_addresses")
 ALL_BTC_RANGES_COUNT = 20
 ALL_BTC_GZ_LOCAL = os.path.join(ALL_BTC_ADDRESSES_DIR, "all_Bitcoin_addresses_ever_used_sorted.txt.gz")
@@ -62,14 +62,6 @@ BACKLOG_RESUME_THRESHOLD = int(
 # Warning rate-limit (seconds), per event name
 PAUSE_WARNING_RATELIMIT_SECONDS = int(
     os.getenv("PAUSE_WARNING_RATELIMIT_SECONDS", "30")
-)
-
-# Polling intervals for status updates
-METRICS_POLL_INTERVAL_SECONDS = int(
-    os.getenv("METRICS_POLL_INTERVAL_SECONDS", "3")
-)
-BACKLOG_MONITOR_INTERVAL_SECONDS = int(
-    os.getenv("BACKLOG_MONITOR_INTERVAL_SECONDS", "2")
 )
 
 # Legacy alias for backward compatibility
@@ -421,13 +413,9 @@ LOGGING_ENABLED = True  # or False if you want to disable it
 
 
 # ===================== 🔒 SECURITY ==========================
-# The dashboard password is stored as a salted hash to avoid keeping
-# plaintext secrets in memory or on disk.  ``DASHBOARD_PASSWORD_HASH`` can be
-# supplied via environment variable or ``--dashboard-password`` CLI flag.
-DASHBOARD_PASSWORD_HASH = os.getenv("DASHBOARD_PASSWORD_HASH", "")
+DASHBOARD_RESET_PASSWORD = os.getenv("DASHBOARD_RESET_PASSWORD", "")
 DELETE_CONFIRMATION_PASSWORD = os.getenv("DELETE_CONFIRMATION_PASSWORD", "")
-# Backward compatible alias used by the GUI module
-DASHBOARD_PASSWORD = DASHBOARD_PASSWORD_HASH
+DASHBOARD_PASSWORD = DASHBOARD_RESET_PASSWORD  # Alias for UI compatibility
 
 # ===================== ❤️ DONATION INFO ==========================
 SHOW_DONATION_MESSAGE = True
@@ -452,9 +440,6 @@ DONATION_ADDRESSES = {
 # ===================== 🔔 ALERTS + NOTIFICATIONS ====================
 
 ENABLE_ALERTS = True  # Master toggle
-
-# Hide sensitive information like seeds or private keys in outgoing alert bodies
-REDACT_SENSITIVE_DATA_IN_ALERTS = True
 
 # === LOCAL AUDIO ALERT ===
 ENABLE_AUDIO_ALERT_LOCAL = True

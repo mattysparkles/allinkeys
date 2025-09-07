@@ -184,10 +184,6 @@ manager = None
 metrics_lock = None
 metrics = None
 
-# Rolling history of rate-based metrics
-RATE_HISTORY: Dict[str, list[float]] = {}
-MAX_RATE_HISTORY = 20
-
 
 def load_lifetime_metrics():
     """Load persisted lifetime metrics from disk."""
@@ -379,8 +375,6 @@ def _default_metrics():
         "csv_rechecked_lifetime": 0,
         "derived_addresses_today": 0,
         "altcoin_files_converted": 0,
-        "altcoin_addresses_per_sec": 0,
-        "altcoin_addresses_per_sec_avg": 0,
         "alerts_sent_today": {c: 0 for c in ALERT_CHANNELS},
         "alerts_sent_lifetime": {c: 0 for c in ALERT_CHANNELS},
         "addresses_checked_today": {
@@ -412,8 +406,6 @@ def _default_metrics():
         "altcoin_gpu_on": False,
         "state": "Initializing",
         "active_processes": [],
-        "popen_failures": {},
-        "last_popen_error": {},
         "csv_check_queue": [],
         "csv_recheck_queue": [],
         "csv_check_progress": {},
@@ -443,8 +435,6 @@ def _default_metrics():
             "matches_found": 0,
             "last_file": "",
             "last_timestamp": "",
-            "rows_per_sec": 0,
-            "rows_per_sec_avg": 0,
         },
         # Human readable module state. Thread health flags expose booleans for
         # programmatic checks so this can safely store strings for the GUI.
@@ -460,6 +450,8 @@ def _default_metrics():
         "alerts_status": "Running" if ENABLE_ALERTS else "Stopped",
         "global_run_state": "running",
         "auto_resume_enabled": True,
+        "process_failures": {},
+        "process_last_error": {},
         "alerts_enabled": {
             "email": False,
             "telegram": False,
@@ -681,28 +673,6 @@ def get_metric(key, default=None):
             if _is_dict_like(metrics.get(top)):
                 return metrics[top].get(sub, default)
         return metrics.get(key, default)
-
-
-def record_rate(metric: str, value: float, history_size: int = MAX_RATE_HISTORY) -> None:
-    """Record an instantaneous rate and update rolling average.
-
-    Parameters
-    ----------
-    metric: str
-        Metric name, dotted keys are supported for nested dicts.
-    value: float
-        Current rate value to record.
-    history_size: int
-        Number of recent samples to keep when computing the average.
-    """
-    history = RATE_HISTORY.setdefault(metric, [])
-    history.append(value)
-    if len(history) > history_size:
-        history.pop(0)
-    avg = sum(history) / len(history) if history else 0.0
-    update_dashboard_stat(metric, round(value, 2))
-    update_dashboard_stat(f"{metric}_avg", round(avg, 2))
-    logger.info(f"[rate] {metric}: {value:.2f}/s (avg {avg:.2f}/s)")
 
 
 def _to_plain(obj):

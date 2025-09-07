@@ -1,9 +1,8 @@
 """GPU scheduling and dynamic reassignment utilities."""
 
+import time
 import os
 import multiprocessing
-import threading
-import time
 
 try:
     import pyopencl as cl
@@ -19,7 +18,6 @@ from config.settings import (
     GPU_STRATEGY,
     GPU_VENDOR,
     VANITY_OUTPUT_DIR,
-    BACKLOG_MONITOR_INTERVAL_SECONDS,
 )
 from core.logger import log_message
 
@@ -94,11 +92,7 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
     # Record the current scheduling strategy for the dashboard
     _safe_set_metric("gpu_strategy", "swing" if SWING_MODE else "static")
 
-    stop_event = shutdown_event or threading.Event()
-
-    def poll():
-        if stop_event.is_set():
-            return
+    while shutdown_event is None or not shutdown_event.is_set():
         try:
             swing_mode = shared_metrics.get("swing_mode", SWING_MODE)
         except Exception:
@@ -146,13 +140,7 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
             _safe_set_metric("vanity_gpu_on", bool(vanity_flag.value))
             _safe_set_metric("altcoin_gpu_on", bool(altcoin_flag.value))
 
-        if not stop_event.is_set():
-            threading.Timer(BACKLOG_MONITOR_INTERVAL_SECONDS, poll).start()
-
-    poll()
-    # Allow unit tests to terminate the scheduler by patching time.sleep
-    time.sleep(BACKLOG_MONITOR_INTERVAL_SECONDS)
-    stop_event.wait()
+        time.sleep(2)
 
 
 def start_scheduler(shared_metrics, shutdown_event):

@@ -3,12 +3,6 @@ import time
 from core.logger import log_message
 
 try:
-    # ``importlib.metadata`` is stdlib in 3.8+, but fall back if needed
-    from importlib.metadata import entry_points
-except Exception:  # pragma: no cover - very old Python
-    from importlib_metadata import entry_points  # type: ignore
-
-try:
     from core.dashboard import init_shared_metrics, set_metric, increment_metric
 except Exception:
     # Fallback shims if dashboard import fails very early
@@ -17,7 +11,6 @@ except Exception:
     def increment_metric(*_a, **_k): return None
 
 _metrics_ready = {"ok": False}
-_plugins_loaded = False
 
 
 def ensure_metrics_ready(shared_dict=None):
@@ -50,46 +43,3 @@ def _safe_inc_metric(name, amount=1):
         increment_metric(name, amount)
     except Exception:
         pass
-
-
-def load_plugins():
-    """Dynamically load derivation and alert plugins via entry points.
-
-    This uses the ``allinkeys.plugins.derivation`` and
-    ``allinkeys.plugins.alert`` entry point groups. Plugins are expected to
-    register themselves with the framework when imported.
-    """
-
-    global _plugins_loaded
-    if _plugins_loaded:
-        return
-
-    def _load_group(group: str):
-        try:
-            eps = entry_points()  # type: ignore[arg-type]
-            # ``select`` is available on Python 3.10+; fall back otherwise
-            try:
-                selected = eps.select(group=group)
-            except Exception:  # pragma: no cover - py3.8/3.9
-                selected = [ep for ep in eps.get(group, [])]
-            for ep in selected:
-                try:
-                    loaded = ep.load()
-                    if callable(loaded):
-                        loaded()
-                    log_message(
-                        f"[worker_bootstrap] Loaded plugin {ep.name} from {group}",
-                        "DEBUG",
-                    )
-                except Exception as exc:  # pragma: no cover - plugin failure
-                    log_message(f"[worker_bootstrap] Failed loading {ep.name}: {exc}", "ERROR")
-        except Exception as exc:  # pragma: no cover - entry point failure
-            log_message(f"[worker_bootstrap] Plugin discovery failed for {group}: {exc}", "ERROR")
-
-    _load_group("allinkeys.plugins.derivation")
-    _load_group("allinkeys.plugins.alert")
-    _plugins_loaded = True
-
-
-# Load plugins on import so they are available in all workers
-load_plugins()
