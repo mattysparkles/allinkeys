@@ -64,6 +64,14 @@ PAUSE_WARNING_RATELIMIT_SECONDS = int(
     os.getenv("PAUSE_WARNING_RATELIMIT_SECONDS", "30")
 )
 
+# Polling intervals for status updates
+METRICS_POLL_INTERVAL_SECONDS = int(
+    os.getenv("METRICS_POLL_INTERVAL_SECONDS", "3")
+)
+BACKLOG_MONITOR_INTERVAL_SECONDS = int(
+    os.getenv("BACKLOG_MONITOR_INTERVAL_SECONDS", "2")
+)
+
 # Legacy alias for backward compatibility
 CHECKER_BACKLOG_PAUSE_THRESHOLD = BACKLOG_PAUSE_THRESHOLD
 

@@ -103,16 +103,21 @@ from core.gpu_selector import (
 )
 
 
-def metrics_updater(shared_metrics=None):
-    from core.worker_bootstrap import ensure_metrics_ready, _safe_set_metric, _safe_inc_metric
+def metrics_updater(shared_metrics=None, shutdown_event=None):
+    from core.worker_bootstrap import ensure_metrics_ready
     try:
         ensure_metrics_ready(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
     except Exception as e:
         print(f"[error] ensure_metrics_ready failed in {__name__}: {e}", flush=True)
-    global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
     last_kps = 0.0
-    while True:
+    stop_event = shutdown_event or threading.Event()
+
+    def update():
+        nonlocal last_kps
+        if stop_event.is_set():
+            return
+        global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
         try:
             from core.dashboard import reset_daily_metrics_if_needed
             reset_daily_metrics_if_needed()
@@ -249,7 +254,11 @@ def metrics_updater(shared_metrics=None):
             log_message(f"📊 Metrics updated: {stats}", "DEBUG")
         except Exception as e:
             log_message(f"❌ Error in metrics updater: {e}", "ERROR")
-        time.sleep(3)
+        if not stop_event.is_set():
+            threading.Timer(settings.METRICS_POLL_INTERVAL_SECONDS, update).start()
+
+    update()
+    stop_event.wait()
 
 
 def should_skip_download_today(download_dir):
@@ -387,7 +396,7 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
             log_message(f"❌ Failed to start checkpoint saver: {e}", "ERROR")
 
     try:
-        p = Process(target=metrics_updater, args=(shared_metrics,))
+        p = Process(target=metrics_updater, args=(shared_metrics, shutdown_events.get('metrics')))
         p.daemon = True
         p.start()
         log_message("[Started] Metrics updater", "INFO")
@@ -475,13 +484,14 @@ def run_only_mode(args):
         pause_keygen = multiprocessing.Event()
         shutdown_btc = multiprocessing.Event()
         pause_btc = multiprocessing.Event()
+        shutdown_metrics = multiprocessing.Event()
         vanity_gpu_flag = multiprocessing.Value('i', 1)
 
         processes = []
         from core.logger import log_queue
 
         # Background metrics collector so the GUI has real-time stats
-        p = Process(target=metrics_updater, args=(shared_metrics,))
+        p = Process(target=metrics_updater, args=(shared_metrics, shutdown_metrics))
         p.daemon = True
         p.start()
         processes.append(p)
@@ -515,6 +525,7 @@ def run_only_mode(args):
         finally:
             shutdown_keygen.set()
             shutdown_btc.set()
+            shutdown_metrics.set()
             for proc in processes:
                 if proc.is_alive():
                     proc.terminate()
@@ -558,6 +569,7 @@ def run_allinkeys(args):
         'altcoin': multiprocessing.Event(),
         'csv_check': multiprocessing.Event(),
         'csv_recheck': multiprocessing.Event(),
+        'metrics': multiprocessing.Event(),
     }
     pause_events = {
         'keygen': multiprocessing.Event(),
@@ -570,6 +582,7 @@ def run_allinkeys(args):
     for name, ev in pause_events.items():
         register_control_events(shutdown_events.get(name), ev, module=name)
         pause_events[name] = get_pause_event(name)
+    register_control_events(shutdown_events.get('metrics'), None, module='metrics')
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
