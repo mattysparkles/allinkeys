@@ -27,7 +27,7 @@ CSV_DIR = env_path("ALLINKEYS_CSV_DIR", BASE_DIR / "output" / "csv")
 # Duplicate to keep legacy modules working
 CSV_OUTPUT_DIR = env_path("ALLINKEYS_CSV_OUTPUT_DIR", CSV_DIR)
 # Location for downloaded funded address lists
-DOWNLOADS_DIR = env_path("ALLINKEYS_DOWNLOADS_DIR", BASE_DIR / "downloads")
+DOWNLOADS_DIR = env_path("ALLINKEYS_DOWNLOADS_DIR", BASE_DIR / "Downloads")
 FULL_DIR = env_path("ALLINKEYS_FULL_DIR", DOWNLOADS_DIR / "full")
 UNIQUE_DIR = env_path("ALLINKEYS_UNIQUE_DIR", DOWNLOADS_DIR / "unique")
 # Where matches and encrypted alerts are archived
