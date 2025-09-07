@@ -4,14 +4,12 @@ import os
 import io
 import time
 import sys
-import signal
 import argparse
 import multiprocessing
 import threading
 import subprocess
 from datetime import datetime, timedelta
 from multiprocessing import Process
-from core.logger import get_logger
 import psutil
 
 # Wrap stdout once with UTF-8 encoding if not already wrapped
@@ -41,18 +39,18 @@ _backlog_processed = 0
 _backlog_last_ts = time.time()
 _last_csv_created = 0
 
+logger = get_logger(__name__)
+
 import config.settings as settings
 from config.settings import (
     ENABLE_CHECKPOINT_RESTORE, CHECKPOINT_INTERVAL_SECONDS,
     LOGO_ART, ENABLE_DAY_ONE_CHECK, ENABLE_UNIQUE_RECHECK,
     ENABLE_DASHBOARD, ENABLE_KEYGEN, ENABLE_ALERTS,
-    ENABLE_BACKLOG_CONVERSION, LOG_DIR, CONFIG_FILE_PATH,
-    CSV_DIR, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
-    BACKLOG_PAUSE_THRESHOLD, BACKLOG_RESUME_THRESHOLD,
+    ENABLE_BACKLOG_CONVERSION, LOG_DIR, CSV_DIR, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
     find_vanitysearch_binary,
 )
 
-from core.logger import log_message, start_listener, stop_listener, get_logger
+from core.logger import log_message, start_listener, stop_listener
 from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint
 from core.downloader import download_and_compare_address_lists, generate_test_csv
 from core.csv_checker import check_csvs_day_one, check_csvs
@@ -60,18 +58,16 @@ from core.btc_only_checker import btc_only_checker_loop
 from core.alerts import trigger_startup_alerts, alert_match
 from core.dashboard import (
     update_dashboard_stat,
-    _default_metrics,
     init_shared_metrics,
     init_dashboard_manager,
     get_current_metrics,
     get_metric,
     set_metric,
-    warn_rate_limited,
 )
-import core.dashboard as dashboard_core
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
 from core.telemetry import start_telemetry
+from utils.file_utils import start_daily_cleanup, cleanup_old_files
 
 
 def display_logo():
@@ -90,9 +86,9 @@ def save_checkpoint_loop():
         try:
             from core.keygen import keygen_progress
             save_keygen_checkpoint(keygen_progress())
-            log_message("💾 Checkpoint saved.", "DEBUG")
+            logger.debug("💾 Checkpoint saved.")
         except Exception as e:
-            log_message(f"❌ Error in checkpoint save loop: {e}", "ERROR")
+            logger.error(f"❌ Error in checkpoint save loop: {e}")
         time.sleep(CHECKPOINT_INTERVAL_SECONDS)
 
 
@@ -174,7 +170,7 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
                             'temp': f"{gpu.temperature}°C" if hasattr(gpu, 'temperature') else 'N/A',
                         }
                 except Exception as e:
-                    log_message(f"⚠️ GPU read failed: {e}", "WARNING")
+                    logger.warning(f"⚠️ GPU read failed: {e}")
 
             next_id = len(stats['gpu_stats'])
             if cl:
@@ -204,7 +200,7 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
                             }
                             next_id += 1
                 except Exception as e:
-                    log_message(f"⚠️ OpenCL GPU read failed: {e}", "WARNING")
+                    logger.warning(f"⚠️ OpenCL GPU read failed: {e}")
 
             # ----- Backlog ETA Calculation -----
             metrics_snapshot = get_current_metrics()
@@ -228,7 +224,6 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
                 stats['backlog_eta'] = 'N/A'
 
             prog = keygen_progress()
-            curr_today = get_metric('keys_generated_today', 0)
             curr_lifetime = get_metric('keys_generated_lifetime', 0)
             current_kps = get_metric('keys_per_sec', 0)
             if current_kps > 0:
@@ -252,7 +247,7 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
             except Exception:
                 stats['vanity_progress_percent'] = 0
             update_dashboard_stat(stats)
-            log_message(f"📊 Metrics updated: {stats}", "DEBUG")
+            logger.debug(f"📊 Metrics updated: {stats}")
         except Exception as e:
             log_message(f"❌ Error in metrics updater: {e}", "ERROR")
         if not stop_event.is_set():
@@ -269,7 +264,6 @@ def should_skip_download_today(download_dir):
 
 def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q):
     from core.keygen import start_keygen_loop
-    from core.backlog import start_backlog_conversion_loop  # Optional non-GPU parser
     from core.dashboard import init_shared_metrics
 
     try:
@@ -289,13 +283,13 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     if ENABLE_CHECKPOINT_RESTORE:
         load_keygen_checkpoint()
-        log_message("🧠 Checkpoint restore enabled.", "INFO")
+        logger.info("🧠 Checkpoint restore enabled.")
 
     if not args.skip_downloads:
         if should_skip_download_today(DOWNLOAD_DIR):
-            log_message("🚩 Skipping address downloads — already downloaded today.")
+            logger.info("🚩 Skipping address downloads — already downloaded today.")
         else:
-            log_message("🌐 Downloading address lists...")
+            logger.info("🌐 Downloading address lists...")
             download_and_compare_address_lists()
     else:
         # Ensure test CSV exists even when downloads are skipped
@@ -321,9 +315,8 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     skip_vanity = gpu_strategy == "swing" and len(backlog_files) >= 100
     if skip_vanity:
-        log_message(
-            "[Startup] Detected backlog of 100+ files; delaying VanitySearch.",
-            "INFO",
+        logger.info(
+            "[Startup] Detected backlog of 100+ files; delaying VanitySearch."
         )
         set_metric("status.keygen", "Stopped")
         vanity_gpu_flag.value = 0
@@ -337,74 +330,74 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
             p = Process(target=start_keygen_loop, args=(shared_metrics, shutdown_events.get('keygen'), pause_events.get('keygen'), vanity_gpu_flag))
             p.daemon = True
             p.start()
-            log_message("[Started] Keygen subprocess", "INFO")
+            logger.info("[Started] Keygen subprocess")
             processes.append(p)
             named_processes.append(("keygen", p))
         except Exception as e:
-            log_message(f"❌ Failed to launch keygen: {e}", "ERROR")
+            logger.error(f"❌ Failed to launch keygen: {e}")
 
     if ENABLE_DAY_ONE_CHECK:
         try:
             p = Process(target=check_csvs_day_one, args=(shared_metrics, shutdown_events.get('csv_check'), pause_events.get('csv_check'), False, log_q))
             p.daemon = True
             p.start()
-            log_message("[Started] Day One CSV checker", "INFO")
+            logger.info("[Started] Day One CSV checker")
             processes.append(p)
             named_processes.append(("csv_check", p))
         except Exception as e:
-            log_message(f"❌ Failed to start day-one checker: {e}", "ERROR")
+            logger.error(f"❌ Failed to start day-one checker: {e}")
 
     if ENABLE_UNIQUE_RECHECK:
         try:
             p = Process(target=check_csvs, args=(shared_metrics, shutdown_events.get('csv_recheck'), pause_events.get('csv_recheck'), False, log_q))
             p.daemon = True
             p.start()
-            log_message("[Started] Unique recheck", "INFO")
+            logger.info("[Started] Unique recheck")
             processes.append(p)
             named_processes.append(("csv_recheck", p))
         except Exception as e:
-            log_message(f"❌ Failed to start recheck: {e}", "ERROR")
+            logger.error(f"❌ Failed to start recheck: {e}")
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
         try:
             p = start_altcoin_conversion_process(shutdown_events.get('altcoin'), shared_metrics, pause_events.get('altcoin'), log_q, altcoin_gpu_flag)
-            log_message("[Started] Altcoin derive subprocess", "INFO")
+            logger.info("[Started] Altcoin derive subprocess")
             processes.append(p)
             named_processes.append(("altcoin", p))
         except Exception as e:
-            log_message(f"❌ Failed to start altcoin convert: {e}", "ERROR")
+            logger.error(f"❌ Failed to start altcoin convert: {e}")
 
     if ENABLE_ALERTS:
         try:
             p = Process(target=trigger_startup_alerts, args=(shared_metrics,))
             p.daemon = True
             p.start()
-            log_message("[Started] Startup alerts", "INFO")
+            logger.info("[Started] Startup alerts")
             processes.append(p)
             named_processes.append(("alerts", p))
         except Exception as e:
-            log_message(f"❌ Failed to trigger startup alerts: {e}", "ERROR")
+            logger.error(f"❌ Failed to trigger startup alerts: {e}")
 
     if CHECKPOINT_INTERVAL_SECONDS:
         try:
             p = Process(target=save_checkpoint_loop)
             p.daemon = True
             p.start()
-            log_message("[Started] Checkpoint saver", "INFO")
+            logger.info("[Started] Checkpoint saver")
             processes.append(p)
             named_processes.append(("checkpoint", p))
         except Exception as e:
-            log_message(f"❌ Failed to start checkpoint saver: {e}", "ERROR")
+            logger.error(f"❌ Failed to start checkpoint saver: {e}")
 
     try:
         p = Process(target=metrics_updater, args=(shared_metrics, shutdown_events.get('metrics')))
         p.daemon = True
         p.start()
-        log_message("[Started] Metrics updater", "INFO")
+        logger.info("[Started] Metrics updater")
         processes.append(p)
         named_processes.append(("metrics", p))
     except Exception as e:
-        log_message(f"❌ Failed to launch metrics updater: {e}", "ERROR")
+        logger.error(f"❌ Failed to launch metrics updater: {e}")
 
     return processes, named_processes
 
@@ -547,6 +540,12 @@ def run_allinkeys(args):
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(CSV_DIR, exist_ok=True)
     start_listener()
+    if getattr(args, "purge", False):
+        removed = cleanup_old_files()
+        log_message(
+            f"\U0001F9F9 Purged {removed} file(s) older than {settings.RETENTION_DAYS} days from downloads"
+        )
+        return
     os.environ.setdefault("PYOPENCL_COMPILER_OUTPUT", "1")
     display_logo()
 
@@ -554,6 +553,7 @@ def run_allinkeys(args):
     test_csv = os.path.join(DOWNLOAD_DIR, "test_alerts.csv")
     if not os.path.exists(test_csv):
         generate_test_csv()
+    start_daily_cleanup()
 
     # Initialize shared metrics manager and create events from it so they can be
     # passed safely to worker processes spawned via ``spawn``.
@@ -601,7 +601,7 @@ def run_allinkeys(args):
             "timestamp": datetime.utcnow().isoformat(),
             "test_mode": True
         }
-        log_message("🧺 Running simulated match alert...")
+        logger.info("🧺 Running simulated match alert...")
         alert_match(test_data, test_mode=True)
 
     from core.logger import log_queue
@@ -663,6 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
     parser.add_argument("--no-telemetry", action="store_true", help="Disable telemetry reporting")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
+    parser.add_argument("--purge", action="store_true", help="Delete old downloaded files and exit")
     parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
     parser.add_argument("--only", type=_parse_only, dest="only", help="Restrict to coin flow(s). Comma-separated list.")
     parser.add_argument("-only", type=_parse_only, dest="only_legacy", help=argparse.SUPPRESS)

@@ -1,12 +1,9 @@
-import threading
 import time
 import json
 import os
 import tempfile
 from datetime import datetime, timezone, timedelta
 import core.checkpoint as checkpoint
-import traceback
-import multiprocessing
 from contextlib import nullcontext
 from typing import Dict
 from core.logger import get_logger
@@ -22,6 +19,7 @@ from config.settings import (
     MANUAL_TIME_ZONE_OVERRIDE,
     GPU_STRATEGY,
     PAUSE_WARNING_RATELIMIT_SECONDS,
+    COIN_DOWNLOAD_URLS,
 )
 try:
     from multiprocessing.managers import DictProxy
@@ -360,7 +358,6 @@ def _default_metrics():
         "processed_pages": 0,
         "checked_pages": 0,
         "matched_keys": 0,
-        "batches_completed": 0,
         "keys_generated_today": 0,
         "mnemonics_generated_today": 0,
         "addresses_generated_today": {
@@ -412,6 +409,8 @@ def _default_metrics():
         "altcoin_gpu_on": False,
         "state": "Initializing",
         "active_processes": [],
+        "popen_failures": {},
+        "last_popen_error": {},
         "csv_check_queue": [],
         "csv_recheck_queue": [],
         "csv_check_progress": {},
@@ -433,6 +432,7 @@ def _default_metrics():
         "btc_ranges_last_updated": "N/A",
         "btc_ranges_files_ready": False,
         "btc_ranges_updated_today": False,
+        "download_progress": {coin: 0 for coin in COIN_DOWNLOAD_URLS},
         "vanity_backlog_count": 0,
         "btc_only_files_checked_today": 0,
         "btc_only_matches_found_today": 0,

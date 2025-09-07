@@ -3,35 +3,18 @@
 import os
 import datetime
 import sys
-import time
 import logging
 import multiprocessing
 from multiprocessing import queues as mp_queues
 from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
-from config.settings import LOG_DIR, LOG_LEVEL, LOG_TO_CONSOLE, LOG_TO_FILE
-
-
-class SizeAndTimeRotatingFileHandler(RotatingFileHandler):
-    """Rotate log files by size *or* age.
-
-    The standard library offers separate handlers for size based and time
-    based rotation.  For our use case we want both so that logs never grow
-    beyond 10MB and are also refreshed at least once every 30 days.  This
-    small helper subclasses :class:`RotatingFileHandler` and simply checks the
-    modification time on each emit.
-    """
-
-    def __init__(self, filename: str, maxBytes: int, backupCount: int, max_days: int = 30, **kwargs):
-        super().__init__(filename, maxBytes=maxBytes, backupCount=backupCount, **kwargs)
-        self.max_days = max_days
-
-    def shouldRollover(self, record):  # type: ignore[override]
-        if os.path.exists(self.baseFilename):
-            # Trigger rotation if the file is older than ``max_days``
-            mtime = os.path.getmtime(self.baseFilename)
-            if time.time() - mtime > self.max_days * 86400:
-                return 1
-        return super().shouldRollover(record)
+from config.settings import (
+    LOG_DIR,
+    LOG_LEVEL,
+    LOG_TO_CONSOLE,
+    LOG_TO_FILE,
+    LOG_MAX_BYTES,
+    LOG_BACKUP_COUNT,
+)
 
 
 console_handler = logging.StreamHandler(sys.stdout)
@@ -75,50 +58,50 @@ def start_listener():
 
     fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
-    # Individual handlers per log level with rotation by size or age
-    debug_handler = SizeAndTimeRotatingFileHandler(
+    # Individual handlers per log level
+    debug_handler = RotatingFileHandler(
         os.path.join(LOG_DIR, "debug.log"),
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
     debug_handler.setLevel(logging.DEBUG)
     debug_handler.setFormatter(fmt)
 
-    info_handler = SizeAndTimeRotatingFileHandler(
+    info_handler = RotatingFileHandler(
         os.path.join(LOG_DIR, "info.log"),
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
     info_handler.setLevel(logging.INFO)
     info_handler.addFilter(lambda r: r.levelno < logging.WARNING)
     info_handler.setFormatter(fmt)
 
-    warning_handler = SizeAndTimeRotatingFileHandler(
+    warning_handler = RotatingFileHandler(
         os.path.join(LOG_DIR, "warning.log"),
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
     warning_handler.setLevel(logging.WARNING)
     warning_handler.addFilter(lambda r: r.levelno < logging.ERROR)
     warning_handler.setFormatter(fmt)
 
-    error_handler = SizeAndTimeRotatingFileHandler(
+    error_handler = RotatingFileHandler(
         os.path.join(LOG_DIR, "error.log"),
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(fmt)
 
     # Dedicated vanity/keygen log handler to consolidate worker events
-    vanity_handler = SizeAndTimeRotatingFileHandler(
+    vanity_handler = RotatingFileHandler(
         os.path.join(LOG_DIR, "vanity_worker.log"),
-        maxBytes=25 * 1024 * 1024,
-        backupCount=5,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
     vanity_handler.setLevel(logging.INFO)
@@ -154,7 +137,7 @@ def get_logger(name: str = "allinkeys") -> logging.Logger:
     if not any(isinstance(h, QueueHandler) for h in logger.handlers):
         qh = QueueHandler(_ensure_queue())
         logger.addHandler(qh)
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(_LEVEL_MAP.get(LOG_LEVEL.upper(), logging.INFO))
         logger.propagate = False
     return logger
 
@@ -192,7 +175,10 @@ def log_message(message: str, level: str = "INFO", exc_info: bool = False) -> No
         return
 
     timestamped = f"{get_timestamp()} {level.upper()}: {message}"
-    logger = get_logger()
+    import inspect
+    caller = inspect.currentframe().f_back  # type: ignore[assignment]
+    module = caller.f_globals.get("__name__", "allinkeys") if caller else "allinkeys"
+    logger = get_logger(module)
     logger.log(_LEVEL_MAP.get(level.upper(), logging.INFO), timestamped, exc_info=exc_info)
 
 

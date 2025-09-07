@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import base64
+from typing import Mapping, Any
+
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 
-def encrypt_with_pgp(data: dict, public_key_path: str) -> str:
+
+def encrypt_with_pgp(data: Mapping[str, Any], public_key_path: str) -> str:
     """
     Encrypts a dictionary of match data with a PGP public key file.
     Returns a base64-encoded encrypted string.
@@ -14,5 +19,5 @@ def encrypt_with_pgp(data: dict, public_key_path: str) -> str:
         serialized_data = str(data).encode("utf-8")
         encrypted = cipher.encrypt(serialized_data)
         return base64.b64encode(encrypted).decode("utf-8")
-    except Exception as e:
-        raise RuntimeError(f"PGP encryption failed: {e}")
+    except Exception as e:  # pragma: no cover - unexpected failures
+        raise RuntimeError(f"PGP encryption failed: {e}") from e

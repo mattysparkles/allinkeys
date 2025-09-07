@@ -26,3 +26,5 @@ Downloads/*
 
 # But allow the folder itself and any placeholder file
 !Downloads/.gitkeep
+# Ignore compiled translation files
+*.mo

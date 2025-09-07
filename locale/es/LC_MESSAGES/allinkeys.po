@@ -1,0 +1,387 @@
+# Spanish translations for PACKAGE package.
+# Copyright (C) 2025 THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# Automatically generated, 2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-09-07 12:29+0000\n"
+"PO-Revision-Date: 2025-09-07 12:29+0000\n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: ui/dashboard_gui.py:62
+msgid "ALLINKEYS Live Dashboard"
+msgstr "Panel en vivo de ALLINKEYS"
+
+#: ui/dashboard_gui.py:117
+msgid "BTC Address Types"
+msgstr "Tipos de dirección BTC"
+
+#: ui/dashboard_gui.py:142
+msgid "1 (P2PKH)"
+msgstr "1 (P2PKH)"
+
+#: ui/dashboard_gui.py:149
+msgid "bc1q (P2WPKH)"
+msgstr "bc1q (P2WPKH)"
+
+#: ui/dashboard_gui.py:156
+msgid "bc1p (Taproot)"
+msgstr "bc1p (Taproot)"
+
+#: ui/dashboard_gui.py:244
+msgid "Loading..."
+msgstr "Cargando..."
+
+#: ui/dashboard_gui.py:258
+msgid "🛠️ CSV Conversions In Progress"
+msgstr "🛠️ Conversiones CSV en progreso"
+
+#: ui/dashboard_gui.py:286
+msgid "Enable Swing Mode"
+msgstr "Activar modo oscilante"
+
+#: ui/dashboard_gui.py:308
+msgid "Alert Methods"
+msgstr "Métodos de alerta"
+
+#: ui/dashboard_gui.py:325
+msgid "Enable Call Alert (Twilio)"
+msgstr "Activar alerta por llamada (Twilio)"
+
+#: ui/dashboard_gui.py:327
+msgid "Enable SMS Alert (Twilio)"
+msgstr "Activar alerta por SMS (Twilio)"
+
+#: ui/dashboard_gui.py:348
+msgid "Open Config File"
+msgstr "Abrir archivo de configuración"
+
+#: ui/dashboard_gui.py:349 ui/dashboard_gui.py:736
+msgid "Reset Metrics"
+msgstr "Restablecer métricas"
+
+#: ui/dashboard_gui.py:350 ui/dashboard_gui.py:747
+msgid "Reset Lifetime"
+msgstr "Restablecer acumulados"
+
+#: ui/dashboard_gui.py:351 ui/dashboard_gui.py:731
+msgid "Test Alerts"
+msgstr "Probar alertas"
+
+#: ui/dashboard_gui.py:353
+msgid "Delete All Data"
+msgstr "Eliminar todos los datos"
+
+#: ui/dashboard_gui.py:356
+msgid ""
+"If you find AllInKeys useful, consider donating! BTC: "
+"18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y"
+msgstr ""
+"Si encuentras AllInKeys útil, ¡considera donar! BTC: "
+"18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y"
+
+#: ui/dashboard_gui.py:373
+msgid "RUNNING"
+msgstr "EJECUTANDO"
+
+#: ui/dashboard_gui.py:378
+msgid "PAUSED"
+msgstr "PAUSADO"
+
+#: ui/dashboard_gui.py:383
+msgid "STOPPED"
+msgstr "DETENIDO"
+
+#: ui/dashboard_gui.py:435
+msgid "Start"
+msgstr "Iniciar"
+
+#: ui/dashboard_gui.py:437
+msgid "Stop"
+msgstr "Detener"
+
+#: ui/dashboard_gui.py:439
+msgid "Pause"
+msgstr "Pausar"
+
+#: ui/dashboard_gui.py:441
+msgid "Resume"
+msgstr "Continuar"
+
+#: ui/dashboard_gui.py:715
+msgid "Missing Config"
+msgstr "Configuración faltante"
+
+#: ui/dashboard_gui.py:715
+#, python-format
+msgid "Could not find: %s"
+msgstr "No se pudo encontrar: %s"
+
+#: ui/dashboard_gui.py:725 ui/dashboard_gui.py:733
+msgid "Error"
+msgstr "Error"
+
+#: ui/dashboard_gui.py:731
+msgid "Test alerts dispatched. Check logs for details."
+msgstr "Alertas de prueba enviadas. Revisa los registros para más detalles."
+
+#: ui/dashboard_gui.py:733
+#, python-format
+msgid "Failed to send test alerts: %s"
+msgstr "Error al enviar alertas de prueba: %s"
+
+#: ui/dashboard_gui.py:736
+msgid "Include lifetime stats?"
+msgstr "¿Incluir estadísticas acumuladas?"
+
+#: ui/dashboard_gui.py:742 ui/dashboard_gui.py:752 ui/dashboard_gui.py:763
+msgid "Invalid Password"
+msgstr "Contraseña inválida"
+
+#: ui/dashboard_gui.py:742 ui/dashboard_gui.py:752
+msgid "Reset canceled."
+msgstr "Restablecimiento cancelado."
+
+#: ui/dashboard_gui.py:747
+msgid "Clear all lifetime metrics?"
+msgstr "¿Borrar todas las métricas acumuladas?"
+
+#: ui/dashboard_gui.py:755
+msgid "Confirm Delete"
+msgstr "Confirmar eliminación"
+
+#: ui/dashboard_gui.py:755
+msgid "Permanently delete all key/data files?"
+msgstr "¿Eliminar permanentemente todos los archivos de claves/datos?"
+
+#: ui/dashboard_gui.py:756
+msgid "Double Check"
+msgstr "Verificar de nuevo"
+
+#: ui/dashboard_gui.py:756
+msgid "Are you really really sure?"
+msgstr "¿Estás realmente seguro?"
+
+#: ui/dashboard_gui.py:763
+msgid "Deletion canceled."
+msgstr "Eliminación cancelada."
+
+#: ui/dashboard_gui.py:767
+msgid "Enter Password"
+msgstr "Ingresar contraseña"
+
+#: ui/dashboard_gui.py:768
+msgid "Password: "
+msgstr "Contraseña: "
+
+#: ui/dashboard_gui.py:777
+msgid "Submit"
+msgstr "Enviar"
+
+#: core/alerts.py:93
+msgid "🔔 Played alert sound."
+msgstr "🔔 Se reprodujo sonido de alerta."
+
+#: core/alerts.py:95
+#, python-format
+msgid "❌ Audio alert error: %s"
+msgstr "❌ Error de alerta de audio: %s"
+
+#: core/alerts.py:136 core/alerts.py:276
+#, python-format
+msgid "❌ Desktop alert error: %s"
+msgstr "❌ Error de alerta de escritorio: %s"
+
+#: core/alerts.py:148
+msgid "PGP encryption disabled or recipient not set."
+msgstr "Cifrado PGP deshabilitado o destinatario no establecido."
+
+#: core/alerts.py:158
+msgid ""
+"❌ PGP recipient key not found. To import a public key:\n"
+"  gpg --import publickey.asc\n"
+"  gpg --list-keys\n"
+"Ensure PGP_RECIPIENT matches the uid/email shown by --list-keys."
+msgstr ""
+"❌ Clave del destinatario PGP no encontrada. Para importar una clave pública:\n"
+"  gpg --import publickey.asc\n"
+"  gpg --list-keys\n"
+"Asegúrate de que PGP_RECIPIENT coincida con el uid/correo mostrado por --list-keys."
+
+#: core/alerts.py:164
+#, python-format
+msgid "🔐 PGP encryption active for %s"
+msgstr "🔐 Cifrado PGP activo para %s"
+
+#: core/alerts.py:176
+#, python-format
+msgid "❌ PGP encryption failed: %s"
+msgstr "❌ Falló el cifrado PGP: %s"
+
+#: core/alerts.py:190
+msgid "Missing Twilio call credentials"
+msgstr "Faltan credenciales de llamada Twilio"
+
+#: core/alerts.py:197
+msgid "📞 Phone call alert triggered."
+msgstr "📞 Alerta de llamada telefónica activada."
+
+#: core/alerts.py:201
+#, python-format
+msgid ""
+"❌ Phone call error: %s\n"
+"%s"
+msgstr ""
+"❌ Error en llamada telefónica: %s\n"
+"%s"
+
+#: core/alerts.py:224
+msgid "❌ Malformed alert_match call — expected dict."
+msgstr "❌ Llamada a alert_match mal formada; se esperaba un dict."
+
+#: core/alerts.py:228 core/alerts.py:412
+msgid "🚫 Alerts are disabled in config."
+msgstr "🚫 Las alertas están deshabilitadas en la configuración."
+
+#: core/alerts.py:242 core/alerts.py:264
+#, python-format
+msgid "☁ Encrypted match stored to: %s"
+msgstr "☁ Coincidencia cifrada guardada en: %s"
+
+#: core/alerts.py:244 core/alerts.py:266
+#, python-format
+msgid "❌ Failed to store encrypted match: %s"
+msgstr "❌ Error al guardar coincidencia cifrada: %s"
+
+#: core/alerts.py:255
+#, python-format
+msgid "🎯 Match found: %s"
+msgstr "🎯 Coincidencia encontrada: %s"
+
+#: core/alerts.py:256
+#, python-format
+msgid "🚨 %s: %s (File: %s)"
+msgstr "🚨 %s: %s (Archivo: %s)"
+
+#: core/alerts.py:272
+msgid "✅ Desktop popup displayed."
+msgstr "✅ Ventana emergente mostrada."
+
+#: core/alerts.py:287
+#, python-format
+msgid "❌ Sound file not found: %s"
+msgstr "❌ Archivo de sonido no encontrado: %s"
+
+#: core/alerts.py:303
+msgid "[ALERT] ✉️ Email sent"
+msgstr "[ALERTA] ✉️ Correo enviado"
+
+#: core/alerts.py:307
+#, python-format
+msgid "❌ Email alert error: %s"
+msgstr "❌ Error de alerta por correo: %s"
+
+#: core/alerts.py:315
+msgid "[ALERT] 📟 Telegram sent"
+msgstr "[ALERTA] 📟 Telegram enviado"
+
+#: core/alerts.py:319
+#, python-format
+msgid "❌ Telegram alert failed: %s"
+msgstr "❌ Falló alerta de Telegram: %s"
+
+#: core/alerts.py:321
+#, python-format
+msgid "❌ Telegram alert error: %s"
+msgstr "❌ Error de alerta de Telegram: %s"
+
+#: core/alerts.py:327
+msgid "Missing Twilio SMS credentials"
+msgstr "Faltan credenciales de SMS de Twilio"
+
+#: core/alerts.py:330
+msgid "📲 SMS alert sent."
+msgstr "📲 Alerta SMS enviada."
+
+#: core/alerts.py:334
+#, python-format
+msgid "❌ SMS alert error: %s"
+msgstr "❌ Error de alerta SMS: %s"
+
+#: core/alerts.py:344
+msgid "💬 Discord alert sent."
+msgstr "💬 Alerta de Discord enviada"
+
+#: core/alerts.py:348
+#, python-format
+msgid "❌ Discord alert failed: %s"
+msgstr "❌ Falló alerta de Discord: %s"
+
+#: core/alerts.py:350
+#, python-format
+msgid "❌ Discord alert error: %s"
+msgstr "❌ Error de alerta de Discord: %s"
+
+#: core/alerts.py:362
+msgid "🏠 Home Assistant alert sent."
+msgstr "🏠 Alerta de Home Assistant enviada"
+
+#: core/alerts.py:366
+#, python-format
+msgid "❌ Home Assistant alert failed: %s"
+msgstr "❌ Falló alerta de Home Assistant: %s"
+
+#: core/alerts.py:368
+#, python-format
+msgid "❌ Home Assistant alert error: %s"
+msgstr "❌ Error de alerta de Home Assistant: %s"
+
+#: core/alerts.py:382
+msgid "☁ Encrypted match uploaded locally."
+msgstr "☁ Coincidencia cifrada subida localmente"
+
+#: core/alerts.py:386
+#, python-format
+msgid "❌ PGP/cloud upload error: %s"
+msgstr "❌ Error de subida PGP/nube: %s"
+
+#: core/alerts.py:395
+msgid "📝 Match written to local log."
+msgstr "📝 Coincidencia escrita en registro local"
+
+#: core/alerts.py:399
+#, python-format
+msgid "❌ Local match logging error: %s"
+msgstr "❌ Error registrando coincidencia local: %s"
+
+#: core/alerts.py:419
+msgid "📣 Triggering startup alerts..."
+msgstr "📣 Disparando alertas de inicio..."
+
+#: core/alerts.py:422
+#, python-format
+msgid "❌ Failed to trigger startup alerts: %s"
+msgstr "❌ Error al disparar alertas de inicio: %s"
+
+#: core/alerts.py:434
+msgid "⚠️ test_alerts.csv not found and could not be generated."
+msgstr "⚠️ test_alerts.csv no se encontró y no pudo generarse"
+
+#: core/alerts.py:454
+#, python-format
+msgid "✅ Test alert sent for %s"
+msgstr "✅ Alerta de prueba enviada para %s"
+
+#: core/alerts.py:456
+#, python-format
+msgid "❌ Failed sending test alert row %s: %s"
+msgstr "❌ Error enviando alerta de prueba fila %s: %s"

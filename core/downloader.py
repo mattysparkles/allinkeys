@@ -8,6 +8,8 @@ from datetime import datetime
 from glob import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from tqdm import tqdm
+
 from utils.file_utils import find_latest_funded_file
 from utils.network_utils import download_file
 
@@ -17,6 +19,7 @@ from config.settings import (
     MAX_DAILY_FILES_PER_COIN
 )
 from config.coin_definitions import coin_columns
+from core.dashboard import update_dashboard_stat
 from core.logger import log_message
 from config.settings import NORMALIZE_BECH32_LOWER
 from config.constants import DOWNLOAD_SHA256
@@ -160,6 +163,8 @@ def _download_single_coin(coin: str, url: str) -> None:
             timeout=30,
         )
         log_message(f"{coin.upper()}: Download complete")
+        if total_size:
+            update_dashboard_stat(f"download_progress.{coin}", 100)
 
         with open(gz_path, "rb") as test_f:
             magic = test_f.read(2)

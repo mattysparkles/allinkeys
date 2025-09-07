@@ -28,7 +28,7 @@ from config.settings import (
     find_vanitysearch_binary,
 )
 from core.logger import get_logger, log_message
-from core.dashboard import set_metric, update_dashboard_stat
+from core.dashboard import update_dashboard_stat
 from core.utils.io_safety import atomic_open, atomic_commit
 from core.vanity_io import RollingAtomicWriter, ensure_dir
 from core.oclvanity_runner import run_oclvanitygen
@@ -351,7 +351,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
     out_dir = ensure_dir(VANITY_TXT_DIR)
     exe = _resolve_exe()
     if not exe:
-        log_message("❌ VanitySearch binary not found.", "ERROR")
+        logger.error("❌ VanitySearch binary not found.")
         return 0
 
     seed = _normalize_seed(seed_start)
@@ -396,7 +396,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
             )
             total_lines = 0
             try:
-                log_message(f"🧪 VanitySearch ({mode_name}): {' '.join(args)}", "INFO")
+                logger.info(f"🧪 VanitySearch ({mode_name}): {' '.join(args)}")
                 proc = _popen_stream(args)
                 last_line_ts = time.time()
 
@@ -410,7 +410,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                         if proc.poll() is not None:
                             break
                         if time.time() - last_line_ts > 5:
-                            log_message("⏳ VanitySearch running (no output yet)...", "DEBUG")
+                            logger.debug("⏳ VanitySearch running (no output yet)...")
                             last_line_ts = time.time()
                         time.sleep(0.05)
                         continue
@@ -424,24 +424,22 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
 
                 rc = proc.wait(timeout=10)
                 if total_lines > 0:
-                    log_message(
-                        f"✅ VanitySearch finished ({mode_name}) with {total_lines} matches.",
-                        "SUCCESS",
+                    logger.info(
+                        f"✅ VanitySearch finished ({mode_name}) with {total_lines} matches."
                     )
                     writer.close()
                     return total_lines
                 else:
-                    log_message(
-                        f"⚠️ VanitySearch exited rc={rc}, matches={total_lines}. Trying next mode...",
-                        "WARNING",
+                    logger.warning(
+                        f"⚠️ VanitySearch exited rc={rc}, matches={total_lines}. Trying next mode..."
                     )
                     writer.abort()
             except Exception as e:
-                log_message(f"⚠️ VanitySearch {mode_name} failed: {e}", "WARNING")
+                logger.warning(f"⚠️ VanitySearch {mode_name} failed: {e}")
                 writer.abort()
                 continue
 
-        log_message("❌ VanitySearch produced no output in any mode.", "ERROR")
+        logger.error("❌ VanitySearch produced no output in any mode.")
         return 0
 
     finally:
