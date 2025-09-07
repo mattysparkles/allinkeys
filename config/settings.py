@@ -43,10 +43,7 @@ def rotate_api_keys():
         if env_name == "TWILIO_AUTH_TOKEN":
             globals()["TWILIO_TOKEN"] = new_val
             os.environ["TWILIO_TOKEN"] = new_val
-# --- Paths ---
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_DIR = os.path.join(ROOT_DIR, "logs")
-...
+
 # ===================== 🔌 SYSTEM PATHS ==========================
 # Root of the repository
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
