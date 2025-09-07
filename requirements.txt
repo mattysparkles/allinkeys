@@ -23,4 +23,6 @@ GPUtil
 eth-account
 python-dotenv
 tzlocal
+fastapi
+uvicorn
 # Optional: install pyopencl separately for GPU acceleration
