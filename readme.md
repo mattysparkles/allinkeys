@@ -221,6 +221,14 @@ PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
 
 ---
 
+## 🛡️ Security Options
+
+- Set `OUTPUT_ENCRYPTION=pgp` to stream VanitySearch and match logs through your PGP public key (`PGP_PUBLIC_KEY_PATH`).
+- Set `OUTPUT_ENCRYPTION=aes` with `AES_PASSPHRASE` to AES‑GCM encrypt those files.
+- Use `secure_delete(path)` from `utils.file_utils` to overwrite and remove sensitive data.
+
+---
+
 ## 🧰 Tools Used
 
 - Python 3.9+

@@ -6,6 +6,7 @@ import os
 import csv
 import time
 import json
+import base64
 from datetime import datetime
 
 from config.settings import (
@@ -18,12 +19,17 @@ from config.settings import (
     PGP_PUBLIC_KEY_PATH,
     LOG_LEVEL,
     NORMALIZE_BECH32_LOWER,
+    MATCHES_DIR,
+    PGP_PUBLIC_KEY_PATH,
 )
 from utils.file_utils import find_latest_funded_file
 from core.alerts import alert_match
 from config.coin_definitions import coin_columns
 from core.logger import get_logger
 from utils.pgp_utils import encrypt_with_pgp
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import scrypt
+from Crypto.Random import get_random_bytes
 from core.dashboard import update_dashboard_stat, get_metric
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 from utils.balance_checker import fetch_live_balance
@@ -38,6 +44,23 @@ logger = get_logger(__name__)
 
 CHECK_TIME_HISTORY = []
 MAX_HISTORY_SIZE = 10
+
+
+def _encrypt_bytes(data: bytes) -> bytes:
+    method = os.getenv("OUTPUT_ENCRYPTION", "").lower()
+    if method == "pgp":
+        encrypted = encrypt_with_pgp(data.decode("utf-8"), PGP_PUBLIC_KEY_PATH)
+        return encrypted.encode("utf-8")
+    if method == "aes":
+        passphrase = os.getenv("AES_PASSPHRASE", "")
+        if not passphrase:
+            raise RuntimeError("AES_PASSPHRASE not set")
+        salt = get_random_bytes(16)
+        key = scrypt(passphrase.encode(), salt, 32, 2**14, 8, 1)
+        cipher = AES.new(key, AES.MODE_GCM)
+        ciphertext, tag = cipher.encrypt_and_digest(data)
+        return base64.b64encode(salt + cipher.nonce + tag + ciphertext)
+    return data
 
 # Track processed CSVs in-memory to avoid tiny marker files on disk
 CHECKED_CACHE = set()
@@ -407,6 +430,18 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                 logger.info(f"📂 Moved matched CSV to {dest_path}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to move {filename} to matched_csv/: {e}")
+        if all_matches:
+            try:
+                os.makedirs(MATCHES_DIR, exist_ok=True)
+                ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                out_path = os.path.join(MATCHES_DIR, f"matches_{ts}.jsonl")
+                payload = "\n".join(json.dumps(m) for m in all_matches).encode("utf-8")
+                payload = _encrypt_bytes(payload)
+                with open(out_path, "wb") as mf:
+                    mf.write(payload)
+                logger.info(f"📝 Matches written to {out_path}")
+            except Exception:
+                logger.exception("Failed to write matches file")
 
         return all_matches, completed
 

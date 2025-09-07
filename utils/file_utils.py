@@ -30,3 +30,35 @@ def find_latest_funded_file(
         return None
     latest = max(files, key=os.path.getmtime)
     return latest
+
+
+def secure_delete(path: str, passes: int = 1) -> bool:
+    """Overwrite a file with random bytes before removing it.
+
+    Parameters
+    ----------
+    path : str
+        Path to the file to securely delete.
+    passes : int, optional
+        Number of overwrite passes. Defaults to 1.
+
+    Returns
+    -------
+    bool
+        ``True`` on success, ``False`` otherwise.
+    """
+
+    try:
+        if not os.path.isfile(path):
+            return False
+        length = os.path.getsize(path)
+        with open(path, "ba+", buffering=0) as f:
+            for _ in range(passes):
+                f.seek(0)
+                f.write(os.urandom(length))
+                f.flush()
+                os.fsync(f.fileno())
+        os.remove(path)
+        return True
+    except Exception:
+        return False
