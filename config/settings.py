@@ -445,6 +445,9 @@ DONATION_ADDRESSES = {
 
 ENABLE_ALERTS = True  # Master toggle
 
+# Hide sensitive information like seeds or private keys in outgoing alert bodies
+REDACT_SENSITIVE_DATA_IN_ALERTS = True
+
 # === LOCAL AUDIO ALERT ===
 ENABLE_AUDIO_ALERT_LOCAL = True
 ALERT_SOUND_FILE = os.path.join(SOUND_CLIPS_DIR, "gondor-calls-for-aid.mp3")  # Must exist or alert will be skipped

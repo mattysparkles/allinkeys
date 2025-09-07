@@ -16,7 +16,7 @@ from Crypto.Cipher import PKCS1_OAEP
 import base64
 from datetime import datetime
 
-from config.settings import ENABLE_ALERTS, DOWNLOADS_DIR
+from config.settings import ENABLE_ALERTS, DOWNLOADS_DIR, REDACT_SENSITIVE_DATA_IN_ALERTS
 from config.coin_definitions import coin_columns
 from config.settings import (
     ALERT_SOUND_FILE, ALERT_POPUP_COLOR_1, ALERT_POPUP_COLOR_2, ALERT_PHRASE,
@@ -53,6 +53,19 @@ ALERT_FLAGS = {
     "ENABLE_DISCORD_ALERT": ENABLE_DISCORD_ALERT,
     "ENABLE_HOME_ASSISTANT_ALERT": ENABLE_HOME_ASSISTANT_ALERT,
     "ENABLE_CLOUD_UPLOAD": ENABLE_CLOUD_UPLOAD,
+}
+
+FLAG_LABELS = {
+    "ENABLE_AUDIO_ALERT_LOCAL": "audio",
+    "ENABLE_DESKTOP_WINDOW_ALERT": "popup",
+    "ENABLE_PGP": "pgp",
+    "ALERT_EMAIL_ENABLED": "email",
+    "ENABLE_TELEGRAM_ALERT": "telegram",
+    "ENABLE_SMS_ALERT": "sms",
+    "ENABLE_PHONE_CALL_ALERT": "phone",
+    "ENABLE_DISCORD_ALERT": "discord",
+    "ENABLE_HOME_ASSISTANT_ALERT": "home_assistant",
+    "ENABLE_CLOUD_UPLOAD": "cloud",
 }
 
 # Mapping of alert channels for metrics tracking
@@ -94,6 +107,27 @@ def _start_audio_worker():
     if audio_thread is None or not audio_thread.is_alive():
         audio_thread = threading.Thread(target=_audio_worker, daemon=True)
         audio_thread.start()
+
+
+def _redact_sensitive_fields(data: dict) -> dict:
+    """Return a copy of ``data`` with seeds/private keys redacted."""
+    if not REDACT_SENSITIVE_DATA_IN_ALERTS:
+        return data
+    redacted = {}
+    for key, value in data.items():
+        if any(token in key.lower() for token in ("priv", "seed", "mnemonic", "wif")) and str(value).upper() not in {"N/A", "TEST"}:
+            redacted[key] = "[REDACTED]"
+        else:
+            redacted[key] = value
+    return redacted
+
+
+def _log_alert_consent():
+    """Log which alert channels are enabled at startup."""
+    for flag, enabled in ALERT_FLAGS.items():
+        channel = FLAG_LABELS.get(flag, flag)
+        status = "ENABLED" if enabled else "disabled"
+        log_message(f"Consent for {channel} alerts: {status}", "INFO")
 
 
 def _show_desktop_popup(alert_type: str):
@@ -244,17 +278,30 @@ def alert_match(match_data, test_mode=False):
             log_message(f"❌ Failed to store encrypted match: {e}", "ERROR")
         return
 
-    timestamp = match_data.get("timestamp") or time.strftime('%Y-%m-%d %H:%M:%S')
-    coin = match_data.get("coin", "BTC")
-    address = match_data.get("address", match_data.get("btc_U", "unknown"))
-    csv_file = match_data.get("csv_file", "unknown")
-    privkey = match_data.get("privkey", "N/A")
+    safe_data = _redact_sensitive_fields(match_data)
+    timestamp = safe_data.get("timestamp") or time.strftime('%Y-%m-%d %H:%M:%S')
+    coin = safe_data.get("coin", "BTC")
+    address = safe_data.get("address", safe_data.get("btc_U", "unknown"))
+    csv_file = safe_data.get("csv_file", "unknown")
+    privkey_display = safe_data.get("privkey", "N/A")
     alert_type = "TEST MATCH" if test_mode else "MATCH FOUND"
 
-    match_text = f"[{timestamp}] {alert_type}!\nCoin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey}"
-    log_message(f"🎯 Match found: {json.dumps(match_data)}", "INFO")
+    # Plain text may include sensitive data for optional encryption
+    plain_match_text = (
+        f"[{timestamp}] {alert_type}!\n"
+        f"Coin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {match_data.get('privkey', 'N/A')}"
+    )
+    match_text = (
+        f"[{timestamp}] {alert_type}!\n"
+        f"Coin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey_display}"
+    )
+
+    log_message(
+        f"🎯 Match found: {json.dumps(safe_data if REDACT_SENSITIVE_DATA_IN_ALERTS else match_data)}",
+        "INFO",
+    )
     log_message(f"🚨 {alert_type}: {address} (File: {csv_file})")
-    encrypted_blob = pgp_encrypt(match_text)
+    encrypted_blob = pgp_encrypt(plain_match_text)
     if encrypted_blob:
         try:
             ts = time.strftime('%Y-%m-%d_%H-%M-%S')
@@ -358,7 +405,7 @@ def alert_match(match_data, test_mode=False):
         ts = datetime.utcnow().strftime('%Y-%m-%d')
         log_path = os.path.join(MATCH_LOG_DIR, f"matches_{ts}.log")
         with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(match_data) + "\n")
+            f.write(json.dumps(safe_data) + "\n")
         log_message("📝 Match written to local log.", "INFO")
         _safe_inc_metric("alerts_sent_today.file")
         _safe_inc_metric("alerts_sent_lifetime.file")
@@ -378,6 +425,8 @@ def trigger_startup_alerts(shared_metrics=None):
     if not ENABLE_ALERTS:
         log_message("🚫 Alerts are disabled in config.", "INFO")
         return
+
+    _log_alert_consent()
 
     # Ensure dashboard reflects that alerts are active on startup
     _safe_set_metric("status.alerts", "Running")
