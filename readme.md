@@ -151,8 +151,10 @@ python main.py --only btc --puzzle 71 --chunk 5  # resume at chunk 5
 ### 🧠 Mnemonic Mode
 
 AllInKeys can also generate BIP‑39 mnemonics and derive keys directly
-without running VanitySearch.  The mode is enabled with `--mnemonic` and
-produces rolling output files in the `mnemonic_output/` directory.
+without running VanitySearch.  Enable it with `--mnemonic` and select the
+mnemonic length via flags like `--12words` or `--24words`.  Output files
+are written to `mnemonic_output/`.  All related options are grouped under
+**Mnemonic Mode** in `python main.py --help`.
 
 Example invocations:
 
@@ -163,15 +165,17 @@ python main.py --mnemonic --24words --coins btc,eth --atomic  # BTC + ETH using 
 
 Additional options mirror the specification:
 
-- `--custom-words-file <path>` use a custom word list
-- `--spanish`, `--french`, `--italian`, `--japanese`, `--korean`, `--czech`,
-  `--portuguese`, `--chinese`, `--chinese-simple` select BIP‑39 word list
-  language
+- `--bip39` (default) or `--custom-words-file <path>` choose the word list
+- Language options `--spanish`, `--french`, `--italian`, `--japanese`,
+  `--korean`, `--czech`, `--portuguese`, `--chinese`, `--chinese-simple`
+  select a BIP‑39 wordlist
 - `--coins btc,eth` or `--allcoins` choose which coins to derive
-- `--atomic`, `--ledger`, `--trezor`, … wallet path presets
-- `--path`, `--btc-path`, `--eth-path` supply explicit derivation paths
+- `--atomic`, `--ledger`, `--trezor`, `--coinomi`, `--trust` wallet path presets
+- `--path`, `--btc-path`, `--eth-path`, … supply explicit derivation paths
 - `--rng-seed <n>` deterministic mnemonic generation for testing
 - `--gpu` / `--no-gpu` toggle OpenCL acceleration (falls back to CPU)
+- Performance controls: `--batch-size`, `--threads`, `--rate-limit`,
+  `--progress-interval`
 
 ---
 

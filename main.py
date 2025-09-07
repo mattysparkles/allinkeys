@@ -667,47 +667,173 @@ def build_parser() -> argparse.ArgumentParser:
     # ------------------------------------------------------------------
     # Mnemonic mode flags
     # ------------------------------------------------------------------
-    parser.add_argument("--mnemonic", action="store_true", help="Enable mnemonic generation mode")
+    mnemonic_group = parser.add_argument_group(
+        "Mnemonic Mode",
+        "Generate BIP-39 mnemonic phrases and derive addresses without running VanitySearch",
+    )
+    mnemonic_group.add_argument(
+        "--mnemonic",
+        action="store_true",
+        help="Enable mnemonic generation mode (skip VanitySearch)",
+    )
     for i in range(3, 26):
-        parser.add_argument(
+        mnemonic_group.add_argument(
             f"--{i}words",
             dest="num_words",
             action="store_const",
             const=i,
-            help=f"Generate {i}-word mnemonics",
+            help=f"Generate {i}-word mnemonic phrase",
         )
 
-    parser.add_argument("--bip39", action="store_true", help="Use BIP39 English wordlist (default)")
-    parser.add_argument("--custom-words-file", help="Path to custom word list for mnemonic generation")
-    lang_group = parser.add_mutually_exclusive_group()
-    lang_group.add_argument("--spanish", action="store_true", help="Use BIP39 Spanish wordlist")
-    lang_group.add_argument("--french", action="store_true", help="Use BIP39 French wordlist")
-    lang_group.add_argument("--italian", action="store_true", help="Use BIP39 Italian wordlist")
-    lang_group.add_argument("--japanese", action="store_true", help="Use BIP39 Japanese wordlist")
-    lang_group.add_argument("--korean", action="store_true", help="Use BIP39 Korean wordlist")
-    lang_group.add_argument("--czech", action="store_true", help="Use BIP39 Czech wordlist")
-    lang_group.add_argument("--portuguese", action="store_true", help="Use BIP39 Portuguese wordlist")
-    lang_group.add_argument("--chinese", action="store_true", help="Use BIP39 Traditional Chinese wordlist")
-    lang_group.add_argument("--chinese-simple", action="store_true", help="Use BIP39 Simplified Chinese wordlist")
-    parser.add_argument("--coins", type=_parse_only, help="Comma separated list of coins to derive")
-    parser.add_argument("--allcoins", action="store_true", help="Derive all supported coins")
-    parser.add_argument("--atomic", action="store_true", help="Use Atomic wallet derivation paths")
-    parser.add_argument("--coinomi", action="store_true", help="Use Coinomi wallet paths")
-    parser.add_argument("--ledger", action="store_true", help="Use Ledger wallet paths")
-    parser.add_argument("--trust", action="store_true", help="Use Trust wallet paths")
-    parser.add_argument("--trezor", action="store_true", help="Use Trezor wallet paths")
-    parser.add_argument("--path", dest="global_path", help="Custom derivation path for all coins")
+    mnemonic_group.add_argument(
+        "--bip39",
+        action="store_true",
+        help="Use the default BIP39 English wordlist",
+    )
+    mnemonic_group.add_argument(
+        "--custom-words-file",
+        help="Path to a custom word list for mnemonic generation",
+    )
+    lang_group = mnemonic_group.add_mutually_exclusive_group()
+    lang_group.add_argument(
+        "--spanish",
+        action="store_true",
+        help="Use BIP39 Spanish wordlist",
+    )
+    lang_group.add_argument(
+        "--french",
+        action="store_true",
+        help="Use BIP39 French wordlist",
+    )
+    lang_group.add_argument(
+        "--italian",
+        action="store_true",
+        help="Use BIP39 Italian wordlist",
+    )
+    lang_group.add_argument(
+        "--japanese",
+        action="store_true",
+        help="Use BIP39 Japanese wordlist",
+    )
+    lang_group.add_argument(
+        "--korean",
+        action="store_true",
+        help="Use BIP39 Korean wordlist",
+    )
+    lang_group.add_argument(
+        "--czech",
+        action="store_true",
+        help="Use BIP39 Czech wordlist",
+    )
+    lang_group.add_argument(
+        "--portuguese",
+        action="store_true",
+        help="Use BIP39 Portuguese wordlist",
+    )
+    lang_group.add_argument(
+        "--chinese",
+        action="store_true",
+        help="Use BIP39 Traditional Chinese wordlist",
+    )
+    lang_group.add_argument(
+        "--chinese-simple",
+        action="store_true",
+        help="Use BIP39 Simplified Chinese wordlist",
+    )
+    mnemonic_group.add_argument(
+        "--coins",
+        type=_parse_only,
+        help="Comma-separated list of coins to derive (e.g., btc,eth)",
+    )
+    mnemonic_group.add_argument(
+        "--allcoins",
+        action="store_true",
+        help="Derive all supported coins",
+    )
+    mnemonic_group.add_argument(
+        "--atomic",
+        action="store_true",
+        help="Use Atomic wallet derivation paths",
+    )
+    mnemonic_group.add_argument(
+        "--coinomi",
+        action="store_true",
+        help="Use Coinomi wallet paths",
+    )
+    mnemonic_group.add_argument(
+        "--ledger",
+        action="store_true",
+        help="Use Ledger wallet paths",
+    )
+    mnemonic_group.add_argument(
+        "--trust",
+        action="store_true",
+        help="Use Trust wallet paths",
+    )
+    mnemonic_group.add_argument(
+        "--trezor",
+        action="store_true",
+        help="Use Trezor wallet paths",
+    )
+    mnemonic_group.add_argument(
+        "--path",
+        dest="global_path",
+        help="Custom derivation path for all coins",
+    )
     for _coin in ["btc", "bch", "ltc", "eth", "dash", "doge", "pep", "rvn"]:
-        parser.add_argument(f"--{_coin}-path", dest=f"{_coin}_path", help=f"Custom derivation path for {_coin.upper()}")
-    parser.add_argument("--gpu", action="store_true", help="Enable OpenCL acceleration if available")
-    parser.add_argument("--gpu-id", type=int, help="Select specific GPU device for mnemonic mode")
-    parser.add_argument("--no-gpu", action="store_true", help="Force CPU implementation")
-    parser.add_argument("--rng-seed", type=int, help="Deterministic RNG seed for mnemonics")
-    parser.add_argument("--passphrase", default="", help="Optional BIP39 passphrase")
-    parser.add_argument("--rate-limit", type=int, help="Throttle derivations per second")
-    parser.add_argument("--batch-size", type=int, default=1, help="Mnemonic mode batch size")
-    parser.add_argument("--threads", type=int, default=1, help="CPU threads for mnemonic mode")
-    parser.add_argument("--progress-interval", type=int, default=10, help="Progress update interval")
+        mnemonic_group.add_argument(
+            f"--{_coin}-path",
+            dest=f"{_coin}_path",
+            help=f"Custom derivation path for {_coin.upper()}",
+        )
+    mnemonic_group.add_argument(
+        "--gpu",
+        action="store_true",
+        help="Enable OpenCL acceleration if available",
+    )
+    mnemonic_group.add_argument(
+        "--gpu-id",
+        type=int,
+        help="Select specific GPU device for mnemonic mode",
+    )
+    mnemonic_group.add_argument(
+        "--no-gpu",
+        action="store_true",
+        help="Force the CPU implementation",
+    )
+    mnemonic_group.add_argument(
+        "--rng-seed",
+        type=int,
+        help="Deterministic RNG seed for mnemonics",
+    )
+    mnemonic_group.add_argument(
+        "--passphrase",
+        default="",
+        help="Optional BIP39 passphrase",
+    )
+    mnemonic_group.add_argument(
+        "--rate-limit",
+        type=int,
+        help="Throttle derivations per second",
+    )
+    mnemonic_group.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Mnemonic mode batch size",
+    )
+    mnemonic_group.add_argument(
+        "--threads",
+        type=int,
+        default=1,
+        help="CPU threads for mnemonic mode",
+    )
+    mnemonic_group.add_argument(
+        "--progress-interval",
+        type=int,
+        default=10,
+        help="Progress update interval in seconds",
+    )
     return parser
 
 
