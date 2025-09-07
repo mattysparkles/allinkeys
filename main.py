@@ -71,6 +71,7 @@ from core.dashboard import (
 import core.dashboard as dashboard_core
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
+from core.telemetry import start_telemetry
 
 
 def display_logo():
@@ -553,6 +554,8 @@ def run_allinkeys(args):
     # worker processes start up or exit.  Events are created once here and then
     # shared with child processes.
     shutdown_event = multiprocessing.Event()
+    if not getattr(args, "no_telemetry", False):
+        start_telemetry(shutdown_event)
     shutdown_events = {
         'keygen': multiprocessing.Event(),
         'altcoin': multiprocessing.Event(),
@@ -644,6 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-dashboard", action="store_true", help="Don't launch GUI dashboard")
     parser.add_argument("--skip-downloads", action="store_true", help="Skip downloading balance files")
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
+    parser.add_argument("--no-telemetry", action="store_true", help="Disable telemetry reporting")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
     parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
     parser.add_argument("--only", type=_parse_only, dest="only", help="Restrict to coin flow(s). Comma-separated list.")

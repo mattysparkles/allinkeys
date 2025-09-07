@@ -48,6 +48,7 @@ sys.modules.setdefault(
 )
 sys.modules.setdefault('core.keygen', types.SimpleNamespace(run_btc_only=lambda *a, **k: None))
 sys.modules.setdefault('core.btc_only_checker', types.SimpleNamespace(btc_only_checker_loop=lambda *a, **k: None))
+sys.modules.setdefault('core.telemetry', types.SimpleNamespace(start_telemetry=lambda *a, **k: None))
 
 import main
 main.metrics_updater = lambda *a, **k: None
@@ -121,6 +122,18 @@ def test_parser_accepts_multiple_only():
     parser = main.build_parser()
     args = parser.parse_args(["--only", "btc,ltc"])
     assert args.only == ["btc", "ltc"]
+
+
+def test_parser_no_telemetry_flag():
+    parser = main.build_parser()
+    args = parser.parse_args(["--no-telemetry"])
+    assert args.no_telemetry is True
+
+
+def test_parser_telemetry_default_enabled():
+    parser = main.build_parser()
+    args = parser.parse_args([])
+    assert getattr(args, "no_telemetry") is False
 
 
 def test_deprecated_all_flag_warning(capsys):
