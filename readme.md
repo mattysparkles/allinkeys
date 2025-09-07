@@ -88,6 +88,28 @@ CHECKPOINT_INTERVAL_SECONDS = 30
 PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
 ```
 
+### 🌐 Path Customization
+
+AllInKeys stores logs, downloads and output under the repository root by default. You can override these locations with environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ALLINKEYS_BASE_DIR` | repo root | Base directory used for relative paths |
+| `ALLINKEYS_LOG_DIR` | `BASE_DIR/logs` | Where log files and checkpoints are written |
+| `ALLINKEYS_CSV_DIR` | `BASE_DIR/output/csv` | Converted CSV output |
+| `ALLINKEYS_DOWNLOADS_DIR` | `BASE_DIR/downloads` | Downloaded address lists |
+| `ALLINKEYS_MATCHES_DIR` | `BASE_DIR/matches` | Archive of matches and alerts |
+| `ALLINKEYS_VANITY_TXT_DIR` | `BASE_DIR/vanity_output` | VanitySearch text batches |
+| `ALLINKEYS_MNEMONIC_TXT_DIR` | `BASE_DIR/mnemonic_output` | Mnemonic mode output |
+
+Example:
+
+```bash
+export ALLINKEYS_LOG_DIR=/var/tmp/allinkeys/logs
+export ALLINKEYS_CSV_DIR=/data/allinkeys/csv
+python main.py
+```
+
 ---
 
 ## 🖥 Usage
