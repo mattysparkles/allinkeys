@@ -67,7 +67,6 @@ from core.dashboard import (
     warn_rate_limited,
 )
 import core.dashboard as dashboard_core
-from ui.dashboard_gui import start_dashboard
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
 
@@ -600,7 +599,8 @@ def run_allinkeys(args):
     threading.Thread(target=monitor, daemon=True).start()
 
     try:
-        if ENABLE_DASHBOARD and not args.no_dashboard:
+        if ENABLE_DASHBOARD and not args.no_dashboard and not getattr(args, "headless", False):
+            from ui.dashboard_gui import start_dashboard
             start_dashboard()
         else:
             while not shutdown_event.is_set():

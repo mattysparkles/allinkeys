@@ -280,16 +280,29 @@ def _which(p: str) -> Optional[str]:
 
 def _resolve_exe() -> Optional[str]:
     bin_dir = _bin_dir()
-    for cand in (
-        os.path.join(bin_dir, "VanitySearch.exe"),
-        os.path.join(bin_dir, "vanitysearch.exe"),
-        os.path.join(bin_dir, "VanitySearch_cuda.exe"),
-        os.path.join(bin_dir, "vanitysearch_cuda.exe"),
-        "VanitySearch.exe",
-        "vanitysearch.exe",
-        "VanitySearch_cuda.exe",
-        "vanitysearch_cuda.exe",
-    ):
+    if os.name == "nt":
+        candidates = [
+            os.path.join(bin_dir, "VanitySearch.exe"),
+            os.path.join(bin_dir, "vanitysearch.exe"),
+            os.path.join(bin_dir, "VanitySearch_cuda.exe"),
+            os.path.join(bin_dir, "vanitysearch_cuda.exe"),
+            "VanitySearch.exe",
+            "vanitysearch.exe",
+            "VanitySearch_cuda.exe",
+            "vanitysearch_cuda.exe",
+        ]
+    else:
+        candidates = [
+            os.path.join(bin_dir, "VanitySearch"),
+            os.path.join(bin_dir, "vanitysearch"),
+            os.path.join(bin_dir, "VanitySearch_cuda"),
+            os.path.join(bin_dir, "vanitysearch_cuda"),
+            "VanitySearch",
+            "vanitysearch",
+            "VanitySearch_cuda",
+            "vanitysearch_cuda",
+        ]
+    for cand in candidates:
         path = _which(cand)
         if path:
             return path
@@ -348,7 +361,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
     out_dir = ensure_dir(VANITY_TXT_DIR)
     exe = _resolve_exe()
     if not exe:
-        log_message("❌ VanitySearch binary not found (VanitySearch.exe).", "ERROR")
+        log_message("❌ VanitySearch binary not found.", "ERROR")
         return 0
 
     seed = _normalize_seed(seed_start)

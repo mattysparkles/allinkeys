@@ -75,8 +75,11 @@ BTC_MIN_FILE_AGE_SEC = 2.0            # ignore files newer than this
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
 # Single VanitySearch binary (CUDA only)
-VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "VanitySearch.exe")
-VANITYSEARCH_EXE_NAME = "VanitySearch.exe"
+if os.name == "nt":
+    VANITYSEARCH_EXE_NAME = "VanitySearch.exe"
+else:
+    VANITYSEARCH_EXE_NAME = "VanitySearch"
+VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", VANITYSEARCH_EXE_NAME)
 # OpenCL/AMD variants from Vanitygen++
 OCLVANITYGEN_PATH = os.path.join(BASE_DIR, "bin", "oclvanitygen.exe")
 OCLVANITYMINER_PATH = os.path.join(BASE_DIR, "bin", "oclvanityminer.exe")

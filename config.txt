@@ -34,7 +34,10 @@ USE_CUSTOM_SEEDS = False
 
 # ===================== 🚀 VANITY SEARCH CONFIG ====================
 # Path to the bundled VanitySearch binary (CUDA only)
-VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "VanitySearch.exe")
+if os.name == "nt":
+    VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "VanitySearch.exe")
+else:
+    VANITYSEARCH_PATH = os.path.join(BASE_DIR, "bin", "VanitySearch")
 PATTERN = "1**"  # Only search for addresses starting with '1'
 VANITYSEARCH_GPU_INDEX = [0]  # Default to GPU 0; override at runtime
 USE_CPU_FALLBACK = True
