@@ -1,6 +1,7 @@
 # core/downloader.py
 
 import os
+import sys
 import gzip
 import shutil
 import csv
@@ -228,14 +229,22 @@ def _download_single_coin(coin: str, url: str) -> None:
 
 
 def download_and_compare_address_lists() -> None:
-    """Download and process all funded address lists concurrently."""
+    """Download and process all funded address lists concurrently with progress.
+
+    Progress bar is disabled in headless/CI mode (when stderr is not a TTY).
+    """
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
-    with ThreadPoolExecutor(max_workers=len(COIN_DOWNLOAD_URLS)) as executor:
+    total = len(COIN_DOWNLOAD_URLS)
+    disable = not sys.stderr.isatty()
+    with ThreadPoolExecutor(max_workers=total or 1) as executor:
         futures = [executor.submit(_download_single_coin, coin, url)
                    for coin, url in COIN_DOWNLOAD_URLS.items()]
-        for future in as_completed(futures):
-            future.result()
+        with tqdm(total=total, disable=disable, desc="downloads", unit="coin") as pbar:
+            for future in as_completed(futures):
+                # Bubble exceptions to fail fast
+                future.result()
+                pbar.update(1)
 
     generate_test_csv()
 

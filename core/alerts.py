@@ -104,9 +104,56 @@ RATE_LIMIT_SECONDS = {
 }
 _last_alert_times = {channel: 0.0 for channel in ALERT_CHANNELS}
 
+# Token-bucket rate limiting (per-channel). Disabled unless capacity/rate provided via env.
+# Env vars supported:
+#   DEFAULT_TOKENS_PER_MIN, DEFAULT_BUCKET_CAPACITY
+#   <CHANNEL>_TOKENS_PER_MIN, <CHANNEL>_BUCKET_CAPACITY (where CHANNEL matches entries in ALERT_CHANNELS)
+_DEFAULT_TOKENS_PER_MIN = float(os.getenv("DEFAULT_TOKENS_PER_MIN", "0"))
+_DEFAULT_BUCKET_CAP = int(os.getenv("DEFAULT_BUCKET_CAPACITY", "0"))
+_bucket_config = {
+    ch: (
+        float(os.getenv(f"{ch.upper()}_TOKENS_PER_MIN", str(_DEFAULT_TOKENS_PER_MIN))),
+        int(os.getenv(f"{ch.upper()}_BUCKET_CAPACITY", str(_DEFAULT_BUCKET_CAP)))
+    )
+    for ch in ALERT_CHANNELS
+}
+_buckets = {
+    ch: {
+        "tokens": cap if cap > 0 else 0.0,
+        "capacity": float(cap),
+        "rate_per_sec": (tpm / 60.0) if tpm > 0 else 0.0,
+        "last": time.time(),
+    }
+    for ch, (tpm, cap) in _bucket_config.items()
+}
+
 
 def _rate_limited(channel: str) -> bool:
-    """Return True if the given channel is currently rate limited."""
+    """Return True if the given channel is currently rate limited.
+
+    Prefers token-bucket if configured via env; otherwise falls back to
+    simple cool-down window using RATE_LIMIT_SECONDS.
+    """
+    # Token-bucket mode
+    b = _buckets.get(channel)
+    if b and b["capacity"] > 0 and b["rate_per_sec"] > 0:
+        now = time.time()
+        # Refill tokens
+        delta = now - b["last"]
+        if delta > 0:
+            b["tokens"] = min(b["capacity"], b["tokens"] + delta * b["rate_per_sec"])
+            b["last"] = now
+        if b["tokens"] >= 1.0:
+            b["tokens"] -= 1.0
+            return False
+        # Out of tokens: rate limited
+        log_message(
+            f"⏳ {channel} alert skipped due to token bucket (refill soon)",
+            "INFO",
+        )
+        return True
+
+    # Fallback to time-based cool-down
     limit = RATE_LIMIT_SECONDS.get(channel, 0)
     if limit <= 0:
         return False
