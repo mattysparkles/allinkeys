@@ -238,7 +238,6 @@ def pgp_encrypt(text: str) -> Optional[str]:
     cmd = ["gpg", "--armor", "--encrypt", "-r", PGP_RECIPIENT]
     if PGP_KEYRING_PATH:
         cmd = ["gpg", "--keyring", PGP_KEYRING_PATH, "--armor", "--encrypt", "-r", PGP_RECIPIENT]
-<<<<<<< HEAD
     with subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -251,14 +250,6 @@ def pgp_encrypt(text: str) -> Optional[str]:
             log_message(f"❌ PGP encryption failed: {err}", "ERROR")
             return None
         return out
-=======
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    out, err = proc.communicate(text)
-    if proc.returncode != 0:
-        log_message(_("❌ PGP encryption failed: %s") % err, "ERROR")
-        return None
-    return out
->>>>>>> origin/codex/externalize-user-facing-strings
 
 
 init_pgp()
@@ -337,7 +328,6 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
     privkey_display = safe_data.get("privkey", "N/A")
     alert_type = "TEST MATCH" if test_mode else "MATCH FOUND"
 
-<<<<<<< HEAD
     # Plain text may include sensitive data for optional encryption
     plain_match_text = (
         f"[{timestamp}] {alert_type}!\n"
@@ -354,12 +344,6 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
     )
     log_message(f"🚨 {alert_type}: {address} (File: {csv_file})")
     encrypted_blob = pgp_encrypt(plain_match_text)
-=======
-    match_text = f"[{timestamp}] {alert_type}!\nCoin: {coin}\nAddress: {address}\nCSV: {csv_file}\nWIF: {privkey}"
-    log_message(_("🎯 Match found: %s") % json.dumps(match_data), "INFO")
-    log_message(_("🚨 %s: %s (File: %s)") % (alert_type, address, csv_file))
-    encrypted_blob = pgp_encrypt(match_text)
->>>>>>> origin/codex/externalize-user-facing-strings
     if encrypted_blob:
         try:
             ts = time.strftime('%Y-%m-%d_%H-%M-%S')
@@ -397,7 +381,6 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
 
     # 📧 Email Alert
     if ALERT_FLAGS.get("ALERT_EMAIL_ENABLED"):
-<<<<<<< HEAD
         if send_email_alert(
             match_text,
             ALERT_EMAIL_FROM,
@@ -416,39 +399,6 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
         if send_telegram_alert(match_text, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID):
             _safe_inc_metric("alerts_sent_today.telegram")
             _safe_inc_metric("alerts_sent_lifetime.telegram")
-=======
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = ALERT_EMAIL_FROM
-            msg['To'] = ",".join(ALERT_EMAIL_TO) if isinstance(ALERT_EMAIL_TO, list) else ALERT_EMAIL_TO
-            msg['Subject'] = f"AllInKeys {alert_type}"
-            msg.attach(MIMEText(match_text, 'plain'))
-
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
-            server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            server.send_message(msg)
-            server.quit()
-            log_message(_("[ALERT] ✉️ Email sent"), "INFO")
-            _safe_inc_metric("alerts_sent_today.email")
-            _safe_inc_metric("alerts_sent_lifetime.email")
-        except Exception as e:
-            log_message(_("❌ Email alert error: %s") % e, "WARNING")
-
-    # 📲 Telegram Alert
-    if ALERT_FLAGS.get("ENABLE_TELEGRAM_ALERT") and not _rate_limited("telegram"):
-        try:
-            telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            resp = requests.post(telegram_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": match_text}, timeout=10)
-            if resp.ok and resp.json().get("ok"):
-                log_message(_("[ALERT] 📟 Telegram sent"), "INFO")
-                _safe_inc_metric("alerts_sent_today.telegram")
-                _safe_inc_metric("alerts_sent_lifetime.telegram")
-            else:
-                log_message(_("❌ Telegram alert failed: %s") % resp.text, "ERROR")
-        except Exception as e:
-            log_message(_("❌ Telegram alert error: %s") % e, "WARNING")
->>>>>>> origin/codex/externalize-user-facing-strings
 
     # 📱 SMS via Twilio
     if ALERT_FLAGS.get("ENABLE_SMS_ALERT") and Client and not _rate_limited("sms"):
@@ -467,7 +417,6 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
 
     # 💬 Discord Alert
     if ALERT_FLAGS.get("ENABLE_DISCORD_ALERT"):
-<<<<<<< HEAD
         if send_discord_alert(match_text, DISCORD_WEBHOOK_URL):
             _safe_inc_metric("alerts_sent_today.discord")
             _safe_inc_metric("alerts_sent_lifetime.discord")
@@ -477,37 +426,6 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
         if send_home_assistant_alert(match_text, HOME_ASSISTANT_URL, HOME_ASSISTANT_TOKEN):
             _safe_inc_metric("alerts_sent_today.home_assistant")
             _safe_inc_metric("alerts_sent_lifetime.home_assistant")
-=======
-        try:
-            data = {"content": match_text}
-            resp = requests.post(DISCORD_WEBHOOK_URL, json=data, timeout=10)
-            if resp.ok:
-                log_message(_("💬 Discord alert sent."), "INFO")
-                _safe_inc_metric("alerts_sent_today.discord")
-                _safe_inc_metric("alerts_sent_lifetime.discord")
-            else:
-                log_message(_("❌ Discord alert failed: %s") % resp.text, "ERROR")
-        except Exception as e:
-            log_message(_("❌ Discord alert error: %s") % e, "ERROR")
-
-    # 🏠 Home Assistant Alert
-    if ALERT_FLAGS.get("ENABLE_HOME_ASSISTANT_ALERT") and not _rate_limited("home_assistant"):
-        try:
-            headers = {
-                "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            payload = {"message": match_text}
-            resp = requests.post(HOME_ASSISTANT_URL, headers=headers, json=payload, timeout=10)
-            if resp.ok:
-                log_message(_("🏠 Home Assistant alert sent."), "INFO")
-                _safe_inc_metric("alerts_sent_today.home_assistant")
-                _safe_inc_metric("alerts_sent_lifetime.home_assistant")
-            else:
-                log_message(_("❌ Home Assistant alert failed: %s") % resp.text, "ERROR")
-        except Exception as e:
-            log_message(_("❌ Home Assistant alert error: %s") % e, "ERROR")
->>>>>>> origin/codex/externalize-user-facing-strings
 
     # ☁ PGP + Cloud Upload
     if ALERT_FLAGS.get("ENABLE_CLOUD_UPLOAD") and not _rate_limited("cloud"):
@@ -533,13 +451,8 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
         ts = datetime.utcnow().strftime('%Y-%m-%d')
         log_path = os.path.join(MATCH_LOG_DIR, f"matches_{ts}.log")
         with open(log_path, 'a', encoding='utf-8') as f:
-<<<<<<< HEAD
             f.write(json.dumps(safe_data) + "\n")
         log_message("📝 Match written to local log.", "INFO")
-=======
-            f.write(json.dumps(match_data) + "\n")
-        log_message(_("📝 Match written to local log."), "INFO")
->>>>>>> origin/codex/externalize-user-facing-strings
         _safe_inc_metric("alerts_sent_today.file")
         _safe_inc_metric("alerts_sent_lifetime.file")
     except Exception as e:
