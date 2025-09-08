@@ -11,6 +11,7 @@ import subprocess
 from datetime import datetime, timedelta
 from multiprocessing import Process
 import psutil
+from core.logger import get_logger
 
 # Wrap stdout once with UTF-8 encoding if not already wrapped
 if not isinstance(sys.stdout, io.TextIOWrapper):
@@ -663,7 +664,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
     parser.add_argument("--no-telemetry", action="store_true", help="Disable telemetry reporting")
     parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
-    parser.add_argument("--purge", action="store_true", help="Delete old downloaded files and exit")
+    parser.add_argument(
+        "--purge",
+        nargs="?",
+        const="30",
+        metavar="DAYS",
+        help="Remove files older than DAYS (default 30) in vanity_output/ and output/csv/",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Preview purge actions without deleting")
     parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
     parser.add_argument("--only", type=_parse_only, dest="only", help="Restrict to coin flow(s). Comma-separated list.")
     parser.add_argument("-only", type=_parse_only, dest="only_legacy", help=argparse.SUPPRESS)
@@ -861,6 +869,19 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point used by ``__main__`` and tests."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    # Handle retention purge early and exit
+    if getattr(args, "purge", None) is not None:
+        try:
+            days = int(args.purge)
+        except Exception:
+            print("Invalid DAYS for --purge; must be an integer.", flush=True)
+            return 2
+        from core.utils.retention import purge_older_than
+
+        _, messages = purge_older_than(days, dry_run=getattr(args, "dry_run", False))
+        for m in messages:
+            print(m, flush=True)
+        return 0
     if getattr(args, "dashboard_password", None):
         from utils.auth import hash_password
         settings.DASHBOARD_PASSWORD_HASH = hash_password(args.dashboard_password)
