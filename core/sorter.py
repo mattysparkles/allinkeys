@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 from typing import Optional
 from core.utils.io_safety import safe_nonempty
 
@@ -12,7 +12,7 @@ def sort_if_ready(input_path: str, logger, min_bytes: int = 128) -> Optional[str
     Never creates an empty .sorted.
     """
     if not safe_nonempty(input_path, min_bytes=min_bytes):
-        logger.info(f"Skipping extractor for empty/not-ready file {os.path.basename(input_path)}")
+        logger.info(f"Skipping extractor for empty/not-ready file {Path(input_path).name}")
         return None
 
     sorted_path = input_path + ".sorted"
@@ -47,7 +47,7 @@ def sort_if_ready(input_path: str, logger, min_bytes: int = 128) -> Optional[str
             for a in sorted(addrs):
                 out.write(a + "\n")
     except OSError as e:
-        logger.warning(f"⚠️ Failed writing sidecar for {os.path.basename(input_path)}: {e}")
+        logger.warning(f"⚠️ Failed writing sidecar for {Path(input_path).name}: {e}")
         return None
 
     return sorted_path

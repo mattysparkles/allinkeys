@@ -2,15 +2,17 @@ import json
 import os
 from bisect import bisect_left
 from typing import List, Tuple
+from pathlib import Path
 
 from config.settings import LOG_DIR
+from core.paths import LOG_DIR as LOG_DIR_P, ensure_dirs
 
-SEED_RANGES_PATH = os.path.join(LOG_DIR, "used_seeds.json")
+SEED_RANGES_PATH = str((Path(LOG_DIR_P) / "used_seeds.json").resolve())
 
 
 def _load_ranges() -> List[Tuple[int, int]]:
     """Load raw ranges from disk without modification."""
-    if not os.path.exists(SEED_RANGES_PATH):
+    if not Path(SEED_RANGES_PATH).exists():
         return []
     try:
         with open(SEED_RANGES_PATH, "r", encoding="utf-8") as f:
@@ -26,7 +28,7 @@ def _load_ranges() -> List[Tuple[int, int]]:
 
 
 def _save_ranges(ranges: List[Tuple[int, int]]) -> None:
-    os.makedirs(os.path.dirname(SEED_RANGES_PATH), exist_ok=True)
+    Path(SEED_RANGES_PATH).parent.mkdir(parents=True, exist_ok=True)
     data = [{"start": s, "end": e} for s, e in ranges]
     with open(SEED_RANGES_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f)

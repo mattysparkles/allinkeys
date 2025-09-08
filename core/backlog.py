@@ -4,21 +4,24 @@ import os
 import csv
 import time
 from datetime import datetime
+from pathlib import Path
 
 from core.altcoin_derive import derive_altcoin_addresses_from_hex, convert_txt_to_csv
 from config.settings import VANITY_OUTPUT_DIR, CSV_DIR
+from core.paths import VANITY_OUTPUT_DIR as VANITY_DIR_P, CSV_DIR as CSV_DIR_P, LOG_DIR as LOG_DIR_P, ensure_dirs
 from core.logger import log_message
 
 # === Portable Config for Batch Parsing Mode ===
-LOG_DIR = os.getenv("LOG_DIR", os.path.join(os.getcwd(), "logs"))
-CSV_BASE_DIR = os.getenv("CSV_BASE_DIR", os.path.join(os.getcwd(), "output", "csv"))
-BATCH_LOG = os.path.join(LOG_DIR, "backlog_history.log")
+LOG_PATH = Path(LOG_DIR_P)
+CSV_BASE = Path(CSV_DIR_P)
+BATCH_LOG = str((LOG_PATH / "backlog_history.log").resolve())
 MAX_CSV_MB = 750
 SKIP_FILE_NAME = "batch_0_part_0_seed_10000000.txt"
 SKIP_FILE_MIN_SIZE_KB = 50_000  # Skip anything < 50MB
 
-os.makedirs(CSV_BASE_DIR, exist_ok=True)
-os.makedirs(LOG_DIR, exist_ok=True)
+ensure_dirs()
+CSV_BASE.mkdir(parents=True, exist_ok=True)
+LOG_PATH.mkdir(parents=True, exist_ok=True)
 
 
 def safe_str(obj):
@@ -46,9 +49,9 @@ def is_file_locked(path):
 
 def is_file_still_writing(path, delay=2.0):
     try:
-        size1 = os.path.getsize(path)
+        size1 = Path(path).stat().st_size
         time.sleep(delay)
-        size2 = os.path.getsize(path)
+        size2 = Path(path).stat().st_size
         return size1 != size2
     except Exception:
         return True
@@ -81,18 +84,15 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
             if get_shutdown_event() and get_shutdown_event().is_set():
                 break
             try:
-                files = [
-                    f
-                    for f in os.listdir(VANITY_OUTPUT_DIR)
-                    if f.endswith(".txt") and not f.endswith(".part")
-                ]  # Do not process .part files
+                vdir = Path(VANITY_DIR_P)
+                files = [p.name for p in vdir.iterdir() if p.is_file() and p.suffix == ".txt" and not p.name.endswith(".part")]
                 update_dashboard_stat("backlog_files_queued", len(files))
                 futures = []
                 for file in files:
-                    txt_path = os.path.join(VANITY_OUTPUT_DIR, file)
-                    output_path = os.path.join(CSV_DIR, file.replace(".txt", ".csv"))
+                    txt_path = str((Path(VANITY_DIR_P) / file).resolve())
+                    output_path = str((Path(CSV_DIR_P) / file.replace(".txt", ".csv")).resolve())
 
-                    too_small = os.path.getsize(txt_path) < SKIP_FILE_MIN_SIZE_KB * 1024
+                    too_small = Path(txt_path).stat().st_size < SKIP_FILE_MIN_SIZE_KB * 1024
                     locked = is_file_locked(txt_path)
                     writing = is_file_still_writing(txt_path)
 
@@ -101,7 +101,7 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
                         continue
 
                     if too_small:
-                        log_message(f"⏭️ Skipping {file} (too small: {os.path.getsize(txt_path)} bytes)", "DEBUG")
+                        log_message(f"⏭️ Skipping {file} (too small: {Path(txt_path).stat().st_size} bytes)", "DEBUG")
                     if locked:
                         log_message(f"⏭️ Skipping {file} (file is locked)", "DEBUG")
                     if writing:
@@ -148,7 +148,7 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
 # === Legacy Parsing Mode (Rarely Used) ===
 
 def get_parsed_log():
-    if not os.path.exists(BATCH_LOG):
+    if not Path(BATCH_LOG).exists():
         return set()
     with open(BATCH_LOG, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
@@ -160,13 +160,13 @@ def append_to_log(filename):
 
 
 def get_file_size_mb(path):
-    return os.path.getsize(path) / (1024 * 1024)
+    return Path(path).stat().st_size / (1024 * 1024)
 
 
 def open_new_csv_writer(index):
     """Create a new CSV writer directly in CSV_BASE_DIR."""
-    os.makedirs(CSV_BASE_DIR, exist_ok=True)
-    path = os.path.join(CSV_BASE_DIR, f"keys_batch_{index:05d}.csv")
+    CSV_BASE.mkdir(parents=True, exist_ok=True)
+    path = str((CSV_BASE / f"keys_batch_{index:05d}.csv").resolve())
     f = open(path, "w", newline='', encoding="utf-8")
     writer = csv.DictWriter(f, fieldnames=[
         "original_seed", "hex_key", "btc_C", "btc_U", "ltc_C", "ltc_U",
@@ -181,10 +181,10 @@ def parse_vanity_file(txt_file, batch_id):
     with open(txt_file, "r", encoding="utf-8") as f:
         lines = [line.strip() for line in f if line.strip()]
 
-    log(f"📄 {len(lines):,} lines read from {os.path.basename(txt_file)}")
+    log(f"📄 {len(lines):,} lines read from {Path(txt_file).name}")
 
     parsed_count = 0
-    csv_index = len([f for _, _, files in os.walk(CSV_BASE_DIR) for f in files if f.endswith(".csv")])
+    csv_index = sum(1 for _ in CSV_BASE.rglob("*.csv"))
     address_tally = {k: 0 for k in [
         "btc_C", "btc_U", "ltc_C", "ltc_U", "doge_C", "doge_U",
         "bch_C", "bch_U", "eth", "dash_C", "dash_U"
@@ -260,13 +260,13 @@ def parse_vanity_file(txt_file, batch_id):
 
 def main():
     parsed_files = get_parsed_log()
-    files = sorted(f for f in os.listdir(LOG_DIR) if f.endswith(".txt") and f.startswith("vanitysearch_batch_"))
+    files = sorted(p.name for p in LOG_PATH.iterdir() if p.is_file() and p.name.endswith(".txt") and p.name.startswith("vanitysearch_batch_"))
 
     for txt in files:
         if txt in parsed_files:
             continue
 
-        path = os.path.join(LOG_DIR, txt)
+        path = str((LOG_PATH / txt).resolve())
         log(f"\n🚀 Processing {txt}...")
 
         try:
@@ -274,7 +274,7 @@ def main():
             written = parse_vanity_file(path, batch_id)
             if written:
                 append_to_log(txt)
-                os.remove(path)
+                Path(path).unlink(missing_ok=True)
                 log(f"🧹 Removed {txt}")
         except Exception as e:
             log(f"❌ Failed to process {txt}: {safe_str(e)}")

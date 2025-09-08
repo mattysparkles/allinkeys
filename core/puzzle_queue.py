@@ -7,19 +7,21 @@ import sqlite3
 import json
 import time
 from typing import Optional, Tuple
+from pathlib import Path
 
 from config.settings import LOG_DIR
+from core.paths import LOG_DIR as LOG_DIR_P
 from core.logger import get_logger
 from utils.puzzle import get_puzzle_info
 
 logger = get_logger(__name__)
 
-DB_PATH = os.path.join(LOG_DIR, "work_queue.db")
+DB_PATH = str((Path(LOG_DIR_P) / "work_queue.db").resolve())
 CHUNK_SIZE = 1 << 20  # ~1M keys
 
 
 def _checkpoint_file(puzzle: int) -> str:
-    return os.path.join(LOG_DIR, f"puzzle{puzzle}_checkpoint.json")
+    return str((Path(LOG_DIR_P) / f"puzzle{puzzle}_checkpoint.json").resolve())
 
 
 def init_work_queue() -> None:
@@ -154,7 +156,7 @@ def claim_chunk(puzzle: int, chunk_index: int, assignee: str) -> Optional[Tuple[
 def load_checkpoint(puzzle: int) -> dict:
     """Load worker progress within the current chunk for a puzzle."""
     path = _checkpoint_file(puzzle)
-    if os.path.exists(path):
+    if Path(path).exists():
         with open(path, "r", encoding="utf-8") as fh:
             return json.load(fh)
     return {}

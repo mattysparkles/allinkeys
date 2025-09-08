@@ -1,11 +1,12 @@
 import os
 import time
 from typing import Optional, BinaryIO
+from pathlib import Path
 
 
 def ensure_dir(path: str) -> str:
     """Create ``path`` if missing and return it."""
-    os.makedirs(path, exist_ok=True)
+    Path(path).mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -54,7 +55,7 @@ class RollingAtomicWriter:
         self._counter += 1
         ts = time.strftime("%Y%m%d_%H%M%S")
         name = f"{self.prefix}_{ts}_{self._counter:03d}.txt"
-        return os.path.join(self.directory, name)
+        return str((Path(self.directory) / name).resolve())
 
     def _open_new_file(self) -> None:
         self.final_path = self._next_filename()
@@ -72,7 +73,7 @@ class RollingAtomicWriter:
         self._fh.flush()
         os.fsync(self._fh.fileno())
         self._fh.close()
-        os.replace(self.temp_path, self.final_path)
+        Path(self.temp_path).replace(self.final_path)
         self._fh = None
 
     # Public API -------------------------------------------------------
@@ -112,7 +113,7 @@ class RollingAtomicWriter:
             try:
                 self._fh.close()
             finally:
-                if os.path.exists(self.temp_path):
-                    os.remove(self.temp_path)
+                p = Path(self.temp_path)
+                if p.exists():
+                    p.unlink(missing_ok=True)
             self._fh = None
-

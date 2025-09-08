@@ -6,6 +6,7 @@ import bisect
 import time
 import json
 from typing import Tuple, List, Optional
+from pathlib import Path
 
 from config.settings import (
     VANITY_OUTPUT_DIR,
@@ -26,6 +27,7 @@ from core.logger import get_logger
 from core.utils.io_safety import safe_nonempty
 from core.sorter import sort_if_ready
 
+from core.paths import VANITY_OUTPUT_DIR as VANITY_DIR_P, ALLINKEYS_OUTPUT_DIR if any
 logger = get_logger(__name__)
 logger.info("Extractor auto-detect: PubAddr or raw-address mode.")
 
@@ -52,12 +54,12 @@ def ensure_sorted_or_skip(vanity_txt_path: str, logger) -> Optional[str]:
         return sorted_path
 
     # Source must exist, be non-empty, and not too "fresh"
-    if not os.path.exists(vanity_txt_path):
+    if not Path(vanity_txt_path).exists():
         return None
     if not safe_nonempty(vanity_txt_path, min_bytes=128):
         return None
     try:
-        mtime = os.path.getmtime(vanity_txt_path)
+        mtime = Path(vanity_txt_path).stat().st_mtime
         if (time.time() - mtime) < DEBOUNCE_SECONDS:
             # Too fresh; let writer/extractor finish
             return None
@@ -71,7 +73,7 @@ def ensure_sorted_or_skip(vanity_txt_path: str, logger) -> Optional[str]:
             return created
         return None
     except Exception as e:
-        logger.warning(f"⚠️ On-demand sort failed for {os.path.basename(vanity_txt_path)}: {e}")
+        logger.warning(f"⚠️ On-demand sort failed for {Path(vanity_txt_path).name}: {e}")
         return None
 
 
@@ -104,9 +106,9 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
         else:
             daily_iter = list(_iter_daily())
         if funded_fp:
-            logger.info(
-                f"Using funded list {os.path.basename(funded_fp)} with {len(daily_iter)} addresses"
-            )
+        logger.info(
+            f"Using funded list {Path(funded_fp).name} with {len(daily_iter)} addresses"
+        )
         else:
             logger.warning("No funded BTC address file found")
         by_range = {i: [] for i in range(len(BOUNDARIES))}
@@ -115,7 +117,7 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
             by_range[idx].append(addr)
         for idx, addrs in by_range.items():
             if addrs:
-                path = os.path.join(ALL_BTC_ADDRESSES_DIR, BTC_RANGE_FILE_PATTERN.format(idx))
+                path = str((Path(ALL_BTC_ADDRESSES_DIR) / BTC_RANGE_FILE_PATTERN.format(idx)).resolve())
                 append_unique_sorted_to_range(path, addrs, logger)
         set_metric("btc_ranges_updated_today", True)
     else:
@@ -125,7 +127,7 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
         FUNDed_SET = set(_iter_daily())
         if funded_fp:
             logger.info(
-                f"Using funded list {os.path.basename(funded_fp)} with {len(FUNDed_SET)} addresses"
+                f"Using funded list {Path(funded_fp).name} with {len(FUNDed_SET)} addresses"
             )
         else:
             logger.warning("No funded BTC address file found")
@@ -224,7 +226,7 @@ def _is_file_stable(path: str, logger) -> bool:
             last = cur
         return True
     except Exception as e:
-        logger.debug(f"Stability check failed for {os.path.basename(path)}: {e}")
+        logger.debug(f"Stability check failed for {Path(path).name}: {e}")
         return False
 
 
@@ -250,9 +252,7 @@ def check_vanity_file_against_ranges(
                 matched = False
                 if USE_ALL:
                     idx = route_address_to_range(addr, BOUNDARIES)
-                    range_file = os.path.join(
-                        all_btc_dir, BTC_RANGE_FILE_PATTERN.format(idx)
-                    )
+                    range_file = str((Path(all_btc_dir) / BTC_RANGE_FILE_PATTERN.format(idx)).resolve())
                     matched = _binary_search_file(range_file, addr)
                 else:
                     matched = addr in FUNDed_SET
@@ -266,7 +266,7 @@ def check_vanity_file_against_ranges(
                             {
                                 "coin": "BTC",
                                 "address": addr,
-                                "csv_file": os.path.basename(sorted_vanity_txt),
+                                "csv_file": Path(sorted_vanity_txt).name,
                             }
                         )
                     except Exception as e:
@@ -274,7 +274,7 @@ def check_vanity_file_against_ranges(
     except FileNotFoundError:
         # Another process could have rotated/deleted the file—just log and skip.
         logger.info(
-            f"⏭️  sorted file vanished before reading: {os.path.basename(sorted_vanity_txt)}"
+            f"⏭️  sorted file vanished before reading: {Path(sorted_vanity_txt).name}"
         )
         return (0, 0, [])
 
@@ -287,18 +287,14 @@ def process_pending_vanity_outputs_once(logger):
     Only call the range checker when a non-empty .sorted exists (or was created).
     Never crash if .sorted is missing; just skip and continue.
     """
-    vanity_dir = VANITY_OUTPUT_DIR
-    if not os.path.isdir(vanity_dir):
+    vanity_dir = Path(VANITY_OUTPUT_DIR)
+    if not vanity_dir.is_dir():
         logger.info(f"ℹ️ vanity_output directory not found: {vanity_dir}")
         return
 
     entries = sorted(
-        [
-            f
-            for f in os.listdir(vanity_dir)
-            if f.lower().endswith(".txt") and not f.lower().endswith(".part")
-        ],
-        key=lambda n: os.path.getmtime(os.path.join(vanity_dir, n)),
+        [p.name for p in vanity_dir.iterdir() if p.is_file() and p.suffix.lower() == ".txt" and not p.name.lower().endswith(".part")],
+        key=lambda n: (vanity_dir / n).stat().st_mtime,
     )
 
     if not entries:
@@ -306,7 +302,7 @@ def process_pending_vanity_outputs_once(logger):
         return
 
     for name in entries:
-        txt_path = os.path.join(vanity_dir, name)
+        txt_path = str((vanity_dir / name).resolve())
         if name in PROCESSED_VANITY:
             continue
 
@@ -315,7 +311,7 @@ def process_pending_vanity_outputs_once(logger):
             logger.info(f"⏭️  Skipping not-ready/empty file {name}")
             continue
         try:
-            mtime = os.path.getmtime(txt_path)
+            mtime = Path(txt_path).stat().st_mtime
             if (time.time() - mtime) < DEBOUNCE_SECONDS:
                 logger.debug(f"⏳ Deferring fresh file {name} (debounce {DEBOUNCE_SECONDS}s)")
                 continue
@@ -336,7 +332,7 @@ def process_pending_vanity_outputs_once(logger):
             sorted_path, ALL_BTC_ADDRESSES_DIR, logger
         )
         logger.info(
-            f"{os.path.basename(sorted_path)} was checked, ({rows}) addresses ({matches}) matches found"
+            f"{Path(sorted_path).name} was checked, ({rows}) addresses ({matches}) matches found"
         )
         for line_no, addr in match_lines:
             logger.info(f"Line {line_no}: {addr}")
@@ -344,7 +340,7 @@ def process_pending_vanity_outputs_once(logger):
             json.dumps(
                 {
                     "event": "vanity_file_checked",
-                    "file": os.path.basename(sorted_path),
+                    "file": Path(sorted_path).name,
                     "rows": rows,
                     "matches": matches,
                 }
@@ -356,19 +352,18 @@ def process_pending_vanity_outputs_once(logger):
         increment_metric("addresses_checked_lifetime.btc", rows)
         PROCESSED_VANITY.add(name)
         try:
-            os.remove(sorted_path)
+            Path(sorted_path).unlink(missing_ok=True)
         except OSError:
             pass
 
 
 def get_vanity_backlog_count() -> int:
     """Count pending VanitySearch output files awaiting check."""
+    vdir = Path(VANITY_OUTPUT_DIR)
     return len([
-        f
-        for f in os.listdir(VANITY_OUTPUT_DIR)
-        if f.endswith(".txt")
-        and not f.endswith(".part")
-        and f not in PROCESSED_VANITY
+        f.name
+        for f in vdir.iterdir()
+        if f.is_file() and f.name.endswith(".txt") and not f.name.endswith(".part") and f.name not in PROCESSED_VANITY
     ])
 
 
@@ -419,4 +414,3 @@ def btc_only_checker_loop(
         set_thread_health("btc_check", False)
     except Exception:
         logger.warning("Failed to update btc_check thread health", exc_info=True)
-
