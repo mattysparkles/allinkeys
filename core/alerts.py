@@ -42,6 +42,8 @@ from config.settings import (
     ENABLE_CLOUD_UPLOAD, PGP_PUBLIC_KEY_PATH, MATCH_LOG_DIR, ENABLE_PGP,
     ENABLE_PGP_ENCRYPTION, PGP_RECIPIENT, PGP_KEYRING_PATH
 )
+from pathlib import Path
+from core.paths import MATCH_LOG_DIR as MATCH_DIR, ensure_dirs
 
 from core.logger import get_logger
 from core.dashboard import get_metric
@@ -359,7 +361,7 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
         try:
             timestamp = time.strftime('%Y-%m-%d_%H-%M-%S')
             filename = f"encrypted_match_{timestamp}.pgp"
-            full_path = os.path.join(MATCH_LOG_DIR, filename)
+            full_path = str((Path(MATCH_DIR) / filename).resolve())
             with open(full_path, "w") as f:
                 f.write(match_data["encrypted"])
             log_message(_("☁ Encrypted match stored to: %s") % filename, "INFO")
@@ -394,10 +396,10 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
     if encrypted_blob:
         try:
             ts = time.strftime('%Y-%m-%d_%H-%M-%S')
-            fname = os.path.join(MATCH_LOG_DIR, f"encrypted_match_{ts}.pgp")
+            fname = str((Path(MATCH_DIR) / f"encrypted_match_{ts}.pgp").resolve())
             with open(fname, "w") as ef:
                 ef.write(encrypted_blob)
-            log_message(_("☁ Encrypted match stored to: %s") % os.path.basename(fname), "INFO")
+            log_message(_("☁ Encrypted match stored to: %s") % Path(fname).name, "INFO")
         except Exception as exc:
             log_message(_("❌ Failed to store encrypted match: %s") % exc, "ERROR")
 
@@ -483,7 +485,7 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
             encrypted = cipher.encrypt(json.dumps(match_data).encode("utf-8"))
             b64_encrypted = base64.b64encode(encrypted).decode()
             timestamp_filename = f"{coin}_match_{timestamp.replace(':', '-')}.pgp"
-            full_path = os.path.join(MATCH_LOG_DIR, timestamp_filename)
+            full_path = str((Path(MATCH_DIR) / timestamp_filename).resolve())
             with open(full_path, 'w') as f:
                 f.write(b64_encrypted)
             log_message(_("☁ Encrypted match uploaded locally."), "INFO")
@@ -494,9 +496,9 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
 
     # 📜 Local match log
     try:
-        os.makedirs(MATCH_LOG_DIR, exist_ok=True)
+        ensure_dirs()
         ts = datetime.utcnow().strftime('%Y-%m-%d')
-        log_path = os.path.join(MATCH_LOG_DIR, f"matches_{ts}.log")
+        log_path = str((Path(MATCH_DIR) / f"matches_{ts}.log").resolve())
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(safe_data) + "\n")
         log_message("📝 Match written to local log.", "INFO")
