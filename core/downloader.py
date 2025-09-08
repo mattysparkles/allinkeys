@@ -16,9 +16,9 @@ from utils.network_utils import download_file
 
 from config.settings import (
     COIN_DOWNLOAD_URLS,
-    DOWNLOADS_DIR,
     MAX_DAILY_FILES_PER_COIN
 )
+from core.paths import DOWNLOADS_DIR as DL_PATH, ensure_dirs
 from config.coin_definitions import coin_columns
 from core.dashboard import update_dashboard_stat
 from core.logger import log_message
@@ -75,8 +75,8 @@ def load_btc_funded_multi(file_path):
 
 def generate_test_csv():
     """Create a test CSV using the first two addresses from funded lists."""
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    test_csv_path = os.path.join(DOWNLOADS_DIR, "test_alerts.csv")
+    ensure_dirs()
+    test_csv_path = str((DL_PATH / "test_alerts.csv").resolve())
 
     if os.path.exists(test_csv_path):
         return test_csv_path
@@ -105,7 +105,7 @@ def generate_test_csv():
 
     found_any = False
     for coin in coin_columns.keys():
-        file_path = find_latest_funded_file(coin, DOWNLOADS_DIR)
+        file_path = find_latest_funded_file(coin, str(DL_PATH))
         if not file_path:
             log_message(f"⚠️ No funded list found for {coin.upper()}.", "WARN")
             continue
@@ -143,18 +143,12 @@ def _download_single_coin(coin: str, url: str) -> None:
     try:
         now = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
         today_prefix = datetime.utcnow().strftime("%Y-%m-%d")
-        pattern_today = os.path.join(
-            DOWNLOADS_DIR, f"{coin.upper()}_addresses_{today_prefix}*.txt"
-        )
+        pattern_today = str((DL_PATH / f"{coin.upper()}_addresses_{today_prefix}*.txt").resolve())
         if glob(pattern_today):
             log_message(f"{coin.upper()}: Already downloaded today, skipping")
             return
-        output_full = os.path.join(
-            DOWNLOADS_DIR, f"{coin.upper()}_addresses_{now}.txt"
-        )
-        output_unique = os.path.join(
-            DOWNLOADS_DIR, f"{coin.upper()}_UNIQUE_addresses_{now}.txt"
-        )
+        output_full = str((DL_PATH / f"{coin.upper()}_addresses_{now}.txt").resolve())
+        output_unique = str((DL_PATH / f"{coin.upper()}_UNIQUE_addresses_{now}.txt").resolve())
         gz_path = output_full + ".gz"
 
         download_file(
@@ -196,7 +190,7 @@ def _download_single_coin(coin: str, url: str) -> None:
         clean_address_file(output_full)
 
         previous_files = sorted(
-            glob(os.path.join(DOWNLOADS_DIR, f"{coin.upper()}_addresses_*.txt"))
+            glob(str((DL_PATH / f"{coin.upper()}_addresses_*.txt").resolve()))
         )
         if len(previous_files) >= 2:
             previous_file = previous_files[-2]
@@ -218,7 +212,7 @@ def _download_single_coin(coin: str, url: str) -> None:
             f"{coin.upper()}_addresses_*.txt",
             f"{coin.upper()}_UNIQUE_addresses_*.txt",
         ]:
-            files = sorted(glob(os.path.join(DOWNLOADS_DIR, pattern)))
+            files = sorted(glob(str((DL_PATH / pattern).resolve())))
             while len(files) > MAX_DAILY_FILES_PER_COIN:
                 to_delete = files.pop(0)
                 os.remove(to_delete)
@@ -233,7 +227,7 @@ def download_and_compare_address_lists() -> None:
 
     Progress bar is disabled in headless/CI mode (when stderr is not a TTY).
     """
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    ensure_dirs()
 
     total = len(COIN_DOWNLOAD_URLS)
     disable = not sys.stderr.isatty()
@@ -251,7 +245,7 @@ def download_and_compare_address_lists() -> None:
 
 def get_daily_funded_btc_addresses(logger):
     """Yield BTC addresses from the latest daily funded list."""
-    file_path = find_latest_funded_file("btc", DOWNLOADS_DIR)
+    file_path = find_latest_funded_file("btc", str(DL_PATH))
     if not file_path:
         logger.warning("No BTC funded address file found")
         return []
