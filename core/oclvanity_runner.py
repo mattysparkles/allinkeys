@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 import time
+from pathlib import Path
 
 from config.settings import (
     OCLVANITYGEN_PATH,
@@ -20,7 +21,7 @@ def run_oclvanitygen(pattern: str, output_path: str, timeout: int = 60, pause_ev
         logger.info("Keygen paused; skipping OCLVanityGen job")
         return False
 
-    if not OCLVANITYGEN_PATH or not os.path.exists(OCLVANITYGEN_PATH):
+    if not OCLVANITYGEN_PATH or not Path(OCLVANITYGEN_PATH).exists():
         raise FileNotFoundError("OCLVanityGen binary not found.")
 
     cmd = [OCLVANITYGEN_PATH, pattern]
@@ -59,20 +60,22 @@ def run_oclvanitygen(pattern: str, output_path: str, timeout: int = 60, pause_ev
                 proc.terminate()
             if timeout and time.time() - start > timeout:
                 proc.terminate()
-            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) >= MAX_OUTPUT_FILE_SIZE:
+            if Path(tmp_path).exists() and Path(tmp_path).stat().st_size >= MAX_OUTPUT_FILE_SIZE:
                 proc.terminate()
         proc.wait()
     except Exception:
         logger.exception("Failed to execute OCLVanityGen")
         tmp_handle.close()
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        p = Path(tmp_path)
+        if p.exists():
+            p.unlink(missing_ok=True)
         return False
 
     tmp_handle.close()
     if valid_lines == 0:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        p = Path(tmp_path)
+        if p.exists():
+            p.unlink(missing_ok=True)
         logger.info(f"No address lines emitted by OCLVanityGen for {addr_mode}")
         return False
 

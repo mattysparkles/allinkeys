@@ -4,6 +4,7 @@ import subprocess
 import time
 import tempfile
 from typing import Dict, List, Tuple, Optional
+from pathlib import Path
 
 from config.settings import (
     GPU_BACKEND,
@@ -64,7 +65,7 @@ def list_devices() -> Dict[str, List[Tuple[int, str]]]:
         "opencl": VANITYSEARCH_BIN_OPENCL,
     }
     for backend, bin_path in binaries.items():
-        if not bin_path or not os.path.exists(bin_path):
+        if not bin_path or not Path(bin_path).exists():
             continue
         out = _run_binary(bin_path, ["-l"])
         entries: List[Tuple[int, str]] = []
@@ -99,7 +100,7 @@ def resolve_vanitysearch_binary(backend: str) -> str:
         path = OCLVANITYGEN_PATH
     else:
         path = VANITYSEARCH_BIN_CPU or find_vanitysearch_binary()
-    if not path or not os.path.exists(path):
+    if not path or not Path(path).exists():
         raise FileNotFoundError("VanitySearch binary not found.")
     return path
 
@@ -133,7 +134,7 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
     except FileNotFoundError:
         binary = None
     if backend in ("cuda", "opencl", "oclvanitygen") and (
-        not binary or not os.path.exists(binary)
+        not binary or not Path(binary).exists()
     ):
         _warn_once("binary_missing", f"GPU backend {backend} selected but binary missing. Falling back to CPU")
         backend = "cpu"
@@ -159,7 +160,7 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
     if backend == "cpu" and GPU_BACKEND != "cpu":
         _warn_once("cpu_fallback", "GPU backend requested but CPU binary selected")
 
-    if not binary or not os.path.exists(binary):
+    if not binary or not Path(binary).exists():
         raise FileNotFoundError("VanitySearch binary not found.")
 
     _SELECTED_BACKEND = backend
@@ -265,20 +266,22 @@ def run_vanitysearch(
                 proc.terminate()
             if timeout and time.time() - start > timeout:
                 proc.terminate()
-            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) >= MAX_OUTPUT_FILE_SIZE:
+            if Path(tmp_path).exists() and Path(tmp_path).stat().st_size >= MAX_OUTPUT_FILE_SIZE:
                 proc.terminate()
         proc.wait()
     except Exception:
         logger.exception("Failed to execute VanitySearch")
         tmp_handle.close()
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        p = Path(tmp_path)
+        if p.exists():
+            p.unlink(missing_ok=True)
         return False
 
     tmp_handle.close()
     if valid_lines == 0:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        p = Path(tmp_path)
+        if p.exists():
+            p.unlink(missing_ok=True)
         logger.info(f"No address lines emitted by VanitySearch for {addr_mode}")
         return False
 
@@ -445,6 +448,6 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
     finally:
         if tmpfile:
             try:
-                os.remove(tmpfile)
+                Path(tmpfile).unlink(missing_ok=True)
             except Exception:
                 pass

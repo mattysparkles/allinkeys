@@ -284,10 +284,11 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                         p.terminate()
                         break
                     try:
-                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
-                            logger.info(
-                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {os.path.basename(path)}"
-                            )
+                        from pathlib import Path
+                        if Path(path).stat().st_size >= MAX_OUTPUT_FILE_SIZE:
+                        logger.info(
+                            f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {Path(path).name}"
+                        )
                             p.terminate()
                             break
                     except FileNotFoundError:
@@ -306,12 +307,12 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                         first_seed = seed_int
                     last_seed_local = seed_int
                     lines += 1
-                    if lines >= MAX_OUTPUT_LINES:
-                        logger.info(
-                            f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {os.path.basename(current_output_path)}"
-                        )
-                        proc.terminate()
-                        break
+            if lines >= MAX_OUTPUT_LINES:
+                logger.info(
+                            f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {__import__('pathlib').Path(current_output_path).name}"
+                )
+                proc.terminate()
+                break
 
             proc.stdout.close()
             proc.wait()
@@ -322,9 +323,10 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
     if lines == 0:
         logger.warning(f"⚠️ Output file empty: {current_output_path}")
+        from pathlib import Path
         try:
-            os.remove(current_output_path)
-        except FileNotFoundError:
+            Path(current_output_path).unlink(missing_ok=True)
+        except Exception:
             pass
         return False
 
@@ -352,8 +354,9 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         logger.exception(f"init_shared_metrics failed in {__name__}: {e}")
     from core.dashboard import register_control_events
     register_control_events(shutdown_event, pause_event, module="keygen")
-    if not os.path.exists(VANITY_OUTPUT_DIR):
-        os.makedirs(VANITY_OUTPUT_DIR)
+    from pathlib import Path
+    if not Path(VANITY_OUTPUT_DIR).exists():
+        Path(VANITY_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     if getattr(settings, "PUZZLE_MODE", False) and getattr(settings, "PUZZLE_NUMBER", None) is not None:
         # Prepare SQLite queue with deterministic ranges
         from core import puzzle_queue as pq

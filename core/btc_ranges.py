@@ -3,6 +3,7 @@
 import os
 import gzip
 from typing import Iterable, List, Tuple
+from pathlib import Path
 
 from config.settings import (
     ALL_BTC_ADDRESSES_URL,
@@ -45,7 +46,7 @@ def build_lexicographic_ranges_from_gz(
     gz_path: str, ranges_dir: str, ranges_count: int, logger
 ) -> None:
     """Split the sorted gz file into ``ranges_count`` range files."""
-    os.makedirs(ranges_dir, exist_ok=True)
+    Path(ranges_dir).mkdir(parents=True, exist_ok=True)
     # First pass to count lines
     total_lines = 0
     with gzip.open(gz_path, "rt", encoding="utf-8", errors="ignore") as f:
@@ -62,7 +63,7 @@ def build_lexicographic_ranges_from_gz(
         outfile = None
         for line in f:
             if outfile is None:
-                path = os.path.join(ranges_dir, BTC_RANGE_FILE_PATTERN.format(idx))
+                path = str((Path(ranges_dir) / BTC_RANGE_FILE_PATTERN.format(idx)).resolve())
                 outfile = open(path, "w", encoding="utf-8")
             outfile.write(line)
             current_count += 1
@@ -80,9 +81,9 @@ def build_lexicographic_ranges_from_gz(
 
 def ensure_all_btc_ranges_ready(logger) -> None:
     """Ensure range files exist, downloading and building if needed."""
-    os.makedirs(ALL_BTC_ADDRESSES_DIR, exist_ok=True)
+    Path(ALL_BTC_ADDRESSES_DIR).mkdir(parents=True, exist_ok=True)
     needed = [
-        os.path.join(ALL_BTC_ADDRESSES_DIR, BTC_RANGE_FILE_PATTERN.format(i))
+        str((Path(ALL_BTC_ADDRESSES_DIR) / BTC_RANGE_FILE_PATTERN.format(i)).resolve())
         for i in range(ALL_BTC_RANGES_COUNT)
     ]
     if all(os.path.exists(p) for p in needed):
@@ -98,7 +99,7 @@ def get_range_boundaries(ranges_dir: str, ranges_count: int) -> List[Tuple[str, 
     """Return (start, end) boundaries for each range file."""
     boundaries = []
     for i in range(ranges_count):
-        path = os.path.join(ranges_dir, BTC_RANGE_FILE_PATTERN.format(i))
+        path = str((Path(ranges_dir) / BTC_RANGE_FILE_PATTERN.format(i)).resolve())
         start = end = ""
         if not os.path.exists(path):
             boundaries.append((start, end))
@@ -133,7 +134,7 @@ def append_unique_sorted_to_range(range_file: str, new_addresses_iter: Iterable[
                 out.write(new_sorted[idx] + "\n")
                 idx += 1
     os.replace(temp_path, range_file)
-    logger.info(f"Updated range file {os.path.basename(range_file)} with {len(new_sorted)} addresses")
+    logger.info(f"Updated range file {Path(range_file).name} with {len(new_sorted)} addresses")
 
 
 def route_address_to_range(addr: str, boundaries: List[Tuple[str, str]]) -> int:
@@ -149,4 +150,3 @@ def route_address_to_range(addr: str, boundaries: List[Tuple[str, str]]) -> int:
         else:
             return mid
     return max(min(lo, len(boundaries) - 1), 0)
-
