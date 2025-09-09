@@ -339,7 +339,17 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     if ENABLE_DAY_ONE_CHECK:
         try:
-            p = Process(target=check_csvs_day_one, args=(shared_metrics, shutdown_events.get('csv_check'), pause_events.get('csv_check'), False, log_q))
+            p = Process(
+                target=check_csvs_day_one,
+                args=(
+                    shared_metrics,
+                    shutdown_events.get('csv_check'),
+                    pause_events.get('csv_check'),
+                    False,
+                    None,
+                    log_q,
+                ),
+            )
             p.daemon = True
             p.start()
             logger.info("[Started] Day One CSV checker")
@@ -350,7 +360,17 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     if ENABLE_UNIQUE_RECHECK:
         try:
-            p = Process(target=check_csvs, args=(shared_metrics, shutdown_events.get('csv_recheck'), pause_events.get('csv_recheck'), False, log_q))
+            p = Process(
+                target=check_csvs,
+                args=(
+                    shared_metrics,
+                    shutdown_events.get('csv_recheck'),
+                    pause_events.get('csv_recheck'),
+                    False,
+                    None,
+                    log_q,
+                ),
+            )
             p.daemon = True
             p.start()
             logger.info("[Started] Unique recheck")
