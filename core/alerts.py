@@ -45,7 +45,7 @@ from config.settings import (
 from pathlib import Path
 from core.paths import MATCH_LOG_DIR as MATCH_DIR, ensure_dirs
 
-from core.logger import get_logger
+from core.logger import get_logger, log_message
 from core.dashboard import get_metric
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric
 from core.utils.alert_helpers import (
