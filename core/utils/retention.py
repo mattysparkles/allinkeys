@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Iterable, Tuple, List
 
 from core.logger import log_message
-from core.paths import CSV_DIR, VANITY_OUTPUT_DIR
+from core.paths import CSV_DIR, VANITY_OUTPUT_DIR, MNEMONIC_OUTPUT_DIR
 
 
 EXCLUDE_EXTENSIONS = {".log"}
@@ -29,7 +29,7 @@ def _should_skip(path: Path) -> bool:
 
 
 def _iter_targets() -> Iterable[Path]:
-    for root in (VANITY_OUTPUT_DIR, CSV_DIR):
+    for root in (VANITY_OUTPUT_DIR, CSV_DIR, MNEMONIC_OUTPUT_DIR):
         if not Path(root).exists():
             continue
         for p in Path(root).rglob("*"):
@@ -38,7 +38,7 @@ def _iter_targets() -> Iterable[Path]:
 
 
 def purge_older_than(days: int, *, dry_run: bool = False) -> Tuple[int, List[str]]:
-    """Delete files older than N days in vanity_output/ and output/csv/.
+    """Delete files older than N days in vanity_output/, mnemonic_output/, and output/csv/.
 
     Returns a tuple (count, messages) describing actions performed or planned.
     """
