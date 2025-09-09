@@ -86,15 +86,18 @@ MATCHES_DIR = env_path("ALLINKEYS_MATCHES_DIR", BASE_DIR / "matches")
 # VanitySearch text outputs
 # ``ALLINKEYS_VANITY_OUTPUT_DIR`` is the newer variable while
 # ``ALLINKEYS_VANITY_TXT_DIR`` is kept for backward compatibility. Prefer the
-# TXT variant when both are set to match historical behaviour.
-_VANITY_DIR_DEFAULT = BASE_DIR / "vanity_output"
+# TXT variant when both are set to match historical behaviour. Defaults are now
+# nested under ``output/`` to mirror the CSV structure.
+_VANITY_DIR_DEFAULT = BASE_DIR / "output" / "vanity_output"
 VANITY_TXT_DIR = env_path(
     "ALLINKEYS_VANITY_TXT_DIR",
     env_path("ALLINKEYS_VANITY_OUTPUT_DIR", _VANITY_DIR_DEFAULT),
 )
 VANITY_OUTPUT_DIR = VANITY_TXT_DIR  # legacy alias
 # Mnemonic mode text outputs
-MNEMONIC_TXT_DIR = env_path("ALLINKEYS_MNEMONIC_TXT_DIR", BASE_DIR / "mnemonic_output")
+MNEMONIC_TXT_DIR = env_path(
+    "ALLINKEYS_MNEMONIC_TXT_DIR", BASE_DIR / "output" / "mnemonic_output"
+)
 # Local audio clips for alerts
 SOUND_CLIPS_DIR = env_path("ALLINKEYS_SOUND_CLIPS_DIR", BASE_DIR / "alerts" / "sounds")
 CHECKPOINT_PATH = env_path("ALLINKEYS_CHECKPOINT_PATH", LOG_DIR / "restore_checkpoint.json")

@@ -99,8 +99,9 @@ allinkeys/
 ├── Downloads/               # Downloaded funded address lists
 ├── logs/                    # Runtime logs and checkpoints
 ├── output/
-│   └── csv/                 # Converted address batches
-├── vanity_output/           # Raw VanitySearch batches (.txt)
+│   ├── csv/                 # Converted address batches
+│   ├── vanity_output/       # Raw VanitySearch batches (.txt)
+│   └── mnemonic_output/     # Mnemonic mode output
 ├── .env.example
 ├── main.py                  # Orchestrates modules
 └── requirements.txt
@@ -162,8 +163,8 @@ AllInKeys stores logs, downloads and output under the repository root by default
 | `ALLINKEYS_CSV_DIR` | `BASE_DIR/output/csv` | Converted CSV output |
 | `ALLINKEYS_DOWNLOADS_DIR` | `BASE_DIR/Downloads` | Downloaded address lists |
 | `ALLINKEYS_MATCHES_DIR` | `BASE_DIR/matches` | Archive of matches and alerts |
-| `ALLINKEYS_VANITY_TXT_DIR` | `BASE_DIR/vanity_output` | VanitySearch text batches |
-| `ALLINKEYS_MNEMONIC_TXT_DIR` | `BASE_DIR/mnemonic_output` | Mnemonic mode output |
+| `ALLINKEYS_VANITY_TXT_DIR` | `BASE_DIR/output/vanity_output` | VanitySearch text batches |
+| `ALLINKEYS_MNEMONIC_TXT_DIR` | `BASE_DIR/output/mnemonic_output` | Mnemonic mode output |
 
 Example:
 
@@ -240,7 +241,7 @@ python main.py --only btc --puzzle 71 --chunk 5  # resume at chunk 5
 AllInKeys can also generate BIP‑39 mnemonics and derive keys directly
 without running VanitySearch.  Enable it with `--mnemonic` and select the
 mnemonic length via flags like `--12words` or `--24words`.  Output files
-are written to `mnemonic_output/`.  All related options are grouped under
+are written to `output/mnemonic_output/`.  All related options are grouped under
 **Mnemonic Mode** in `python main.py --help`.
 
 Example invocations:
