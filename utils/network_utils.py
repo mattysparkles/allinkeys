@@ -3,7 +3,7 @@ import hashlib
 import requests
 from urllib.parse import urlparse
 
-from core.logger import get_logger
+from core.logger import get_logger, log_message
 
 logger = get_logger(__name__)
 
