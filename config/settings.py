@@ -84,7 +84,14 @@ UNIQUE_DIR = env_path("ALLINKEYS_UNIQUE_DIR", DOWNLOADS_DIR / "unique")
 # Where matches and encrypted alerts are archived
 MATCHES_DIR = env_path("ALLINKEYS_MATCHES_DIR", BASE_DIR / "matches")
 # VanitySearch text outputs
-VANITY_TXT_DIR = env_path("ALLINKEYS_VANITY_TXT_DIR", BASE_DIR / "vanity_output")
+# ``ALLINKEYS_VANITY_OUTPUT_DIR`` is the newer variable while
+# ``ALLINKEYS_VANITY_TXT_DIR`` is kept for backward compatibility. Prefer the
+# TXT variant when both are set to match historical behaviour.
+_VANITY_DIR_DEFAULT = BASE_DIR / "vanity_output"
+VANITY_TXT_DIR = env_path(
+    "ALLINKEYS_VANITY_TXT_DIR",
+    env_path("ALLINKEYS_VANITY_OUTPUT_DIR", _VANITY_DIR_DEFAULT),
+)
 VANITY_OUTPUT_DIR = VANITY_TXT_DIR  # legacy alias
 # Mnemonic mode text outputs
 MNEMONIC_TXT_DIR = env_path("ALLINKEYS_MNEMONIC_TXT_DIR", BASE_DIR / "mnemonic_output")
