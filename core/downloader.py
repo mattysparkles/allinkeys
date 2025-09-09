@@ -151,11 +151,21 @@ def _download_single_coin(coin: str, url: str) -> None:
         output_unique = str((DL_PATH / f"{coin.upper()}_UNIQUE_addresses_{now}.txt").resolve())
         gz_path = output_full + ".gz"
 
+        total_size = 0
+
+        def _progress(downloaded: int, total: int) -> None:
+            nonlocal total_size
+            total_size = total
+            if total:
+                pct = downloaded * 100 / total
+                update_dashboard_stat(f"download_progress.{coin}", pct)
+
         download_file(
             url,
             gz_path,
             expected_sha256=DOWNLOAD_SHA256.get(url),
             timeout=30,
+            progress_cb=_progress,
         )
         log_message(f"{coin.upper()}: Download complete")
         if total_size:
