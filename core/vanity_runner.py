@@ -220,11 +220,23 @@ def run_vanitysearch(
         return run_oclvanitygen(pattern, output_path, timeout=timeout, pause_event=pause_event, addr_mode=addr_mode)
 
     binary = resolve_vanitysearch_binary(backend)
-    cmd = [binary] + seed_args
+    base_cmd = [binary] + seed_args
+    logger.info(f"Base VanitySearch command: {' '.join(base_cmd)}")
+
+    # Ensure pattern (last element of seed_args) remains final CLI arg
+    if seed_args:
+        core_args, pattern = seed_args[:-1], seed_args[-1]
+    else:
+        core_args, pattern = [], ""
+
+    cmd = [binary] + core_args
     if backend in ("cuda", "opencl") and device_id is not None:
         cmd += ["-gpu", str(device_id)]
+    if pattern:
+        cmd.append(pattern)
+
     update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
-    logger.info(f"Executing: {' '.join(cmd)}")
+    logger.info(f"Executing VanitySearch: {' '.join(cmd)}")
 
     tmp_path, tmp_handle = atomic_open(output_path)
     buffer: List[str] = []
@@ -364,6 +376,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
 
     base = [exe, "-s", seed, "-q"]
     _apply_mode_flags(base)
+    logger.info(f"Base VanitySearch command: {' '.join(base)}")
 
     modes = [
         ("GPU", ["-gpu"]),
@@ -399,7 +412,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
             )
             total_lines = 0
             try:
-                logger.info(f"🧪 VanitySearch ({mode_name}): {' '.join(args)}")
+                logger.info(f"🧪 VanitySearch ({mode_name}) command: {' '.join(args)}")
                 proc = _popen_stream(args)
                 last_line_ts = time.time()
 
