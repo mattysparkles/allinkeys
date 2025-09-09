@@ -21,8 +21,10 @@ def download_file(
 
     If ``expected_sha256`` is provided and does not match the computed digest the
     file is deleted and a security alert is logged before raising ``ValueError``.
-    ``progress_cb`` is called with ``(downloaded_bytes, total_bytes)`` after each
-    chunk allowing callers to track progress.
+    An ``expected_sha256`` of 64 zeroes is treated as a placeholder and
+    disables verification. ``progress_cb`` is called with
+    ``(downloaded_bytes, total_bytes)`` after each chunk allowing callers to
+    track progress.
     """
 
     parsed = urlparse(url)
@@ -49,13 +51,15 @@ def download_file(
                 progress_cb(downloaded, total)
 
     digest = hasher.hexdigest()
-    if expected_sha256 and digest.lower() != expected_sha256.lower():
-        log_message(
-            f"SHA256 mismatch for {url}: expected {expected_sha256} got {digest}",
-            "ALERT",
-        )
-        try:
-            os.remove(dest_path)
-        finally:
-            pass
-        raise ValueError("SHA256 mismatch")
+    if expected_sha256:
+        expected = expected_sha256.lower()
+        if expected != "0" * 64 and digest.lower() != expected:
+            log_message(
+                f"SHA256 mismatch for {url}: expected {expected_sha256} got {digest}",
+                "ALERT",
+            )
+            try:
+                os.remove(dest_path)
+            finally:
+                pass
+            raise ValueError("SHA256 mismatch")
