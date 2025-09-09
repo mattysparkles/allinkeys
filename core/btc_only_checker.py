@@ -27,7 +27,6 @@ from core.logger import get_logger
 from core.utils.io_safety import safe_nonempty
 from core.sorter import sort_if_ready
 
-from core.paths import VANITY_OUTPUT_DIR as VANITY_DIR_P, ALLINKEYS_OUTPUT_DIR if any
 logger = get_logger(__name__)
 logger.info("Extractor auto-detect: PubAddr or raw-address mode.")
 
@@ -106,9 +105,9 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
         else:
             daily_iter = list(_iter_daily())
         if funded_fp:
-        logger.info(
-            f"Using funded list {Path(funded_fp).name} with {len(daily_iter)} addresses"
-        )
+            logger.info(
+                f"Using funded list {Path(funded_fp).name} with {len(daily_iter)} addresses"
+            )
         else:
             logger.warning("No funded BTC address file found")
         by_range = {i: [] for i in range(len(BOUNDARIES))}
@@ -281,7 +280,7 @@ def check_vanity_file_against_ranges(
     return (rows, matches, matched_lines)
 
 
-def process_pending_vanity_outputs_once(logger):
+def process_pending_vanity_outputs_once(logger) -> None:
     """
     Enumerate vanity_output/*.txt, and for each, obtain a .sorted file safely.
     Only call the range checker when a non-empty .sorted exists (or was created).

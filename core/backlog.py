@@ -5,6 +5,7 @@ import csv
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, Tuple, Set, TextIO
 
 from core.altcoin_derive import derive_altcoin_addresses_from_hex, convert_txt_to_csv
 from config.settings import VANITY_OUTPUT_DIR, CSV_DIR
@@ -24,7 +25,11 @@ CSV_BASE.mkdir(parents=True, exist_ok=True)
 LOG_PATH.mkdir(parents=True, exist_ok=True)
 
 
-def safe_str(obj):
+def safe_str(obj: object) -> str:
+    """Best-effort conversion of any object to string for logging.
+
+    Never raises; falls back to ``repr`` or a sentinel string.
+    """
     try:
         return str(obj)
     except Exception:
@@ -34,12 +39,14 @@ def safe_str(obj):
             return "<unprintable exception>"
 
 
-def log(msg):
+def log(msg: str) -> None:
+    """Print a timestamped message for the legacy backlog CLI."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {msg}")
 
 
-def is_file_locked(path):
+def is_file_locked(path: str) -> bool:
+    """Return True if ``path`` appears locked (cannot be opened appendable)."""
     try:
         with open(path, 'a+'):
             return False
@@ -47,7 +54,8 @@ def is_file_locked(path):
         return True
 
 
-def is_file_still_writing(path, delay=2.0):
+def is_file_still_writing(path: str, delay: float = 2.0) -> bool:
+    """Heuristic: file is writing if its size changes within ``delay`` seconds."""
     try:
         size1 = Path(path).stat().st_size
         time.sleep(delay)
@@ -57,7 +65,7 @@ def is_file_still_writing(path, delay=2.0):
         return True
 
 
-def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, pause_event=None):
+def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, pause_event=None) -> None:
     """
     Monitors VANITY_OUTPUT_DIR for .txt files and converts to .csv if ready.
     Skips files that are too small, locked, or recently modified.
@@ -147,24 +155,30 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
 
 # === Legacy Parsing Mode (Rarely Used) ===
 
-def get_parsed_log():
+def get_parsed_log() -> Set[str]:
+    """Return set of previously processed vanity batch filenames."""
     if not Path(BATCH_LOG).exists():
         return set()
     with open(BATCH_LOG, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
 
-def append_to_log(filename):
+def append_to_log(filename: str) -> None:
+    """Append a processed filename to the legacy backlog history log."""
     with open(BATCH_LOG, "a", encoding="utf-8") as f:
         f.write(filename + "\n")
 
 
-def get_file_size_mb(path):
+def get_file_size_mb(path: str) -> float:
+    """Return size of ``path`` in megabytes."""
     return Path(path).stat().st_size / (1024 * 1024)
 
 
-def open_new_csv_writer(index):
-    """Create a new CSV writer directly in CSV_BASE_DIR."""
+def open_new_csv_writer(index: int) -> Tuple[TextIO, csv.DictWriter, str]:
+    """Create a new CSV writer directly in CSV_BASE_DIR.
+
+    Returns a tuple of (file_handle, csv_writer, file_path).
+    """
     CSV_BASE.mkdir(parents=True, exist_ok=True)
     path = str((CSV_BASE / f"keys_batch_{index:05d}.csv").resolve())
     f = open(path, "w", newline='', encoding="utf-8")
@@ -177,7 +191,7 @@ def open_new_csv_writer(index):
     return f, writer, path
 
 
-def parse_vanity_file(txt_file, batch_id):
+def parse_vanity_file(txt_file: str, batch_id: Optional[int]) -> int:
     with open(txt_file, "r", encoding="utf-8") as f:
         lines = [line.strip() for line in f if line.strip()]
 
@@ -258,7 +272,7 @@ def parse_vanity_file(txt_file, batch_id):
     return parsed_count
 
 
-def main():
+def main() -> None:
     parsed_files = get_parsed_log()
     files = sorted(p.name for p in LOG_PATH.iterdir() if p.is_file() and p.name.endswith(".txt") and p.name.startswith("vanitysearch_batch_"))
 

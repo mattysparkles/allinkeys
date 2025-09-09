@@ -1,6 +1,7 @@
 # core/keygen.py
 
 import os
+from pathlib import Path
 import time
 import subprocess
 import threading
@@ -284,11 +285,10 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                         p.terminate()
                         break
                     try:
-                        from pathlib import Path
                         if Path(path).stat().st_size >= MAX_OUTPUT_FILE_SIZE:
-                        logger.info(
-                            f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {Path(path).name}"
-                        )
+                            logger.info(
+                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {Path(path).name}"
+                            )
                             p.terminate()
                             break
                     except FileNotFoundError:
@@ -309,7 +309,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                     lines += 1
             if lines >= MAX_OUTPUT_LINES:
                 logger.info(
-                            f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {__import__('pathlib').Path(current_output_path).name}"
+                    f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {Path(current_output_path).name}"
                 )
                 proc.terminate()
                 break
@@ -323,7 +323,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
     if lines == 0:
         logger.warning(f"⚠️ Output file empty: {current_output_path}")
-        from pathlib import Path
         try:
             Path(current_output_path).unlink(missing_ok=True)
         except Exception:
