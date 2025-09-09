@@ -26,7 +26,12 @@ DOWNLOADS_DIR: Path = _env_path(
 )
 OUTPUT_DIR: Path = _env_path("ALLINKEYS_OUTPUT_DIR", Path(getattr(settings, "OUTPUT_DIR", BASE_DIR / "output")))
 CSV_DIR: Path = _env_path("ALLINKEYS_CSV_DIR", OUTPUT_DIR / "csv")
-VANITY_OUTPUT_DIR: Path = _env_path("ALLINKEYS_VANITY_OUTPUT_DIR", BASE_DIR / "vanity_output")
+# Support both ``ALLINKEYS_VANITY_OUTPUT_DIR`` and the legacy
+# ``ALLINKEYS_VANITY_TXT_DIR`` for vanity search outputs.
+VANITY_OUTPUT_DIR: Path = _env_path(
+    "ALLINKEYS_VANITY_OUTPUT_DIR",
+    _env_path("ALLINKEYS_VANITY_TXT_DIR", BASE_DIR / "vanity_output"),
+)
 MATCH_LOG_DIR: Path = _env_path("ALLINKEYS_MATCH_LOG_DIR", Path(getattr(settings, "MATCH_LOG_DIR", LOG_DIR)))
 
 
