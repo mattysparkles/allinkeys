@@ -13,6 +13,29 @@ from typing import Dict
 load_dotenv()
 
 
+# ---------------------------------------------------------------------------
+# Environment helpers
+# ---------------------------------------------------------------------------
+
+
+def env_path(var: str, default: Path | str) -> Path:
+    """Return a :class:`~pathlib.Path` from ``var`` or ``default``.
+
+    Parameters
+    ----------
+    var:
+        Name of the environment variable to read.
+    default:
+        Fallback path used when the environment variable is not set.
+
+    The returned value is always converted to :class:`~pathlib.Path` and no
+    filesystem interaction (such as directory creation) is performed here.
+    """
+
+    value = os.getenv(var)
+    return Path(value) if value else Path(default)
+
+
 # --------------------- API KEY ROTATION ---------------------
 _API_KEY_STATES: Dict[str, Dict[str, object]] = {}
 
@@ -82,7 +105,7 @@ RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
 
 # === BTC-only mode settings ===
 ALL_BTC_ADDRESSES_URL = "https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"
-ALL_BTC_ADDRESSES_DIR = os.path.join(BASE_DIR, "all_btc_addresses")
+ALL_BTC_ADDRESSES_DIR = BASE_DIR / "all_btc_addresses"
 ALL_BTC_RANGES_COUNT = 20
 ALL_BTC_GZ_LOCAL = env_path(
     "ALLINKEYS_ALL_BTC_GZ_LOCAL",
