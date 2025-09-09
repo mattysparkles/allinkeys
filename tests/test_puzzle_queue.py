@@ -32,10 +32,12 @@ except Exception:  # pragma: no cover
     sys.modules["base58"] = types.SimpleNamespace(b58encode=lambda b: b"1addr")
 
 import config.settings as settings
+import core.paths as paths
 
 
 def test_puzzle_queue_sequential(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(paths, "LOG_DIR", tmp_path)
     pq = importlib.reload(importlib.import_module("core.puzzle_queue"))
     pq.init_work_queue()
     start = 1 << (76 - 1)
@@ -47,6 +49,7 @@ def test_puzzle_queue_sequential(tmp_path, monkeypatch):
 
 def test_puzzle_queue_specific_chunk(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(paths, "LOG_DIR", tmp_path)
     pq = importlib.reload(importlib.import_module("core.puzzle_queue"))
     pq.init_work_queue()
     start_bound, _ = pq._get_bounds(76)

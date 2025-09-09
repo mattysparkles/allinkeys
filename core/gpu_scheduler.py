@@ -3,6 +3,7 @@
 import os
 import multiprocessing
 import threading
+import time
 
 try:
     import pyopencl as cl

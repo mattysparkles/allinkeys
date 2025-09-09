@@ -30,6 +30,41 @@ pip install -r requirements.txt
 
 Copy `.env.example` to `.env` and fill in any credentials needed for alert channels (email, Telegram, Twilio, etc.).
 
+## 🚀 Quick Start
+
+1. **Start the full pipeline**
+
+   ```bash
+   python main.py
+   ```
+
+   The orchestration script launches key generation, backlog conversion, and any enabled alert or dashboard modules according to `config/settings.py`.
+
+2. **Run individual modules**
+
+   Each component can be invoked directly for isolated testing or debugging:
+
+   ```bash
+   python -m core.keygen           # GPU/CPU vanity key generation
+   python -m core.altcoin_derive   # Derive altcoin addresses from seeds
+   python -m core.csv_checker      # Compare generated addresses to funded lists
+   python -m ui.dashboard_gui      # Launch Tkinter dashboard only
+   ```
+
+3. **Run in Docker**
+
+   ```bash
+   docker compose up --build
+   ```
+
+   Use the Compose file to scale across multiple GPUs or hosts.
+
+4. **Run tests**
+
+   ```bash
+   pytest
+   ```
+
 ### 📁 Directory Overview
 
 ```
@@ -340,6 +375,24 @@ Produces `dist/main.exe` — a standalone binary.
 | BTC  | `18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y` |
 | DOGE | `DPoHJNbYHEuvNHyCFcUnvtTVmRDMNgnAs5` |
 | ETH  | `0xCb8B2937D60c47438562A2E53d08B85865B57741` |
+
+---
+
+## 📝 Changelog
+
+### [Unreleased]
+
+- Added `env_path` helper and migrated many modules to `pathlib`-based paths
+- Introduced `--purge` command with dry-run for cleaning old downloads
+- Added opt-in telemetry module and consent logging with alert redaction
+- Added Docker support and compose configuration
+- Implemented dashboard authentication and premium licensing module
+- Added plugin entry point system and templates
+- Improved GPU detection, selection, and scheduler tests
+- Enforced HTTPS downloads with checksum verification
+- Added processing throughput metrics and SQLite fallback for funded address lookup
+- Stream VanitySearch output to track seeds and expanded binary detection
+- Enhanced mnemonic mode with full BIP-39 language support and multilingual output
 
 ---
 
