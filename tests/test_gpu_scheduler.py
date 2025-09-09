@@ -28,7 +28,14 @@ def run_scheduler_once(backlog, monkeypatch):
     metrics = {}
     monkeypatch.setattr("core.worker_bootstrap._safe_set_metric", lambda k, v: metrics.update({k: v}))
     monkeypatch.setattr(gpu_scheduler.os, "listdir", lambda p: [f"f{i}.txt" for i in range(backlog)])
-    monkeypatch.setattr(gpu_scheduler.time, "sleep", lambda s: shutdown_event.set())
+    class ImmediateTimer:
+        def __init__(self, interval, func):
+            self.func = func
+
+        def start(self):
+            shutdown_event.set()
+
+    monkeypatch.setattr(gpu_scheduler.threading, "Timer", lambda i, f: ImmediateTimer(i, f))
 
     gpu_scheduler.monitor_backlog_and_reassign(
         shared_metrics, vanity_flag, altcoin_flag, assignment_flag, shutdown_event

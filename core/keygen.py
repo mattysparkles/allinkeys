@@ -307,12 +307,12 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                         first_seed = seed_int
                     last_seed_local = seed_int
                     lines += 1
-            if lines >= MAX_OUTPUT_LINES:
-                logger.info(
-                    f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {Path(current_output_path).name}"
-                )
-                proc.terminate()
-                break
+                if lines >= MAX_OUTPUT_LINES:
+                    logger.info(
+                        f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {Path(current_output_path).name}"
+                    )
+                    proc.terminate()
+                    break
 
             proc.stdout.close()
             proc.wait()
