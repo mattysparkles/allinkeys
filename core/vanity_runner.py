@@ -435,7 +435,13 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                     striped = line.rstrip("\n")
                     if striped:
                         writer.write_line(striped)
-                        if addr_re.match(striped):
+                        # VanitySearch may emit leading spaces; strip them for
+                        # detection while preserving the original line in the
+                        # output file.  ``search`` is used instead of
+                        # ``match`` so addresses embedded later in the line
+                        # still register as valid results.
+                        clean = striped.strip()
+                        if addr_re.search(clean):
                             total_lines += 1
 
                 rc = proc.wait(timeout=10)
