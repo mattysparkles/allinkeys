@@ -255,10 +255,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     first_seed = None
     last_seed_local = None
 
-    lines = 0
-    first_seed = None
-    last_seed_local = None
-
     try:
         with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
             logger.info(f"Opened {current_output_path} for writing")
@@ -270,7 +266,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 text=True,
                 bufsize=1,
             )
-            captured: list[bytes] = []
+            captured: list[str] = []
 
             def monitor_process(p, path):
                 """Monitor file size and pause requests while VanitySearch runs."""
@@ -300,6 +296,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
             for raw_line in proc.stdout:
                 outfile.write(raw_line)
+                if encryption:
+                    captured.append(raw_line)
                 if raw_line.startswith("Priv (HEX):"):
                     hex_val = raw_line.split(":", 1)[1].strip().replace("0x", "")
                     seed_int = int(hex_val, 16)
@@ -317,6 +315,16 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
             proc.stdout.close()
             proc.wait()
             timer_thread.join()
+
+        if encryption:
+            try:
+                data = "".join(captured).encode("utf-8")
+                encrypted = _encrypt_bytes(data)
+                with open(current_output_path, "wb") as enc_file:
+                    enc_file.write(encrypted)
+            except Exception as exc:
+                logger.exception(f"Failed to encrypt vanity output: {exc}")
+                return False
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
