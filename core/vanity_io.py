@@ -1,13 +1,23 @@
 import os
 import time
-from typing import Optional, BinaryIO
+from typing import Optional, BinaryIO, Union
 from pathlib import Path
 
 
-def ensure_dir(path: str) -> str:
-    """Create ``path`` if missing and return it."""
-    Path(path).mkdir(parents=True, exist_ok=True)
-    return path
+def ensure_dir(path: Union[str, Path]) -> str:
+    """Create ``path`` if missing and return it as a string.
+
+    Historically ``ensure_dir`` returned the same object that was passed in,
+    which could be a :class:`Path`.  Callers such as :class:`RollingAtomicWriter`
+    and ``tempfile`` always expect a string representation, so returning the
+    original ``Path`` could lead to subtle inconsistencies on older Python
+    versions or when concatenating paths.  Normalising to ``str`` keeps the
+    return type predictable while still accepting ``Path`` instances.
+    """
+
+    p = Path(path)
+    p.mkdir(parents=True, exist_ok=True)
+    return str(p)
 
 
 class RollingAtomicWriter:
