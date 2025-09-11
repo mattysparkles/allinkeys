@@ -85,10 +85,10 @@ UNIQUE_DIR = env_path("ALLINKEYS_UNIQUE_DIR", DOWNLOADS_DIR / "unique")
 MATCHES_DIR = env_path("ALLINKEYS_MATCHES_DIR", BASE_DIR / "matches")
 # VanitySearch text outputs
 # ``ALLINKEYS_VANITY_OUTPUT_DIR`` is the newer variable while
-# ``ALLINKEYS_VANITY_TXT_DIR`` is kept for backward compatibility. Prefer the
-# TXT variant when both are set to match historical behaviour. Defaults are now
-# nested under ``output/`` to mirror the CSV structure.
-_VANITY_DIR_DEFAULT = BASE_DIR / "output" / "vanity_output"
+# ``ALLINKEYS_VANITY_TXT_DIR`` is kept for backward compatibility.
+# Legacy default: BASE_DIR/"vanity_output" when neither ALLINKEYS_VANITY_TXT_DIR nor
+# ALLINKEYS_VANITY_OUTPUT_DIR is set (newer layout uses output/vanity_output).
+_VANITY_DIR_DEFAULT = BASE_DIR / "vanity_output"
 VANITY_TXT_DIR = env_path(
     "ALLINKEYS_VANITY_TXT_DIR",
     env_path("ALLINKEYS_VANITY_OUTPUT_DIR", _VANITY_DIR_DEFAULT),
