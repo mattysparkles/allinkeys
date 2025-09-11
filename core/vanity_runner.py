@@ -355,6 +355,14 @@ def _popen_stream(args: List[str]) -> subprocess.Popen:
     )
 
 
+def _warn_zero_matches(mode: str, pattern_count: int, used_file: bool, seed: str) -> None:
+    """Log detailed warning when a mode exits with no vanity lines."""
+    logger.warning(
+        f"⚠️ VanitySearch exited cleanly with 0 matches | mode={mode} | patterns={pattern_count} | "
+        f"input={'-i' if used_file else 'single'} | seed={seed} | device={get_selected_device_name()}"
+    )
+
+
 def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) -> int:
     """
     Runs VanitySearch with correct CLI layout:
@@ -364,6 +372,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
     Streams stdout into RollingAtomicWriter with atomic rotation.
     """
     out_dir = ensure_dir(VANITY_TXT_DIR)
+    logger.info(f"Vanity output directory: {out_dir.resolve()}")
     exe = _resolve_exe()
     if not exe:
         logger.error("❌ VanitySearch binary not found.")
@@ -407,44 +416,65 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
 
         for mode_name, mode_flag in modes:
             args = base + mode_flag + multi_suffix + single_suffix
-            writer = RollingAtomicWriter(
-                out_dir, rotate_lines=VANITY_ROTATE_LINES, max_bytes=VANITY_MAX_BYTES, prefix="vanity"
-            )
-            total_lines = 0
-            try:
-                logger.info(f"🧪 VanitySearch ({mode_name}) command: {' '.join(args)}")
-                proc = _popen_stream(args)
-                last_line_ts = time.time()
+            attempt_fallback = bool(multi_suffix)
 
-                while True:
-                    if stop_event and stop_event.is_set():
-                        proc.terminate()
-                        break
+            while True:
+                writer = RollingAtomicWriter(
+                    out_dir, rotate_lines=VANITY_ROTATE_LINES, max_bytes=VANITY_MAX_BYTES, prefix="vanity"
+                )
+                total_lines = 0
+                try:
+                    logger.info(f"🧪 VanitySearch ({mode_name}) command: {' '.join(args)}")
+                    logger.info(f"Popen args ({mode_name}): {args}")
+                    proc = _popen_stream(args)
+                    last_line_ts = mode_start = time.time()
+                    fallback_triggered = False
 
-                    line = proc.stdout.readline()
-                    if not line:
-                        if proc.poll() is not None:
+                    while True:
+                        if stop_event and stop_event.is_set():
+                            proc.terminate()
                             break
-                        if time.time() - last_line_ts > 5:
-                            logger.debug("⏳ VanitySearch running (no output yet)...")
-                            last_line_ts = time.time()
-                        time.sleep(0.05)
-                        continue
 
-                    last_line_ts = time.time()
-                    striped = line.rstrip("\n")
-                    if striped:
-                        writer.write_line(striped)
-                        # VanitySearch may emit leading spaces; strip them for
-                        # detection while preserving the original line in the
-                        # output file.  ``search`` is used instead of
-                        # ``match`` so addresses embedded later in the line
-                        # still register as valid results.
-                        clean = striped.strip()
-                        if addr_re.search(clean):
-                            total_lines += 1
+                        line = proc.stdout.readline()
+                        if not line:
+                            if proc.poll() is not None:
+                                break
+                            if time.time() - last_line_ts > 5:
+                                logger.debug("⏳ VanitySearch running (no output yet)...")
+                                last_line_ts = time.time()
+                            if (
+                                attempt_fallback
+                                and total_lines == 0
+                                and time.time() - mode_start > 10
+                            ):
+                                proc.terminate()
+                                writer.abort()
+                                logger.warning("⚠️ No output for 10s; sanity-checking with 1**")
+                                args = base + mode_flag + ["1**"]
+                                attempt_fallback = False
+                                fallback_triggered = True
+                                break
+                            time.sleep(0.05)
+                            continue
 
-                rc = proc.wait(timeout=10)
+                        last_line_ts = time.time()
+                        striped = line.rstrip("\n")
+                        if striped:
+                            writer.write_line(striped)
+                            clean = striped.strip()
+                            if addr_re.search(clean):
+                                total_lines += 1
+
+                    rc = proc.wait(timeout=10)
+                except Exception as e:
+                    logger.warning(f"⚠️ VanitySearch {mode_name} failed: {e}")
+                    writer.abort()
+                    break
+
+                if fallback_triggered:
+                    # retry with fallback args
+                    continue
+
                 if total_lines > 0:
                     logger.info(
                         f"✅ VanitySearch finished ({mode_name}) with {total_lines} matches."
@@ -452,14 +482,14 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                     writer.close()
                     return total_lines
                 else:
-                    logger.warning(
-                        f"⚠️ VanitySearch exited rc={rc}, matches={total_lines}. Trying next mode..."
-                    )
+                    if rc == 0:
+                        _warn_zero_matches(mode_name, len(pats), bool(multi_suffix), seed)
+                    else:
+                        logger.warning(
+                            f"⚠️ VanitySearch exited rc={rc}, matches={total_lines}. Trying next mode..."
+                        )
                     writer.abort()
-            except Exception as e:
-                logger.warning(f"⚠️ VanitySearch {mode_name} failed: {e}")
-                writer.abort()
-                continue
+                    break
 
         logger.error("❌ VanitySearch produced no output in any mode.")
         return 0
