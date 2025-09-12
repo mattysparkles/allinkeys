@@ -285,7 +285,9 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 first_seed = None
                 last_seed = None
                 for line in f:
-                    if line.startswith("Priv (HEX):"):
+                    # VanitySearch may output either "Privkey:" or "Priv (HEX):" markers.
+                    lower_line = line.lower()
+                    if lower_line.startswith("privkey:") or lower_line.startswith("priv (hex):"):
                         hex_val = line.split(":", 1)[1].strip().replace("0x", "")
                         seed_int = int(hex_val, 16)
                         if first_seed is None:
@@ -293,8 +295,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                         last_seed = seed_int
                         lines += 1
             if lines == 0:
+                # Keep file even if no key lines were parsed; only empty files are removed.
                 logger.warning(f"⚠️ No key lines found in: {current_output_path}")
-                current_output_path.unlink(missing_ok=True)
                 return False
             total_keys_generated += lines
             increment_metric("keys_generated_today", lines)
