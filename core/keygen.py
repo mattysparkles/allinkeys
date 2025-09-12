@@ -228,8 +228,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
     hex_seed_short = hex(initial_seed_int)[2:].lstrip("0")[:8] or "00000000"
 
-    current_output_path = os.path.join(
-        VANITY_OUTPUT_DIR,
+    current_output_path = Path(VANITY_OUTPUT_DIR) / (
         f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}.txt"
     )
     last_output_file = current_output_path
@@ -238,7 +237,10 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     if not exe_path:
         logger.error("VanitySearch binary not found.")
         raise FileNotFoundError("VanitySearch binary not found.")
-    cmd = [exe_path, "-s", hex_seed_full, "-o", current_output_path]
+    # Ensure command components are plain strings so logging and subprocess
+    # work reliably even if ``find_vanitysearch_binary`` returns a Path object
+    # (e.g., on Windows where ``WindowsPath`` can surface).
+    cmd = [str(exe_path), "-s", hex_seed_full, "-o", str(current_output_path)]
     if use_gpu:
         cmd.append("-gpu")  # Enable CUDA acceleration
     if not BTC_COMPRESSED:
