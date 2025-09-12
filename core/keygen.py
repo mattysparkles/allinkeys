@@ -261,46 +261,57 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     last_seed_local = None
 
     try:
-        with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
-            logger.info(f"Opened {current_output_path} for writing")
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env={**os.environ, **gpu_env},
-                text=True,
-                bufsize=1,
-            )
-            captured: list[str] = []
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, **gpu_env},
+        )
 
-            def monitor_process(p, path):
-                """Monitor file size and pause requests while VanitySearch runs."""
-                start = time.time()
-                while p.poll() is None:
-                    if pause_event and pause_event.is_set():
-                        logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
-                        p.terminate()
-                        break
-                    if time.time() - start >= ROTATE_INTERVAL_SECONDS:
-                        logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
-                        p.terminate()
-                        break
-                    try:
-                        if Path(path).stat().st_size >= MAX_OUTPUT_FILE_SIZE:
+        def monitor_process(p, path):
+            """Monitor file size, line count, and pause requests while VanitySearch runs."""
+            start = time.time()
+            while p.poll() is None:
+                if pause_event and pause_event.is_set():
+                    logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
+                    p.terminate()
+                    break
+                if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                    logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
+                    p.terminate()
+                    break
+                try:
+                    file_obj = Path(path)
+                    if file_obj.exists():
+                        if file_obj.stat().st_size >= MAX_OUTPUT_FILE_SIZE:
                             logger.info(
-                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {Path(path).name}"
+                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {file_obj.name}"
                             )
                             p.terminate()
                             break
-                    except FileNotFoundError:
-                        logger.debug("Output file not yet created during monitoring")
-                    time.sleep(1)
+                        with file_obj.open("r", encoding="utf-8", errors="ignore") as f:
+                            if sum(1 for _ in f) >= MAX_OUTPUT_LINES:
+                                logger.info(
+                                    f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {file_obj.name}"
+                                )
+                                p.terminate()
+                                break
+                except FileNotFoundError:
+                    logger.debug("Output file not yet created during monitoring")
+                time.sleep(1)
 
-            timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
-            timer_thread.start()
+        timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
+        timer_thread.start()
+        proc.wait()
+        timer_thread.join()
+    except Exception as e:
+        logger.exception(f"Failed to execute VanitySearch: {e}")
+        return False
 
-            for raw_line in proc.stdout:
-                outfile.write(raw_line)
+    captured: list[str] = []
+    try:
+        with open(current_output_path, "r", encoding="utf-8", errors="ignore") as outfile:
+            for raw_line in outfile:
                 if encryption:
                     captured.append(raw_line)
 
@@ -313,30 +324,19 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
                 if address_regex.search(raw_line):
                     lines += 1
-
-                if lines >= MAX_OUTPUT_LINES:
-                    logger.info(
-                        f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {Path(current_output_path).name}"
-                    )
-                    proc.terminate()
-                    break
-
-            proc.stdout.close()
-            proc.wait()
-            timer_thread.join()
-
-        if encryption:
-            try:
-                data = "".join(captured).encode("utf-8")
-                encrypted = _encrypt_bytes(data)
-                with open(current_output_path, "wb") as enc_file:
-                    enc_file.write(encrypted)
-            except Exception as exc:
-                logger.exception(f"Failed to encrypt vanity output: {exc}")
-                return False
     except Exception as e:
-        logger.exception(f"Failed to execute VanitySearch: {e}")
+        logger.exception(f"Failed to process VanitySearch output: {e}")
         return False
+
+    if encryption:
+        try:
+            data = "".join(captured).encode("utf-8")
+            encrypted = _encrypt_bytes(data)
+            with open(current_output_path, "wb") as enc_file:
+                enc_file.write(encrypted)
+        except Exception as exc:
+            logger.exception(f"Failed to encrypt vanity output: {exc}")
+            return False
 
     try:
         file_path_obj = Path(current_output_path)
