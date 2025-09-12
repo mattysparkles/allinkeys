@@ -15,6 +15,7 @@ def download_file(
     expected_sha256: str | None = None,
     chunk_size: int = 8192,
     progress_cb=None,
+    allow_http: bool = False,
     **kwargs,
 ) -> None:
     """Download ``url`` to ``dest_path`` enforcing HTTPS and optional SHA256 verification.
@@ -29,8 +30,10 @@ def download_file(
 
     parsed = urlparse(url)
     if parsed.scheme != "https":
-        log_message(f"Blocked insecure URL: {url}", "ALERT")
-        raise ValueError("HTTPS is required for all downloads")
+        if not allow_http:
+            log_message(f"Blocked insecure URL: {url}", "ALERT")
+            raise ValueError("HTTPS is required for all downloads")
+        logger.warning("Using insecure HTTP for download: %s", url)
 
     r = requests.get(url, stream=True, **kwargs)
     r.raise_for_status()
