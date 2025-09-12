@@ -10,6 +10,7 @@ import platform
 from datetime import datetime
 from collections import deque
 from config.settings import (
+    VANITYSEARCH_PATH,
     VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
     MAX_OUTPUT_FILE_SIZE,
@@ -201,9 +202,9 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     )
     last_output_file = current_output_path
 
-    exe_path = find_vanitysearch_binary()
-    if not exe_path:
-        logger.error("VanitySearch binary not found.")
+    exe_path = VANITYSEARCH_PATH
+    if not exe_path or not Path(exe_path).exists():
+        logger.error("VanitySearch binary not found: %s", exe_path)
         raise FileNotFoundError("VanitySearch binary not found.")
 
     cmd = [str(exe_path), "-s", hex_seed_full, "-o", str(current_output_path)]
