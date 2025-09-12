@@ -7,19 +7,16 @@ import subprocess
 import threading
 import secrets
 import platform
-import base64
 from datetime import datetime
 from collections import deque
-import re
 from config.settings import (
+    VANITYSEARCH_PATH,
     VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
     MAX_OUTPUT_FILE_SIZE,
     ROTATE_INTERVAL_SECONDS,
     FILES_PER_BATCH,
     MAX_OUTPUT_LINES,
-    find_vanitysearch_binary,
-    PGP_PUBLIC_KEY_PATH,
 )
 
 from config.constants import SECP256K1_ORDER
@@ -27,16 +24,11 @@ from core.checkpoint import load_keygen_checkpoint as load_checkpoint, save_keyg
 from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
 from core.logger import get_logger
 import config.settings as settings
-from utils.pgp_utils import encrypt_with_pgp
-from Crypto.Cipher import AES
-from Crypto.Protocol.KDF import scrypt
-from Crypto.Random import get_random_bytes
 from core.seed_tracker import (
     seed_in_used_range,
     record_seed_range,
     get_condensed_ranges,
 )
-from core.utils.process import popen_with_retry
 
 
 # Runtime trackers
@@ -66,24 +58,6 @@ logger = get_logger("keygen")
 
 # Tracks whether BTC addresses should be generated in compressed form.
 BTC_COMPRESSED = True
-
-
-def _encrypt_bytes(data: bytes) -> bytes:
-    """Encrypt ``data`` according to OUTPUT_ENCRYPTION env variable."""
-    method = os.getenv("OUTPUT_ENCRYPTION", "").lower()
-    if method == "pgp":
-        encrypted = encrypt_with_pgp(data.decode("utf-8"), PGP_PUBLIC_KEY_PATH)
-        return encrypted.encode("utf-8")
-    if method == "aes":
-        passphrase = os.getenv("AES_PASSPHRASE", "")
-        if not passphrase:
-            raise RuntimeError("AES_PASSPHRASE not set")
-        salt = get_random_bytes(16)
-        key = scrypt(passphrase.encode(), salt, 32, 2**14, 8, 1)
-        cipher = AES.new(key, AES.MODE_GCM)
-        ciphertext, tag = cipher.encrypt_and_digest(data)
-        return base64.b64encode(salt + cipher.nonce + tag + ciphertext)
-    return data
 
 
 def run_btc_only(
@@ -212,15 +186,9 @@ def generate_random_seed(min_bits=128):
 
 
 def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None):
-    """Run VanitySearch once and return when the output file is rotated.
-
-    Returns ``True`` if the file was generated successfully, ``False`` if the
-    process was interrupted (e.g. via the pause button).
-    """
+    """Run VanitySearch once and return when the output file is rotated."""
     global total_keys_generated, last_output_file
 
-    # ``gpu_flag`` allows the GUI to toggle GPU usage at runtime. When False we
-    # skip setting ``CUDA_VISIBLE_DEVICES`` so VanitySearch runs on CPU only.
     use_gpu = True if gpu_flag is None else bool(gpu_flag.value)
     selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
     gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
@@ -233,19 +201,18 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     )
     last_output_file = current_output_path
 
-    exe_path = find_vanitysearch_binary()
-    if not exe_path:
-        logger.error("VanitySearch binary not found.")
+    exe_path = VANITYSEARCH_PATH
+    if not exe_path or not Path(exe_path).exists():
+        logger.error("VanitySearch binary not found: %s", exe_path)
         raise FileNotFoundError("VanitySearch binary not found.")
-    # Ensure command components are plain strings so logging and subprocess
-    # work reliably even if ``find_vanitysearch_binary`` returns a Path object
-    # (e.g., on Windows where ``WindowsPath`` can surface).
+
     cmd = [str(exe_path), "-s", hex_seed_full, "-o", str(current_output_path)]
     if use_gpu:
         cmd.append("-gpu")  # Enable CUDA acceleration
     if not BTC_COMPRESSED:
         cmd.append("-u")
     cmd.append(VANITY_PATTERN)
+
     logger.info(
         f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'CPU'}"
     )
@@ -253,120 +220,103 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     if pause_event and pause_event.is_set():
         logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
         return False
-    encryption = os.getenv("OUTPUT_ENCRYPTION", "").lower()
-    address_regex = re.compile(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b")
-    priv_regex = re.compile(r"Priv \(HEX\):\s*([0-9A-Fa-f]+)")
-    lines = 0
-    first_seed = None
-    last_seed_local = None
 
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-            env={**os.environ, **gpu_env},
-        )
+        with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
+            logger.info(f"Opened {current_output_path} for writing")
+            proc = subprocess.Popen(
+                cmd,
+                stdout=outfile,
+                stderr=subprocess.STDOUT,
+                env={**os.environ, **gpu_env},
+            )
+            logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd}")
 
-        def monitor_process(p, path):
-            """Monitor file size, line count, and pause requests while VanitySearch runs."""
-            start = time.time()
-            while p.poll() is None:
-                if pause_event and pause_event.is_set():
-                    logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
-                    p.terminate()
-                    break
-                if time.time() - start >= ROTATE_INTERVAL_SECONDS:
-                    logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
-                    p.terminate()
-                    break
-                try:
-                    file_obj = Path(path)
-                    if file_obj.exists():
-                        if file_obj.stat().st_size >= MAX_OUTPUT_FILE_SIZE:
-                            logger.info(
-                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {file_obj.name}"
-                            )
-                            p.terminate()
-                            break
-                        with file_obj.open("r", encoding="utf-8", errors="ignore") as f:
-                            if sum(1 for _ in f) >= MAX_OUTPUT_LINES:
+            def monitor_process(p, path):
+                start = time.time()
+                while p.poll() is None:
+                    if pause_event and pause_event.is_set():
+                        logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
+                        p.terminate()
+                        break
+                    if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                        logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
+                        p.terminate()
+                        break
+                    try:
+                        file_obj = Path(path)
+                        if file_obj.exists():
+                            if file_obj.stat().st_size >= MAX_OUTPUT_FILE_SIZE:
                                 logger.info(
-                                    f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {file_obj.name}"
+                                    f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {file_obj.name}"
                                 )
                                 p.terminate()
                                 break
-                except FileNotFoundError:
-                    logger.debug("Output file not yet created during monitoring")
-                time.sleep(1)
+                            with file_obj.open("r", encoding="utf-8", errors="ignore") as f:
+                                if sum(1 for _ in f) >= MAX_OUTPUT_LINES:
+                                    logger.info(
+                                        f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {file_obj.name}"
+                                    )
+                                    p.terminate()
+                                    break
+                    except FileNotFoundError:
+                        logger.debug("Output file not yet created during monitoring")
+                    time.sleep(1)
 
-        timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
-        timer_thread.start()
-        proc.wait()
-        timer_thread.join()
+            timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
+            timer_thread.start()
+            proc.wait()
+            timer_thread.join()
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
 
-    captured: list[str] = []
     try:
-        with open(current_output_path, "r", encoding="utf-8", errors="ignore") as outfile:
-            for raw_line in outfile:
-                if encryption:
-                    captured.append(raw_line)
-
-                priv_match = priv_regex.search(raw_line)
-                if priv_match:
-                    seed_int = int(priv_match.group(1), 16)
-                    if first_seed is None:
-                        first_seed = seed_int
-                    last_seed_local = seed_int
-
-                if address_regex.search(raw_line):
-                    lines += 1
+        if current_output_path.exists():
+            size = current_output_path.stat().st_size
+            if size == 0:
+                logger.warning(f"⚠️ Output file empty: {current_output_path}")
+                current_output_path.unlink(missing_ok=True)
+                return False
+            with current_output_path.open("r", encoding="utf-8", errors="ignore") as f:
+                logger.info(f"Opened {current_output_path} for reading")
+                lines = 0
+                first_seed = None
+                last_seed = None
+                for line in f:
+                    if line.startswith("Priv (HEX):"):
+                        hex_val = line.split(":", 1)[1].strip().replace("0x", "")
+                        seed_int = int(hex_val, 16)
+                        if first_seed is None:
+                            first_seed = seed_int
+                        last_seed = seed_int
+                        lines += 1
+            if lines == 0:
+                logger.warning(f"⚠️ No key lines found in: {current_output_path}")
+                current_output_path.unlink(missing_ok=True)
+                return False
+            total_keys_generated += lines
+            increment_metric("keys_generated_today", lines)
+            increment_metric("keys_generated_lifetime", lines)
+            from core.dashboard import update_dashboard_stat, get_metric
+            update_dashboard_stat(
+                "keys_generated_today", get_metric("keys_generated_today")
+            )
+            update_dashboard_stat(
+                "keys_generated_lifetime", get_metric("keys_generated_lifetime")
+            )
+            if first_seed is not None and last_seed is not None:
+                record_seed_range(first_seed, last_seed)
+            logger.info(
+                f"📄 File complete: {lines} lines → {current_output_path}"
+            )
+            return True
+        else:
+            logger.error(f"❌ Output file not created: {current_output_path}")
+            return False
     except Exception as e:
-        logger.exception(f"Failed to process VanitySearch output: {e}")
+        logger.warning(f"⚠️ Failed to process VanitySearch output: {e}")
         return False
-
-    if encryption:
-        try:
-            data = "".join(captured).encode("utf-8")
-            encrypted = _encrypt_bytes(data)
-            with open(current_output_path, "wb") as enc_file:
-                enc_file.write(encrypted)
-        except Exception as exc:
-            logger.exception(f"Failed to encrypt vanity output: {exc}")
-            return False
-
-    try:
-        file_path_obj = Path(current_output_path)
-        if file_path_obj.stat().st_size == 0:
-            logger.warning(f"⚠️ Output file empty: {current_output_path}")
-            file_path_obj.unlink(missing_ok=True)
-            return False
-        with open(current_output_path, "r", encoding="utf-8", errors="ignore") as check_file:
-            has_address = any(address_regex.search(line) for line in check_file)
-        if not has_address:
-            logger.warning(f"⚠️ No address lines found in: {current_output_path}")
-            file_path_obj.unlink(missing_ok=True)
-            return False
-    except FileNotFoundError:
-        logger.warning(f"⚠️ Output file missing: {current_output_path}")
-        return False
-    except Exception:
-        logger.exception(f"Failed to validate output file: {current_output_path}")
-        return False
-
-    total_keys_generated += lines
-    increment_metric("keys_generated_today", lines)
-    increment_metric("keys_generated_lifetime", lines)
-    from core.dashboard import update_dashboard_stat, get_metric
-    update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
-    update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
-    if first_seed is not None and last_seed_local is not None:
-        record_seed_range(first_seed, last_seed_local)
-    logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
-    return True
 
 
 
