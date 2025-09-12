@@ -1,0 +1,310 @@
+# Configuration Reference
+
+This document enumerates the adjustable options in `settings.py` with their default values.
+
+When importing your own copy of the **all BTC addresses** list for `--all` mode,
+place the file at `all_btc_addresses/all_Bitcoin_addresses_ever_used_sorted.txt.gz`
+so it matches the naming convention expected by the application.
+
+- **Line 73 – BASE_DIR**: `env_path("ALLINKEYS_BASE_DIR", Path(__file__).resolve().parents[1])`
+- **Line 75 – LOG_DIR**: `env_path("ALLINKEYS_LOG_DIR", BASE_DIR / "logs")`
+- **Line 77 – CSV_DIR**: `env_path("ALLINKEYS_CSV_DIR", BASE_DIR / "output" / "csv")`
+- **Line 79 – CSV_OUTPUT_DIR**: `env_path("ALLINKEYS_CSV_OUTPUT_DIR", CSV_DIR)`
+- **Line 81 – DOWNLOADS_DIR**: `env_path("ALLINKEYS_DOWNLOADS_DIR", BASE_DIR / "Downloads")`
+- **Line 82 – FULL_DIR**: `env_path("ALLINKEYS_FULL_DIR", DOWNLOADS_DIR / "full")`
+- **Line 83 – UNIQUE_DIR**: `env_path("ALLINKEYS_UNIQUE_DIR", DOWNLOADS_DIR / "unique")`
+- **Line 85 – MATCHES_DIR**: `env_path("ALLINKEYS_MATCHES_DIR", BASE_DIR / "matches")`
+- **Line 90 – _VANITY_DIR_DEFAULT**: `BASE_DIR / "output" / "vanity_output"`
+- **Line 91 – VANITY_TXT_DIR**: `env_path(`
+- **Line 95 – VANITY_OUTPUT_DIR**: `VANITY_TXT_DIR` – legacy alias
+- **Line 97 – MNEMONIC_TXT_DIR**: `env_path(`
+- **Line 101 – SOUND_CLIPS_DIR**: `env_path("ALLINKEYS_SOUND_CLIPS_DIR", BASE_DIR / "alerts" / "sounds")`
+- **Line 102 – CHECKPOINT_PATH**: `env_path("ALLINKEYS_CHECKPOINT_PATH", LOG_DIR / "restore_checkpoint.json")`
+- **Line 104 – CHECKED_CSV_LOG**: `env_path("ALLINKEYS_CHECKED_CSV_LOG", LOG_DIR / "checked_csvs.txt")`
+- **Line 105 – RECHECKED_CSV_LOG**: `env_path("ALLINKEYS_RECHECKED_CSV_LOG", LOG_DIR / "rechecked_csvs.txt")`
+- **Line 107 – CSV_CHECKPOINT_STATE**: `env_path("ALLINKEYS_CSV_CHECKPOINT_STATE", LOG_DIR / "csv_checker_state.json")`
+- **Line 109 – DOWNLOAD_DIR**: `DOWNLOADS_DIR`
+- **Line 110 – CHECKPOINT_FILE**: `env_path("ALLINKEYS_CHECKPOINT_FILE", BASE_DIR / "checkpoint.json")`
+- **Line 113 – RETENTION_DAYS**: `int(os.getenv("RETENTION_DAYS", "30"))`
+- **Line 116 – ALL_BTC_ADDRESSES_URL**: `"https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"` – Source list of all BTC addresses
+- **Line 117 – ALL_BTC_ADDRESSES_DIR**: `BASE_DIR / "all_btc_addresses"` – Where the downloaded list is stored
+- **Line 118 – ALL_BTC_RANGES_COUNT**: `20` – Number of range files to split the list into
+- **Line 119 – ALL_BTC_GZ_LOCAL**: `env_path(`
+- **Line 123 – BTC_RANGE_FILE_PATTERN**: `"btc_range_{:02d}.txt"` – Range file naming pattern 00..19
+- **Line 126 – BACKLOG_PAUSE_THRESHOLD**: `int(`
+- **Line 129 – BACKLOG_RESUME_THRESHOLD**: `int(`
+- **Line 133 – PAUSE_WARNING_RATELIMIT_SECONDS**: `int(`
+- **Line 138 – METRICS_POLL_INTERVAL_SECONDS**: `int(`
+- **Line 141 – BACKLOG_MONITOR_INTERVAL_SECONDS**: `int(`
+- **Line 146 – CHECKER_BACKLOG_PAUSE_THRESHOLD**: `BACKLOG_PAUSE_THRESHOLD`
+- **Line 149 – BTC_FILE_STABILITY_WINDOW_SEC**: `3.0` – how long size must remain unchanged
+- **Line 150 – BTC_FILE_STABILITY_POLLS**: `6` – number of polls
+- **Line 151 – BTC_FILE_STABILITY_INTERVAL_SEC**: `BTC_FILE_STABILITY_WINDOW_SEC / BTC_FILE_STABILITY_POLLS`
+- **Line 152 – BTC_MIN_FILE_AGE_SEC**: `2.0` – ignore files newer than this
+- **Line 155 – VANITY_PATTERN**: `"1**"` – Change this pattern to match your target (e.g., starts with 1)
+- **Line 233 – VANITYSEARCH_PATH**: `Path(_vanitysearch) if _vanitysearch else None`
+- **Line 236 – OCLVANITYGEN_PATH**: `Path(_oclvanitygen) if _oclvanitygen else None`
+- **Line 238 – OCLVANITYMINER_PATH**: `Path(_oclvanityminer) if _oclvanityminer else None`
+- **Line 239 – KEYCONV_PATH**: `env_path("ALLINKEYS_KEYCONV_PATH", BASE_DIR / "bin" / "keyconv.exe")`
+- **Line 240 – MAX_KEYS_PER_FILE**: `100_000` – Deprecated
+- **Line 242 – VANITY_ROTATE_LINES**: `200_000`
+- **Line 243 – VANITY_MAX_BYTES**: `500 * 1024 * 1024`
+- **Line 244 – MAX_OUTPUT_LINES**: `VANITY_ROTATE_LINES` – legacy alias
+- **Line 245 – MAX_OUTPUT_FILE_SIZE**: `VANITY_MAX_BYTES` – legacy alias
+- **Line 246 – USE_GPU**: `True`
+- **Line 247 – ROTATE_INTERVAL_SECONDS**: `60`
+- **Line 248 – VANITY_MODE**: `"both"` – 'both' -> -b, 'uncompressed' -> -u, 'compressed' -> (no flag)
+- **Line 251 – ENABLE_CHECKPOINT_RESTORE**: `True`
+- **Line 252 – ENABLE_CHECKPOINTING**: `True`
+- **Line 253 – CHECKPOINT_ENABLED**: `True`
+- **Line 254 – CHECKPOINT_INTERVAL_SECONDS**: `180`
+- **Line 255 – MAX_CHECKPOINT_HISTORY**: `3`
+- **Line 258 – ENABLE_DASHBOARD**: `True`
+- **Line 260 – ENABLE_GUI**: `True`
+- **Line 262 – ENABLE_KEYGEN**: `True`
+- **Line 264 – ENABLE_ALERTS**: `True`
+- **Line 266 – ENABLE_BACKLOG_CONVERSION**: `True`
+- **Line 268 – ENABLE_DAY_ONE_CHECKS**: `True`
+- **Line 269 – ENABLE_DAY_ONE_CHECK**: `ENABLE_DAY_ONE_CHECKS` – Alias do not change
+- **Line 271 – ENABLE_DAILY_UNIQUE_RECHECK**: `True`
+- **Line 272 – ENABLE_UNIQUE_RECHECK**: `ENABLE_DAILY_UNIQUE_RECHECK` – Alias do not change
+- **Line 274 – ENABLE_ALTCOIN_DERIVATION**: `True`
+- **Line 275 – ENABLE_SEED_VERIFICATION**: `False`
+- **Line 277 – ENABLE_PGP**: `False`
+- **Line 279 – ENABLE_AUTO_RESUME_DEPENDENCIES**: `True`
+- **Line 282 – CONFIG_FILE_PATH**: `__file__`
+- **Line 285 – LOGO_ART**: `r"""`
+- **Line 296 – LOGO_ASCII**: `LOGO_ART`
+- **Line 300 – PGP_PUBLIC_KEY_PATH**: `env_path(`
+- **Line 305 – ALERT_PHRASE**: `"The Beacons Have Been Lit, Gondor Calls for Aid!"`
+- **Line 306 – ENABLE_AUDIO_ALERT_LOCAL**: `True`
+- **Line 307 – ALERT_SOUND_FILE**: `env_path(`
+- **Line 310 – ENABLE_DESKTOP_WINDOW_ALERT**: `True`
+- **Line 311 – ALERT_POPUP_COLOR_1**: `"` – FF0000"
+- **Line 312 – ALERT_POPUP_COLOR_2**: `"` – 000000"
+- **Line 315 – TOKENVIEW_API_KEY**: `os.getenv("TOKENVIEW_API_KEY", "")`
+- **Line 318 – COIN_DOWNLOAD_URLS**: `{`
+- **Line 326 – MAX_DAILY_FILES_PER_COIN**: `2`
+- **Line 327 – FILTER_ONLY_P2PKH**: `False`
+- **Line 330 – ENABLE_P2PKH**: `True` – legacy "1" prefix (P2PKH)
+- **Line 332 – ENABLE_BC1_DEFAULT**: `False`
+- **Line 333 – ENABLE_BECH32_DEFAULT**: `ENABLE_BC1_DEFAULT` – deprecated alias
+- **Line 334 – ENABLE_P2WPKH**: `ENABLE_BC1_DEFAULT` – bc1q… (Bech32 v0)
+- **Line 335 – ENABLE_TAPROOT**: `ENABLE_BC1_DEFAULT` – bc1p… (Bech32m v1)
+- **Line 338 – DEFAULT_BTC_PATTERNS**: `["1**"]` – legacy
+- **Line 339 – DEFAULT_BTC_PATTERNS_BECH32**: `["bc1q**"]` – v0
+- **Line 340 – DEFAULT_BTC_PATTERNS_BECH32M**: `["bc1p**"]` – v1
+- **Line 343 – NORMALIZE_BECH32_LOWER**: `True`
+- **Line 346 – USE_GPU**: `True`
+- **Line 347 – USE_CPU_FALLBACK**: `False`
+- **Line 348 – ROTATE_AT_MB**: `100`
+- **Line 349 – ROTATE_AT_LINES**: `200000`
+- **Line 350 – MAX_BATCH_SIZE**: `100000`
+- **Line 351 – BATCH_SIZE**: `100000`
+- **Line 352 – FILES_PER_BATCH**: `5` – number of VanitySearch files per batch
+- **Line 353 – ADDR_PER_FILE**: `200000`
+- **Line 354 – START_BATCH_ID**: `0`
+- **Line 355 – USE_CUSTOM_SEEDS**: `False`
+- **Line 356 – PATTERN**: `"1**"`
+- **Line 357 – VANITYSEARCH_GPU_INDEX**: `[0]`
+- **Line 358 – VANITY_GPU_INDEX**: `[0]`
+- **Line 363 – GPU_STRATEGY**: `"vanity_priority"` – Options: "vanity_priority", "csv_priority", "swing"
+- **Line 364 – MAX_BACKLOG_THRESHOLD**: `10` – backlog size to trigger GPU reassignment
+- **Line 365 – MIN_BACKLOG_THRESHOLD**: `1` – backlog size to resume vanity GPU keygen
+- **Line 366 – GPU_VENDOR**: `"auto"` – "nvidia", "amd", or "auto"
+- **Line 372 – ALTCOIN_GPUS_INDEX**: `[0]`
+- **Line 373 – CSV_MAX_SIZE_MB**: `200`
+- **Line 374 – MAX_CSV_MB**: `CSV_MAX_SIZE_MB` – alias do not change
+- **Line 375 – CSV_MAX_ROWS**: `200000`
+- **Line 376 – BCH_CASHADDR_ENABLED**: `True`
+- **Line 377 – EXCLUDE_ETH_FROM_DERIVE**: `False`
+- **Line 378 – ENABLED_COINS**: `{`
+- **Line 389 – BTC**: `ENABLED_COINS["BTC"]`
+- **Line 390 – ETH**: `ENABLED_COINS["ETH"]`
+- **Line 391 – DOGE**: `ENABLED_COINS["DOGE"]`
+- **Line 392 – LTC**: `ENABLED_COINS["LTC"]`
+- **Line 393 – DASH**: `ENABLED_COINS["DASH"]`
+- **Line 394 – BCH**: `ENABLED_COINS["BCH"]`
+- **Line 395 – RVN**: `ENABLED_COINS["RVN"]`
+- **Line 396 – PEP**: `ENABLED_COINS["PEP"]`
+- **Line 399 – SHOW_BATCHES_COMPLETED**: `True`
+- **Line 400 – SHOW_CURRENT_SEED_INDEX**: `True`
+- **Line 401 – SHOW_CURRENT_SEED_INDEX**: `True`
+- **Line 402 – SHOW_CURRENT_SEED**: `True`
+- **Line 403 – SHOW_KEYS_PER_SEC**: `True`
+- **Line 404 – SHOW_AVG_KEYGEN_FILE_TIME**: `True`
+- **Line 405 – SHOW_AVG_CSV_FILE_CHECK_TIME**: `True`
+- **Line 406 – SHOW_CSV_CHECK_QUEUE_FILE_COUNT**: `True`
+- **Line 407 – SHOW_CSV_RECHECK_QUEUE_FILE_COUNT**: `True`
+- **Line 408 – SHOW_PROGRESS_BAR_CURRENT_CSV**: `True`
+- **Line 409 – SHOW_PROGRESS_BAR_CURRENT_CSV_RECHECK**: `True`
+- **Line 410 – SHOW_CPU_USAGE_STATS**: `True`
+- **Line 411 – SHOW_RAM_USAGE_STATS**: `True`
+- **Line 412 – SHOW_NVIDIA_GPU_STATS**: `True`
+- **Line 413 – SHOW_AMD_GPU_STATS**: `True`
+- **Line 414 – SHOW_BACKLOG_FILES_IN_QUEUE_COUNT**: `True`
+- **Line 415 – SHOW_BACKLOG_PROCESS_TIME_UNTIL_CAUGHT_UP**: `True`
+- **Line 416 – SHOW_AVERAGE_TIME_PER_BACKLOG_FILE**: `True`
+- **Line 417 – SHOW_PROGRESS_BAR_CURRENT_BACKLOG_FILENAME_PROCESSING**: `True`
+- **Line 418 – SHOW_CONTROL_BUTTONS_MAIN**: `True`
+- **Line 419 – SHOW_DISK_FREE**: `True`
+- **Line 420 – SHOW_BUTTONS_START_STOP_PAUSE_RESUME**: `True` – Shows main control buttons for the dashboard
+- **Line 421 – SHOW_SAVE_DIRECTORIES**: `True`
+- **Line 422 – SHOW_UPTIME**: `True`
+- **Line 423 – SHOW_MATCHES_LIFETIME**: `True`
+- **Line 424 – SHOW_KEYS_GENERATED_TODAY**: `True`
+- **Line 425 – SHOW_KEYS_GENERATED_LIFETIME**: `True`
+- **Line 426 – SHOW_CSV_PROGRESS**: `True`
+- **Line 427 – SHOW_CSV_CREATED_TODAY**: `True`
+- **Line 428 – SHOW_CSV_CREATED_LIFETIME**: `True`
+- **Line 429 – SHOW_NEW_CSV_CHECKED_TODAY_TOTAL**: `True`
+- **Line 430 – SHOW_CSV_RECHECKED_TOTAL_TODAY**: `True`
+- **Line 431 – SHOW_ADDRESS_COUNTS_LIFETIME**: `True` – Show total addresses created lifetime (per coin)
+- **Line 432 – SHOW_ADDRESS_CREATED_COUNTS_TODAY**: `True` – Show total addresses created today (per coin)
+- **Line 433 – SHOW_ADDRESS_CHECKED_COUNTS_TODAY**: `True`
+- **Line 434 – SHOW_ADDRESS_CHECKED_COUNTS_LIFETIME**: `True`
+- **Line 436 – ADDRESS_CREATED_TODAY**: `{`
+- **Line 446 – ADDRESS_CREATED_LIFETIME**: `ADDRESS_CREATED_TODAY.copy()`
+- **Line 447 – ADDRESS_CHECKED_TODAY**: `ADDRESS_CREATED_TODAY.copy()`
+- **Line 448 – ADDRESS_CHECKED_LIFETIME**: `ADDRESS_CREATED_TODAY.copy()`
+- **Line 450 – SHOW_ALERTS_SUCCESSFULLY_CONFIGURED_TYPES**: `True`
+- **Line 451 – SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES**: `True`
+- **Line 454 – VANITY_SEARCH_BUTTON_CONTROL**: `True`
+- **Line 455 – VANITY_SEARCH_START_BUTTON**: `True`
+- **Line 456 – VANITY_SEARCH_STOP_BUTTON**: `True`
+- **Line 457 – VANITY_SEARCH_PAUSE_BUTTON**: `True`
+- **Line 458 – VANITY_SEARCH_RESUME_BUTTON**: `True`
+- **Line 460 – ALTCOIN_BUTTON_CONTROL**: `True`
+- **Line 461 – ALTCOIN_START_BUTTON**: `True`
+- **Line 462 – ALTCOIN_STOP_BUTTON**: `True`
+- **Line 463 – ALTCOIN_PAUSE_BUTTON**: `True`
+- **Line 464 – ALTCOIN_RESUME_BUTTON**: `True`
+- **Line 466 – CSV_CHECK_BUTTON_CONTROL**: `True`
+- **Line 467 – CSV_CHECK_START_BUTTON**: `True`
+- **Line 468 – CSV_CHECK_STOP_BUTTON**: `True`
+- **Line 469 – CSV_CHECK_PAUSE_BUTTON**: `True`
+- **Line 470 – CSV_CHECK_RESUME_BUTTON**: `True`
+- **Line 472 – CSV_RECHECK_BUTTON_CONTROL**: `True`
+- **Line 473 – CSV_RECHECK_START_BUTTON**: `True`
+- **Line 474 – CSV_RECHECK_STOP_BUTTON**: `True`
+- **Line 475 – CSV_RECHECK_PAUSE_BUTTON**: `True`
+- **Line 476 – CSV_RECHECK_RESUME_BUTTON**: `True`
+- **Line 478 – ALERTS_BUTTON_CONTROL**: `True`
+- **Line 479 – ALERTS_START_BUTTON**: `True`
+- **Line 480 – ALERTS_STOP_BUTTON**: `True`
+- **Line 481 – ALERTS_PAUSE_BUTTON**: `True`
+- **Line 482 – ALERTS_RESUME_BUTTON**: `True`
+- **Line 484 – OPEN_CONFIG_FILE_FROM_DASHBOARD**: `True`
+- **Line 485 – SHOW_REFRESH_DASHBOARD_DATA_BUTTON**: `True`
+- **Line 486 – SHOW_DELETE_DASHBOARD_DATA_BUTTON**: `True`
+- **Line 488 – DELETE_VANITY_SEARCH_LOGS**: `True`
+- **Line 489 – DELETE_CSV_FILES**: `True`
+- **Line 490 – DELETE_SYSTEM_LOGS**: `True`
+- **Line 491 – DELETE_CSV_CHECKING_LOGS**: `True`
+- **Line 494 – LOG_LEVEL**: `"INFO"` – Options include: INFO, DEBUG, TRACE,
+- **Line 495 – LOG_TO_FILE**: `True`
+- **Line 496 – LOG_TO_CONSOLE**: `True`
+- **Line 497 – LOGGING_ENABLED**: `True` – or False if you want to disable it
+- **Line 498 – LOG_MAX_BYTES**: `int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))`
+- **Line 499 – LOG_BACKUP_COUNT**: `int(os.getenv("LOG_BACKUP_COUNT", "5"))`
+- **Line 506 – DASHBOARD_PASSWORD_HASH**: `os.getenv("DASHBOARD_PASSWORD_HASH", "")`
+- **Line 507 – DELETE_CONFIRMATION_PASSWORD**: `os.getenv("DELETE_CONFIRMATION_PASSWORD", "")`
+- **Line 509 – DASHBOARD_PASSWORD**: `DASHBOARD_PASSWORD_HASH`
+- **Line 512 – SHOW_DONATION_MESSAGE**: `True`
+- **Line 513 – DONATION_ADDRESSES**: `{`
+- **Line 533 – ENABLE_ALERTS**: `True` – Master toggle
+- **Line 536 – REDACT_SENSITIVE_DATA_IN_ALERTS**: `True`
+- **Line 539 – ENABLE_AUDIO_ALERT_LOCAL**: `True`
+- **Line 540 – ALERT_SOUND_FILE**: `env_path(`
+- **Line 545 – ENABLE_DESKTOP_WINDOW_ALERT**: `True`
+- **Line 546 – ALERT_POPUP_COLOR_1**: `"` – FF0000"  # First flash color
+- **Line 547 – ALERT_POPUP_COLOR_2**: `"` – 000000"  # Second flash color
+- **Line 548 – ALERT_PHRASE**: `"The Beacons Have Been Lit, Gondor Calls for Aid!"` – Message shown in window
+- **Line 551 – ENABLE_PGP**: `False`
+- **Line 552 – PGP_PUBLIC_KEY_PATH**: `env_path(`
+- **Line 558 – ALERT_EMAIL_ENABLED**: `True`
+- **Line 559 – ALERT_EMAIL_SENDER**: `os.getenv("ALERT_EMAIL_SENDER", "emailsenderbtc@gmail.com")`
+- **Line 560 – ALERT_EMAIL_PASSWORD**: `os.getenv("ALERT_EMAIL_PASSWORD", "")`
+- **Line 561 – ALERT_EMAIL_RECIPIENTS**: `os.getenv("ALERT_EMAIL_RECIPIENTS", "").split(",") if os.getenv("ALERT_EMAIL_RECIPIENTS") else []`
+- **Line 562 – EMAIL_SMTP_SERVER**: `os.getenv("EMAIL_SMTP_SERVER", "smtp.gmail.com")`
+- **Line 563 – EMAIL_SMTP_PORT**: `int(os.getenv("EMAIL_SMTP_PORT", 587))`
+- **Line 564 – INCLUDE_MATCH_INFO**: `True`
+- **Line 565 – ENCRYPTED_MESSAGE**: `False`
+- **Line 567 – SMTP_SERVER**: `os.getenv("SMTP_SERVER", "smtp.gmail.com")` – Or use your provider's SMTP host
+- **Line 568 – SMTP_PORT**: `int(os.getenv("SMTP_PORT", 587))` – TLS port (use 465 for SSL)
+- **Line 569 – SMTP_USERNAME**: `os.getenv("SMTP_USERNAME", "emailsenderbtc@gmail.com")` – Replace with your actual sending email
+- **Line 570 – SMTP_PASSWORD**: `os.getenv("SMTP_PASSWORD", "")` – App password if using Gmail 2FA
+- **Line 571 – ALERT_EMAIL_FROM**: `SMTP_USERNAME` – or hardcode like "you@example.com"
+- **Line 572 – ALERT_EMAIL_TO**: `ALERT_EMAIL_RECIPIENTS` – DONT CHANGE HERE CHANGE ALERT_EMAIL_RECIPIENTS OPTION ABOVE
+- **Line 576 – ALERT_TELEGRAM_ENABLED**: `True`
+- **Line 577 – ENABLE_TELEGRAM_ALERT**: `ALERT_TELEGRAM_ENABLED` – alias for backward compatibility dont modify
+- **Line 578 – TELEGRAM_BOT_TOKEN**: `_init_api_key("TELEGRAM_BOT_TOKEN")`
+- **Line 579 – TELEGRAM_CHAT_ID**: `os.getenv("TELEGRAM_CHAT_ID", "")`
+- **Line 582 – ALERT_SMS_ENABLED**: `True`
+- **Line 583 – ENABLE_SMS_ALERT**: `ALERT_SMS_ENABLED` – alias for backward compatibility dont modify
+- **Line 584 – TWILIO_SID**: `_init_api_key("TWILIO_SID")`
+- **Line 585 – TWILIO_AUTH_TOKEN**: `_init_api_key("TWILIO_AUTH_TOKEN")`
+- **Line 586 – TWILIO_FROM_NUMBER**: `os.getenv("TWILIO_FROM_NUMBER", "")`
+- **Line 587 – TWILIO_TO_NUMBER**: `os.getenv("TWILIO_TO_NUMBER", "")`
+- **Line 588 – TWILIO_TO**: `TWILIO_TO_NUMBER` – Alias do not change
+- **Line 589 – TWILIO_TO_SMS**: `TWILIO_TO_NUMBER` – alias for backward compatibility
+- **Line 590 – TWILIO_FROM**: `TWILIO_FROM_NUMBER` – alias for backward compatibility
+- **Line 591 – ENABLE_PHONE_CALL_ALERT**: `True`
+- **Line 592 – TWILIO_CALL_TO_NUMBER**: `os.getenv("TWILIO_CALL_TO_NUMBER", "")`
+- **Line 593 – TWILIO_TOKEN**: `TWILIO_AUTH_TOKEN` – Alias do not change
+- **Line 594 – TWILIO_TO_CALL**: `TWILIO_CALL_TO_NUMBER` – Alias do not change
+- **Line 597 – ALERT_DISCORD_ENABLED**: `False`
+- **Line 598 – ENABLE_DISCORD_ALERT**: `ALERT_DISCORD_ENABLED` – Alias do not change
+- **Line 599 – DISCORD_WEBHOOK_URL**: `_init_api_key("DISCORD_WEBHOOK_URL")`
+- **Line 602 – ALERT_HOME_ASSISTANT_ENABLED**: `False`
+- **Line 603 – ENABLE_HOME_ASSISTANT_ALERT**: `ALERT_HOME_ASSISTANT_ENABLED` – Alias do not change
+- **Line 604 – HOME_ASSISTANT_WEBHOOK**: `os.getenv("HOME_ASSISTANT_WEBHOOK", "")`
+- **Line 605 – HOME_ASSISTANT_URL**: `HOME_ASSISTANT_WEBHOOK` – Alias do not change
+- **Line 606 – HOME_ASSISTANT_TOKEN**: `_init_api_key("HOME_ASSISTANT_TOKEN")`
+- **Line 611 – ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE**: `False`
+- **Line 612 – ICLOUD_LOGIN**: `os.getenv("ICLOUD_LOGIN", "you@icloud.com")`
+- **Line 613 – ICLOUD_PASSWORD**: `os.getenv("ICLOUD_PASSWORD", "")`
+- **Line 614 – ICLOUD_DRIVE_PATH**: `os.getenv("ICLOUD_DRIVE_PATH", "/path/on/icloud")`
+- **Line 615 – ENABLE_CLOUD_UPLOAD**: `ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE` – Alias do not change
+- **Line 618 – ALERT_SAVE_MATCHES_TO_GOOGLE_DRIVE**: `False`
+- **Line 619 – GOOGLE_DRIVE_LOGIN**: `os.getenv("GOOGLE_DRIVE_LOGIN", "you@gmail.com")`
+- **Line 620 – GOOGLE_DRIVE_PASSWORD**: `os.getenv("GOOGLE_DRIVE_PASSWORD", "")`
+- **Line 621 – GOOGLE_DRIVE_FILE_PATH**: `os.getenv("GOOGLE_DRIVE_FILE_PATH", "/path/on/gdrive")`
+- **Line 624 – ALERT_SAVE_MATCHES_TO_DROPBOX**: `False`
+- **Line 625 – DROPBOX_LOGIN**: `os.getenv("DROPBOX_LOGIN", "you@protonmail.com")`
+- **Line 626 – DROPBOX_PASSWORD**: `os.getenv("DROPBOX_PASSWORD", "")`
+- **Line 627 – DROPBOX_FILE_PATH**: `os.getenv("DROPBOX_FILE_PATH", "/dropbox/folder")`
+- **Line 630 – ALERT_SAVE_MATCHES_TO_LOCAL_FILE**: `True`
+- **Line 631 – FILE_PATH**: `MATCHES_DIR` – Matches folder
+- **Line 632 – MATCH_LOG_DIR**: `MATCHES_DIR` – Alias do not change
+- **Line 633 – INCLUDE_MATCH_INFO**: `True`
+- **Line 634 – ENCRYPTED_MESSAGE**: `False`
+- **Line 637 – BTC**: `ENABLED_COINS["BTC"]`
+- **Line 638 – ETH**: `ENABLED_COINS["ETH"]`
+- **Line 639 – DOGE**: `ENABLED_COINS["DOGE"]`
+- **Line 640 – LTC**: `ENABLED_COINS["LTC"]`
+- **Line 641 – DASH**: `ENABLED_COINS["DASH"]`
+- **Line 642 – BCH**: `ENABLED_COINS["BCH"]`
+- **Line 643 – RVN**: `ENABLED_COINS["RVN"]`
+- **Line 644 – PEP**: `ENABLED_COINS["PEP"]`
+- **Line 648 – LAUNCH_TIMESTAMP**: `datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")`
+- **Line 651 – ENABLE_AUTO_TIMEZONE_SETTING**: `True`
+- **Line 652 – MANUAL_TIME_ZONE_OVERRIDE**: `"UTC-5"`
+- **Line 655 – STATS_TO_DISPLAY**: `{`
+- **Line 709 – DASHBOARD_REFRESH_INTERVAL**: `1.0` – seconds between dashboard UI updates
+- **Line 713 – METRICS_LABEL_MAP**: `{`
+- **Line 767 – ALERT_OPTIONS**: `{`
+- **Line 782 – ALERT_CHECKBOXES**: `{`
+- **Line 799 – ALERT_CREDENTIAL_WARNINGS**: `{`
+- **Line 848 – BUTTONS_ENABLED**: `{`
+- **Line 859 – GPU_BACKEND**: `os.getenv("GPU_BACKEND", "cuda")` – cuda, opencl, cpu, auto, or oclvanitygen
+- **Line 860 – VANITYSEARCH_BIN_CUDA**: `VANITYSEARCH_PATH or ""`
+- **Line 861 – VANITYSEARCH_BIN_OPENCL**: `""` – placeholder for future OpenCL support
+- **Line 862 – VANITYSEARCH_BIN_CPU**: `VANITYSEARCH_PATH or ""` – CPU fallback shares the same binary
+- **Line 864 – FORCE_CPU_FALLBACK**: `False` – If True, run CPU even if GPU available
+- **Line 865 – MIN_EXPECTED_GPU_MKEYS**: `120.0` – GTX 1060 typical: 150–230 MKeys/s
+- **Line 868 – ENABLE_SMS_ALERT**: `ENABLE_SMS_ALERT`
+- **Line 869 – ENABLE_PHONE_CALL_ALERT**: `ENABLE_PHONE_CALL_ALERT`
+- **Line 872 – ENABLE_PGP_ENCRYPTION**: `False`
+- **Line 873 – PGP_RECIPIENT**: `""` – key email or uid fragment
+- **Line 874 – PGP_KEYRING_PATH**: `r"P:\\ALLINKEYS\\pgp\\pubring.kbx"` – ok if empty; use default

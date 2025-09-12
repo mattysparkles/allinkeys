@@ -113,14 +113,14 @@ CHECKPOINT_FILE = env_path("ALLINKEYS_CHECKPOINT_FILE", BASE_DIR / "checkpoint.j
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
 
 # === BTC-only mode settings ===
-ALL_BTC_ADDRESSES_URL = "https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"
-ALL_BTC_ADDRESSES_DIR = BASE_DIR / "all_btc_addresses"
-ALL_BTC_RANGES_COUNT = 20
+ALL_BTC_ADDRESSES_URL = "https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"  # Source list of all BTC addresses
+ALL_BTC_ADDRESSES_DIR = BASE_DIR / "all_btc_addresses"  # Where the downloaded list is stored
+ALL_BTC_RANGES_COUNT = 20  # Number of range files to split the list into
 ALL_BTC_GZ_LOCAL = env_path(
     "ALLINKEYS_ALL_BTC_GZ_LOCAL",
     ALL_BTC_ADDRESSES_DIR / "all_Bitcoin_addresses_ever_used_sorted.txt.gz",
-)
-BTC_RANGE_FILE_PATTERN = "btc_range_{:02d}.txt"  # 00..19
+)  # Local filename expected when importing your own list
+BTC_RANGE_FILE_PATTERN = "btc_range_{:02d}.txt"  # Range file naming pattern 00..19
 
 # Backlog pause control (creation vs. consumption)
 BACKLOG_PAUSE_THRESHOLD = int(

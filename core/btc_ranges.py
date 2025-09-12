@@ -31,14 +31,33 @@ def download_with_progress(url: str, dest_path: str, logger) -> None:
         else:
             logger.info(f"Downloading BTC addresses {downloaded} bytes")
 
-    download_file(
-        url,
-        dest_path,
-        expected_sha256=DOWNLOAD_SHA256.get(url),
-        chunk_size=1024 * 1024,
-        progress_cb=_progress,
-        timeout=30,
-    )
+    try:
+        download_file(
+            url,
+            dest_path,
+            expected_sha256=DOWNLOAD_SHA256.get(url),
+            chunk_size=1024 * 1024,
+            progress_cb=_progress,
+            timeout=30,
+        )
+    except Exception as exc:
+        # Attempt insecure HTTP fallback if HTTPS fails
+        if url.startswith("https://"):
+            http_url = "http://" + url[len("https://") :]
+            logger.warning(
+                "HTTPS download failed (%s). Falling back to HTTP.", exc,
+            )
+            download_file(
+                http_url,
+                dest_path,
+                expected_sha256=DOWNLOAD_SHA256.get(url),
+                chunk_size=1024 * 1024,
+                progress_cb=_progress,
+                timeout=30,
+                allow_http=True,
+            )
+        else:
+            raise
     logger.info("BTC address download complete")
 
 
