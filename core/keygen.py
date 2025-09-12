@@ -17,6 +17,7 @@ from config.settings import (
     ROTATE_INTERVAL_SECONDS,
     FILES_PER_BATCH,
     MAX_OUTPUT_LINES,
+    find_vanitysearch_binary,
 )
 
 from config.constants import SECP256K1_ORDER
