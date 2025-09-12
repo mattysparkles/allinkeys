@@ -187,138 +187,151 @@ def generate_random_seed(min_bits=128):
 
 
 def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None):
-    """Run VanitySearch once and return when the output file is rotated."""
+    """Run VanitySearch once and return when the output file is rotated.
+
+    Returns ``True`` if the file was generated successfully, ``False`` if the
+    process was interrupted (e.g. via the pause button).
+    """
     global total_keys_generated, last_output_file
 
+    # GPU toggle
     use_gpu = True if gpu_flag is None else bool(gpu_flag.value)
     selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
     gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
 
+    # Seed formatting
     hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
     hex_seed_short = hex(initial_seed_int)[2:].lstrip("0")[:8] or "00000000"
 
-    current_output_path = Path(VANITY_OUTPUT_DIR) / (
+    # Output path (VanitySearch writes this via -o)
+    current_output_path = os.path.join(
+        VANITY_OUTPUT_DIR,
         f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}.txt"
     )
     last_output_file = current_output_path
 
-    exe_path = VANITYSEARCH_PATH
-    if not exe_path or not Path(exe_path).exists():
+    # Normalize pattern and ensure it's the final positional arg
+    pattern = str(VANITY_PATTERN).strip()
+    if (pattern.startswith('"') and pattern.endswith('"')) or (pattern.startswith("'") and pattern.endswith("'")):
+        pattern = pattern[1:-1].strip()
+    if not pattern:
+        pattern = "1**"
+
+    # Resolve VanitySearch binary
+    exe_path = str(VANITYSEARCH_PATH)
+    if not exe_path or not os.path.exists(exe_path):
         logger.error("VanitySearch binary not found: %s", exe_path)
         raise FileNotFoundError("VanitySearch binary not found.")
 
-    cmd = [str(exe_path), "-s", hex_seed_full, "-o", str(current_output_path)]
+    # Build command (all strings; pattern LAST)
+    cmd = [exe_path, "-s", str(hex_seed_full), "-o", str(current_output_path)]
     if use_gpu:
         cmd.append("-gpu")  # Enable CUDA acceleration
     if not BTC_COMPRESSED:
         cmd.append("-u")
-    cmd.append(VANITY_PATTERN)
+    cmd.append(pattern)  # must be last
 
+    # Safe command preview for logs
+    cmd_preview = " ".join(map(str, cmd))
     logger.info(
-        f"🧬 Starting VanitySearch:\n   Seed: {hex_seed_full}\n   Output: {current_output_path}\n   GPUs: {selected_gpu_ids or 'CPU'}"
+        f"🧬 Starting VanitySearch:\n"
+        f"   Seed: {hex_seed_full}\n"
+        f"   Output: {current_output_path}\n"
+        f"   GPUs: {selected_gpu_ids or 'CPU'}\n"
+        f"   Pattern: {pattern}"
     )
-    logger.info(f"🚀 Running command: {' '.join(cmd)}")
+    logger.info(f"🚀 Running command: {cmd_preview}")
     if pause_event and pause_event.is_set():
         logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
         return False
 
     try:
-        with open(current_output_path, "w", encoding="utf-8", buffering=1) as outfile:
-            logger.info(f"Opened {current_output_path} for writing")
-            proc = subprocess.Popen(
-                cmd,
-                stdout=outfile,
-                stderr=subprocess.STDOUT,
-                env={**os.environ, **gpu_env},
-            )
-            logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd}")
+        # IMPORTANT: do NOT open current_output_path here; VanitySearch owns the file via -o.
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,      # avoid writing to the same file
+            stderr=subprocess.STDOUT,
+            env={**os.environ, **gpu_env},
+        )
+        logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd_preview}")
 
-            def monitor_process(p, path):
-                start = time.time()
-                while p.poll() is None:
-                    if pause_event and pause_event.is_set():
-                        logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
-                        p.terminate()
-                        break
-                    if time.time() - start >= ROTATE_INTERVAL_SECONDS:
-                        logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
-                        p.terminate()
-                        break
-                    try:
-                        file_obj = Path(path)
-                        if file_obj.exists():
-                            if file_obj.stat().st_size >= MAX_OUTPUT_FILE_SIZE:
+        def monitor_process(p, path):
+            """Monitor file size/lines and pause requests while VanitySearch runs."""
+            start = time.time()
+            while p.poll() is None:
+                if pause_event and pause_event.is_set():
+                    logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
+                    p.terminate()
+                    break
+                if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                    logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
+                    p.terminate()
+                    break
+                try:
+                    if os.path.exists(path):
+                        # Size-based rotation
+                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
+                            logger.info(
+                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {os.path.basename(path)}"
+                            )
+                            p.terminate()
+                            break
+                        # Line-count rotation
+                        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                            if sum(1 for _ in f) >= MAX_OUTPUT_LINES:
                                 logger.info(
-                                    f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). Rotating file {file_obj.name}"
+                                    f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {os.path.basename(path)}"
                                 )
                                 p.terminate()
                                 break
-                            with file_obj.open("r", encoding="utf-8", errors="ignore") as f:
-                                if sum(1 for _ in f) >= MAX_OUTPUT_LINES:
-                                    logger.info(
-                                        f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {file_obj.name}"
-                                    )
-                                    p.terminate()
-                                    break
-                    except FileNotFoundError:
-                        logger.debug("Output file not yet created during monitoring")
-                    time.sleep(1)
+                except FileNotFoundError:
+                    logger.debug("Output file not yet created during monitoring")
+                time.sleep(1)
 
-            timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
-            timer_thread.start()
-            proc.wait()
-            timer_thread.join()
+        timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
+        timer_thread.start()
+        proc.wait()
+        timer_thread.join()
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
 
-    try:
-        if current_output_path.exists():
-            size = current_output_path.stat().st_size
-            if size == 0:
-                logger.warning(f"⚠️ Output file empty: {current_output_path}")
-                current_output_path.unlink(missing_ok=True)
-                return False
-            with current_output_path.open("r", encoding="utf-8", errors="ignore") as f:
+    # Post-process
+    if os.path.exists(current_output_path):
+        size = os.path.getsize(current_output_path)
+        if size == 0:
+            logger.warning(f"⚠️ Output file empty: {current_output_path}")
+            os.remove(current_output_path)
+            return False
+        try:
+            with open(current_output_path, 'r', encoding='utf-8') as f:
                 logger.info(f"Opened {current_output_path} for reading")
                 lines = 0
                 first_seed = None
                 last_seed = None
                 for line in f:
-                    # VanitySearch may output either "Privkey:" or "Priv (HEX):" markers.
-                    lower_line = line.lower()
-                    if lower_line.startswith("privkey:") or lower_line.startswith("priv (hex):"):
+                    # Keep existing parser; can be widened later if needed
+                    if line.startswith("Priv (HEX):"):
                         hex_val = line.split(":", 1)[1].strip().replace("0x", "")
                         seed_int = int(hex_val, 16)
                         if first_seed is None:
                             first_seed = seed_int
                         last_seed = seed_int
                         lines += 1
-            if lines == 0:
-                # Keep file even if no key lines were parsed; only empty files are removed.
-                logger.warning(f"⚠️ No key lines found in: {current_output_path}")
-                return False
-            total_keys_generated += lines
-            increment_metric("keys_generated_today", lines)
-            increment_metric("keys_generated_lifetime", lines)
-            from core.dashboard import update_dashboard_stat, get_metric
-            update_dashboard_stat(
-                "keys_generated_today", get_metric("keys_generated_today")
-            )
-            update_dashboard_stat(
-                "keys_generated_lifetime", get_metric("keys_generated_lifetime")
-            )
-            if first_seed is not None and last_seed is not None:
-                record_seed_range(first_seed, last_seed)
-            logger.info(
-                f"📄 File complete: {lines} lines → {current_output_path}"
-            )
-            return True
-        else:
-            logger.error(f"❌ Output file not created: {current_output_path}")
-            return False
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to process VanitySearch output: {e}")
+                total_keys_generated += lines
+                increment_metric("keys_generated_today", lines)
+                increment_metric("keys_generated_lifetime", lines)
+                from core.dashboard import update_dashboard_stat, get_metric
+                update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
+                update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
+                if first_seed is not None and last_seed is not None:
+                    record_seed_range(first_seed, last_seed)
+                logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
+        return True
+    else:
+        logger.error(f"❌ Output file not created: {current_output_path}")
         return False
 
 
