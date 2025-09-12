@@ -38,7 +38,7 @@ def _iter_targets() -> Iterable[Path]:
 
 
 def purge_older_than(days: int, *, dry_run: bool = False) -> Tuple[int, List[str]]:
-    """Delete files older than N days in vanity_output/, mnemonic_output/, and output/csv/.
+    """Delete files older than N days in output/vanity_output/, output/mnemonic_output/, and output/csv/.
 
     Returns a tuple (count, messages) describing actions performed or planned.
     """

@@ -281,14 +281,15 @@ def check_vanity_file_against_ranges(
 
 
 def process_pending_vanity_outputs_once(logger) -> None:
-    """
-    Enumerate vanity_output/*.txt, and for each, obtain a .sorted file safely.
-    Only call the range checker when a non-empty .sorted exists (or was created).
-    Never crash if .sorted is missing; just skip and continue.
+    """Enumerate ``output/vanity_output`` (or configured ``VANITY_OUTPUT_DIR``).
+
+    For each ``.txt`` file, obtain a ``.sorted`` file safely. Only call the range
+    checker when a non-empty ``.sorted`` exists (or was created). Never crash if
+    ``.sorted`` is missing; just skip and continue.
     """
     vanity_dir = Path(VANITY_OUTPUT_DIR)
     if not vanity_dir.is_dir():
-        logger.info(f"ℹ️ vanity_output directory not found: {vanity_dir}")
+        logger.info(f"ℹ️ vanity output directory not found: {vanity_dir}")
         return
 
     entries = sorted(

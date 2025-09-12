@@ -107,6 +107,8 @@ allinkeys/
 └── requirements.txt
 ```
 
+VanitySearch results are saved under `output/vanity_output/`.
+
 ## 🐳 Docker
 
 A Docker setup is included for running AllInKeys in a containerized
@@ -165,6 +167,9 @@ AllInKeys stores logs, downloads and output under the repository root by default
 | `ALLINKEYS_MATCHES_DIR` | `BASE_DIR/matches` | Archive of matches and alerts |
 | `ALLINKEYS_VANITY_TXT_DIR` | `BASE_DIR/output/vanity_output` | VanitySearch text batches |
 | `ALLINKEYS_MNEMONIC_TXT_DIR` | `BASE_DIR/output/mnemonic_output` | Mnemonic mode output |
+
+To retain the legacy top-level ``vanity_output`` directory, set
+``ALLINKEYS_VANITY_TXT_DIR`` to ``BASE_DIR/vanity_output``.
 
 Example:
 

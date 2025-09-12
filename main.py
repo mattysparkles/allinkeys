@@ -689,7 +689,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const="30",
         metavar="DAYS",
-        help="Remove files older than DAYS (default 30) in vanity_output/ and output/csv/",
+        help="Remove files older than DAYS (default 30) in output/vanity_output/ and output/csv/",
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview purge actions without deleting")
     parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
