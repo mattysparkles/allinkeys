@@ -210,7 +210,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     )
     last_output_file = current_output_path
 
-    # Normalize pattern and ensure it's the final positional arg
+    # Normalize the pattern and ensure it's the final positional arg
     pattern = str(VANITY_PATTERN).strip()
     if (pattern.startswith('"') and pattern.endswith('"')) or (pattern.startswith("'") and pattern.endswith("'")):
         pattern = pattern[1:-1].strip()
@@ -226,7 +226,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     # Build command (all strings; pattern LAST)
     cmd = [exe_path, "-s", str(hex_seed_full), "-o", str(current_output_path)]
     if use_gpu:
-        cmd.append("-gpu")  # Enable CUDA acceleration
+        cmd.append("-gpu")
     if not BTC_COMPRESSED:
         cmd.append("-u")
     cmd.append(pattern)  # must be last
@@ -310,7 +310,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 first_seed = None
                 last_seed = None
                 for line in f:
-                    # Keep existing parser; can be widened later if needed
+                    # keep your existing marker
                     if line.startswith("Priv (HEX):"):
                         hex_val = line.split(":", 1)[1].strip().replace("0x", "")
                         seed_int = int(hex_val, 16)
@@ -333,7 +333,6 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     else:
         logger.error(f"❌ Output file not created: {current_output_path}")
         return False
-
 
 
 from core.dashboard import init_shared_metrics, set_metric, increment_metric, get_metric
