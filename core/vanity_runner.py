@@ -372,7 +372,12 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
     Streams stdout into RollingAtomicWriter with atomic rotation.
     """
     out_dir = ensure_dir(VANITY_TXT_DIR)
-    logger.info(f"Vanity output directory: {out_dir.resolve()}")
+    # ``ensure_dir`` now returns a string path. Wrap with ``Path`` so ``resolve``
+    # is always available while still providing the string to callers that expect
+    # one. The previous direct ``out_dir.resolve()`` call triggered an
+    # ``AttributeError`` once ``ensure_dir`` began normalising to ``str``,
+    # preventing VanitySearch from writing any output files.
+    logger.info(f"Vanity output directory: {Path(out_dir).resolve()}")
     exe = _resolve_exe()
     if not exe:
         logger.error("❌ VanitySearch binary not found.")
