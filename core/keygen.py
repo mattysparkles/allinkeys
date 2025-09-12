@@ -10,12 +10,14 @@ import platform
 import base64
 from datetime import datetime
 from collections import deque
+import re
 from config.settings import (
     VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
     MAX_OUTPUT_FILE_SIZE,
     ROTATE_INTERVAL_SECONDS,
     FILES_PER_BATCH,
+    MAX_OUTPUT_LINES,
     find_vanitysearch_binary,
     PGP_PUBLIC_KEY_PATH,
 )
@@ -250,7 +252,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
         return False
     encryption = os.getenv("OUTPUT_ENCRYPTION", "").lower()
-
+    address_regex = re.compile(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b")
+    priv_regex = re.compile(r"Priv \(HEX\):\s*([0-9A-Fa-f]+)")
     lines = 0
     first_seed = None
     last_seed_local = None
@@ -298,13 +301,17 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                 outfile.write(raw_line)
                 if encryption:
                     captured.append(raw_line)
-                if raw_line.startswith("Priv (HEX):"):
-                    hex_val = raw_line.split(":", 1)[1].strip().replace("0x", "")
-                    seed_int = int(hex_val, 16)
+
+                priv_match = priv_regex.search(raw_line)
+                if priv_match:
+                    seed_int = int(priv_match.group(1), 16)
                     if first_seed is None:
                         first_seed = seed_int
                     last_seed_local = seed_int
+
+                if address_regex.search(raw_line):
                     lines += 1
+
                 if lines >= MAX_OUTPUT_LINES:
                     logger.info(
                         f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). Rotating file {Path(current_output_path).name}"
@@ -329,12 +336,23 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
 
-    if lines == 0:
-        logger.warning(f"⚠️ Output file empty: {current_output_path}")
-        try:
-            Path(current_output_path).unlink(missing_ok=True)
-        except Exception:
-            pass
+    try:
+        file_path_obj = Path(current_output_path)
+        if file_path_obj.stat().st_size == 0:
+            logger.warning(f"⚠️ Output file empty: {current_output_path}")
+            file_path_obj.unlink(missing_ok=True)
+            return False
+        with open(current_output_path, "r", encoding="utf-8", errors="ignore") as check_file:
+            has_address = any(address_regex.search(line) for line in check_file)
+        if not has_address:
+            logger.warning(f"⚠️ No address lines found in: {current_output_path}")
+            file_path_obj.unlink(missing_ok=True)
+            return False
+    except FileNotFoundError:
+        logger.warning(f"⚠️ Output file missing: {current_output_path}")
+        return False
+    except Exception:
+        logger.exception(f"Failed to validate output file: {current_output_path}")
         return False
 
     total_keys_generated += lines
