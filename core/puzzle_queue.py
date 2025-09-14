@@ -14,6 +14,13 @@ from core.paths import LOG_DIR as LOG_DIR_P
 from core.logger import get_logger
 from utils.puzzle import get_puzzle_info
 
+try:  # pragma: no cover - optional in minimal environments
+    from core.dashboard import increment_metric
+except Exception:  # pragma: no cover
+    def increment_metric(*args, **kwargs):
+        """Fallback metric increment when dashboard is unavailable."""
+        return None
+
 logger = get_logger(__name__)
 
 DB_PATH = str((Path(LOG_DIR_P) / "work_queue.db").resolve())
@@ -195,6 +202,18 @@ def next_seed(puzzle: int, assignee: str, chunk_index: Optional[int] = None) -> 
             return None  # no more work
         start, end = claim
         cur = start
+
+    start_bound, end_bound = _get_bounds(puzzle)
+    if not (start_bound <= start < end <= end_bound):
+        logger.debug(
+            "Chunk [%x, %x) outside puzzle range [%x, %x) — skipping",
+            start,
+            end,
+            start_bound,
+            end_bound,
+        )
+        increment_metric("out_of_range_skipped", 1)
+        return None
 
     seed = cur
     save_checkpoint(puzzle, {"chunk_start": start, "chunk_end": end, "cursor": seed + 1})
