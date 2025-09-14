@@ -1,3 +1,4 @@
+# ruff: noqa
 # dashboard_gui.py – Themed Live Dashboard for AllInKeys
 import os
 import sys
@@ -9,13 +10,15 @@ from ttkbootstrap.constants import *
 import gettext
 
 # Add repo root so `config` package can be imported reliably
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, BASE_DIR)
-sys.path.insert(0, os.path.join(BASE_DIR, 'config'))
+sys.path.insert(0, os.path.join(BASE_DIR, "config"))
 
-locale_dir = os.path.join(BASE_DIR, 'locale')
-lang = os.environ.get('LANG', 'en')[:2]
-translation = gettext.translation('allinkeys', localedir=locale_dir, languages=[lang], fallback=True)
+locale_dir = os.path.join(BASE_DIR, "locale")
+lang = os.environ.get("LANG", "en")[:2]
+translation = gettext.translation(
+    "allinkeys", localedir=locale_dir, languages=[lang], fallback=True
+)
 _ = translation.gettext
 
 import settings
@@ -82,30 +85,36 @@ class DashboardGUI:
 
         # ----- Scrollable container -----
         self.canvas = tk.Canvas(self.master, borderwidth=0)
-        self.scrollbar = ttk.Scrollbar(self.master, orient="vertical", command=self.canvas.yview)
+        self.scrollbar = ttk.Scrollbar(
+            self.master, orient="vertical", command=self.canvas.yview
+        )
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.scrollbar.grid(row=0, column=1, sticky="ns")
         self.container = ttk.Frame(self.canvas)
-        self.container_window = self.canvas.create_window((0, 0), window=self.container, anchor="nw")
+        self.container_window = self.canvas.create_window(
+            (0, 0), window=self.container, anchor="nw"
+        )
         self.container.bind(
             "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
         )
         self.canvas.bind(
             "<Configure>",
-            lambda e: self.canvas.itemconfig(self.container_window, width=e.width)
+            lambda e: self.canvas.itemconfig(self.container_window, width=e.width),
         )
         self.canvas.bind_all(
             "<MouseWheel>",
-            lambda e: self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            lambda e: self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"),
         )
 
         # Logo
         if LOGO_ASCII:
             logo_frame = ttk.Frame(self.container)
             logo_frame.pack(fill="x", padx=10)
-            logo_label = tk.Label(logo_frame, text=LOGO_ASCII, font=("Courier", 7), justify="center")
+            logo_label = tk.Label(
+                logo_frame, text=LOGO_ASCII, font=("Courier", 7), justify="center"
+            )
             logo_label.pack()
 
         addr_frame = ttk.LabelFrame(self.container, text=_("BTC Address Types"))
@@ -114,17 +123,20 @@ class DashboardGUI:
         addr_frame.grid_columnconfigure(1, weight=1)
         addr_frame.grid_columnconfigure(2, weight=1)
 
-        initial = 'p2pkh' if ENABLE_P2PKH else ('p2wpkh' if ENABLE_P2WPKH else 'taproot')
+        initial = (
+            "p2pkh" if ENABLE_P2PKH else ("p2wpkh" if ENABLE_P2WPKH else "taproot")
+        )
         self.addr_type_var = tk.StringVar(value=initial)
 
         def _select_addr_type():
             sel = self.addr_type_var.get()
-            settings.ENABLE_P2PKH = sel == 'p2pkh'
-            settings.ENABLE_P2WPKH = sel == 'p2wpkh'
-            settings.ENABLE_TAPROOT = sel == 'taproot'
+            settings.ENABLE_P2PKH = sel == "p2pkh"
+            settings.ENABLE_P2WPKH = sel == "p2wpkh"
+            settings.ENABLE_TAPROOT = sel == "taproot"
             try:
                 from core.dashboard import module_pause_events
-                ev = module_pause_events.get('keygen')
+
+                ev = module_pause_events.get("keygen")
                 if ev:
                     ev.set()
                     self.master.after(500, ev.clear)
@@ -135,21 +147,21 @@ class DashboardGUI:
             addr_frame,
             text=_("1 (P2PKH)"),
             variable=self.addr_type_var,
-            value='p2pkh',
+            value="p2pkh",
             command=_select_addr_type,
         ).grid(row=0, column=0, sticky="w")
         ttk.Radiobutton(
             addr_frame,
             text=_("bc1q (P2WPKH)"),
             variable=self.addr_type_var,
-            value='p2wpkh',
+            value="p2wpkh",
             command=_select_addr_type,
         ).grid(row=0, column=1, sticky="w")
         ttk.Radiobutton(
             addr_frame,
             text=_("bc1p (Taproot)"),
             variable=self.addr_type_var,
-            value='taproot',
+            value="taproot",
             command=_select_addr_type,
         ).grid(row=0, column=2, sticky="w")
 
@@ -160,29 +172,61 @@ class DashboardGUI:
         grouped_keys = {"System Stats": [], "CSV Checker": [], "Backlog": []}
 
         system_stats = {
-            "cpu_usage", "ram_usage", "disk_free_gb", "disk_fill_eta",
-            "gpu_stats", "gpu_assignments", "gpu_strategy", "gpu_assignment",
-            "vanity_gpu_on", "altcoin_gpu_on", "uptime",
-            "vanity_progress_percent", "last_updated", "status",
+            "cpu_usage",
+            "ram_usage",
+            "disk_free_gb",
+            "disk_fill_eta",
+            "gpu_stats",
+            "gpu_assignments",
+            "gpu_strategy",
+            "gpu_assignment",
+            "vanity_gpu_on",
+            "altcoin_gpu_on",
+            "uptime",
+            "vanity_progress_percent",
+            "last_updated",
+            "status",
             "download_progress",
         }
         csv_stats = {
-            "csv_checked_today", "csv_rechecked_today",
-            "addresses_checked_today", "addresses_checked_lifetime",
+            "csv_checked_today",
+            "csv_rechecked_today",
+            "addresses_checked_today",
+            "addresses_checked_lifetime",
             "matches_found_lifetime",
-            "csv_created_today", "csv_created_lifetime",
-            "alerts_sent_today", "csv_checker",
+            "csv_created_today",
+            "csv_created_lifetime",
+            "alerts_sent_today",
+            "csv_checker",
         }
         backlog_stats = {
-            "batches_completed", "avg_keygen_time", "backlog_files_queued",
-            "backlog_eta", "backlog_avg_time", "backlog_current_file",
-            "keys_per_sec", "keys_generated_today", "keys_generated_lifetime",
-            "current_seed_index", "current_seed", "altcoin_files_converted",
-            "derived_addresses_today", "vanity_backlog_count",
-            "derive_kps", "rows_per_sec", "current_file", "last_rotation", "derive_recoveries",
-            "btc_only_files_checked_today", "btc_only_matches_found_today",
-            "new_btc_ranges_size_bytes", "btc_ranges_progress", "btc_ranges_last_updated",
-            "vanitysearch_current_mkeys", "vanitysearch_backend", "vanitysearch_device_name",
+            "batches_completed",
+            "avg_keygen_time",
+            "backlog_files_queued",
+            "backlog_eta",
+            "backlog_avg_time",
+            "backlog_current_file",
+            "keys_per_sec",
+            "keys_generated_today",
+            "keys_generated_lifetime",
+            "current_seed_index",
+            "current_seed",
+            "altcoin_files_converted",
+            "derived_addresses_today",
+            "vanity_backlog_count",
+            "derive_kps",
+            "rows_per_sec",
+            "current_file",
+            "last_rotation",
+            "derive_recoveries",
+            "btc_only_files_checked_today",
+            "btc_only_matches_found_today",
+            "new_btc_ranges_size_bytes",
+            "btc_ranges_progress",
+            "btc_ranges_last_updated",
+            "vanitysearch_current_mkeys",
+            "vanitysearch_backend",
+            "vanitysearch_device_name",
         }
 
         for key, enabled in STATS_TO_DISPLAY.items():
@@ -219,16 +263,30 @@ class DashboardGUI:
             frame = ttk.LabelFrame(parent, text=_(group))
             frame.pack(fill="both", expand=True, pady=10)
             frame.grid_columnconfigure(1, weight=1)
-            SMALL_FONT_KEYS = {"addresses_checked_today", "addresses_checked_lifetime", "matches_found_lifetime"}
+            SMALL_FONT_KEYS = {
+                "addresses_checked_today",
+                "addresses_checked_lifetime",
+                "matches_found_lifetime",
+            }
             for i, (key, label_text) in enumerate(keys):
-                ttk.Label(frame, text=label_text + ":", anchor="w", justify="left", font=FONT).grid(
-                    row=i, column=0, sticky="nw", padx=2, pady=2
-                )
-                if key not in ("cpu_usage", "ram_usage") and any(x in key for x in ["usage", "percent", "progress"]) and key != "keys_per_sec":
+                ttk.Label(
+                    frame, text=label_text + ":", anchor="w", justify="left", font=FONT
+                ).grid(row=i, column=0, sticky="nw", padx=2, pady=2)
+                if (
+                    key not in ("cpu_usage", "ram_usage")
+                    and any(x in key for x in ["usage", "percent", "progress"])
+                    and key != "keys_per_sec"
+                ):
                     pb = ttk.Progressbar(frame, length=150, mode="determinate")
                     pb.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     self.metrics[key] = pb
-                elif key in ("gpu_stats", "gpu_assignments", "status", "csv_checker", "alerts_sent_today"):
+                elif key in (
+                    "gpu_stats",
+                    "gpu_assignments",
+                    "status",
+                    "csv_checker",
+                    "alerts_sent_today",
+                ):
                     txt = tk.Text(frame, height=1, width=45, wrap="none", font=FONT)
                     txt.grid(row=i, column=1, sticky="nsew", padx=2, pady=2)
                     txt.configure(state="disabled")
@@ -244,7 +302,10 @@ class DashboardGUI:
                         justify="left",
                     )
                     lbl.grid(row=i, column=1, sticky="w", padx=2, pady=2)
-                    lbl.bind("<Configure>", lambda e, l=lbl: l.config(wraplength=l.winfo_width()))
+                    lbl.bind(
+                        "<Configure>",
+                        lambda e, l=lbl: l.config(wraplength=l.winfo_width()),
+                    )
                     self.metrics[key] = lbl
 
             if group == "Backlog":
@@ -257,15 +318,25 @@ class DashboardGUI:
                     font=FONT,
                 ).grid(row=bp_row, column=0, sticky="nw", padx=2, pady=2)
                 self.backlog_progress_canvas = tk.Canvas(frame, height=120)
-                self.backlog_progress_canvas.grid(row=bp_row + 1, column=0, columnspan=2, sticky="nsew")
-                self.backlog_scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.backlog_progress_canvas.yview)
+                self.backlog_progress_canvas.grid(
+                    row=bp_row + 1, column=0, columnspan=2, sticky="nsew"
+                )
+                self.backlog_scrollbar = ttk.Scrollbar(
+                    frame, orient="vertical", command=self.backlog_progress_canvas.yview
+                )
                 self.backlog_scrollbar.grid(row=bp_row + 1, column=2, sticky="ns")
-                self.backlog_progress_canvas.configure(yscrollcommand=self.backlog_scrollbar.set)
+                self.backlog_progress_canvas.configure(
+                    yscrollcommand=self.backlog_scrollbar.set
+                )
                 self.backlog_progress_inner = ttk.Frame(self.backlog_progress_canvas)
-                self.backlog_progress_canvas.create_window((0, 0), window=self.backlog_progress_inner, anchor="nw")
+                self.backlog_progress_canvas.create_window(
+                    (0, 0), window=self.backlog_progress_inner, anchor="nw"
+                )
                 self.backlog_progress_inner.bind(
                     "<Configure>",
-                    lambda e: self.backlog_progress_canvas.configure(scrollregion=self.backlog_progress_canvas.bbox("all")),
+                    lambda e: self.backlog_progress_canvas.configure(
+                        scrollregion=self.backlog_progress_canvas.bbox("all")
+                    ),
                 )
                 self.metrics["backlog_progress"] = {}
 
@@ -283,7 +354,7 @@ class DashboardGUI:
             variable=self.gpu_swing_mode_enabled,
             command=self.toggle_swing_mode,
         )
-        swing_row = (backlog_row + 1) if 'backlog_row' in locals() else row
+        swing_row = (backlog_row + 1) if "backlog_row" in locals() else row
         self.swing_mode_button.grid(
             row=swing_row,
             column=2,  # place under backlog stats column
@@ -305,6 +376,7 @@ class DashboardGUI:
             alert_frame.pack(fill="x", padx=10, pady=(5, 0))
 
             from core import alerts
+
             third = (len(ALERT_CHECKBOXES) + 2) // 3
             for idx, name in enumerate(ALERT_CHECKBOXES):
                 row = idx // third
@@ -313,7 +385,7 @@ class DashboardGUI:
                 var = tk.BooleanVar(value=initial)
                 var.trace_add(
                     "write",
-                    lambda *_, n=name, v=var: self.on_checkbox_toggle(n, v.get())
+                    lambda *_, n=name, v=var: self.on_checkbox_toggle(n, v.get()),
                 )
                 self.checkbox_vars[name] = var
                 label_text = _(name)
@@ -324,7 +396,9 @@ class DashboardGUI:
                 cb = tk.Checkbutton(alert_frame, text=label_text, variable=var)
                 cb.grid(row=row, column=col, sticky="w", padx=(0, 2))
                 if ALERT_CREDENTIAL_WARNINGS.get(name):
-                    tk.Label(alert_frame, text="⚠", fg="red").grid(row=row, column=col + 1)
+                    tk.Label(alert_frame, text="⚠", fg="red").grid(
+                        row=row, column=col + 1
+                    )
 
         # Control Panel
         if SHOW_CONTROL_BUTTONS_MAIN:
@@ -341,16 +415,33 @@ class DashboardGUI:
         bottom_frame.pack(pady=10)
 
         if OPEN_CONFIG_FILE_FROM_DASHBOARD:
-            ttk.Button(bottom_frame, text=_("Open Config File"), command=self.open_config_file).pack(side="left", padx=5)
-        ttk.Button(bottom_frame, text=_("Reset Metrics"), command=self.reset_metrics_prompt).pack(side="left", padx=5)
-        ttk.Button(bottom_frame, text=_("Reset Lifetime"), command=self.reset_lifetime_prompt).pack(side="left", padx=5)
-        ttk.Button(bottom_frame, text=_("Test Alerts"), command=self.test_alerts).pack(side="left", padx=5)
+            ttk.Button(
+                bottom_frame, text=_("Open Config File"), command=self.open_config_file
+            ).pack(side="left", padx=5)
+        ttk.Button(
+            bottom_frame, text=_("Reset Metrics"), command=self.reset_metrics_prompt
+        ).pack(side="left", padx=5)
+        ttk.Button(
+            bottom_frame, text=_("Reset Lifetime"), command=self.reset_lifetime_prompt
+        ).pack(side="left", padx=5)
+        ttk.Button(bottom_frame, text=_("Test Alerts"), command=self.test_alerts).pack(
+            side="left", padx=5
+        )
         if SHOW_DELETE_DASHBOARD_DATA_BUTTON:
-            ttk.Button(bottom_frame, text=_("Delete All Data"), command=self.delete_data_prompt).pack(side="left", padx=5)
+            ttk.Button(
+                bottom_frame, text=_("Delete All Data"), command=self.delete_data_prompt
+            ).pack(side="left", padx=5)
 
         if SHOW_DONATION_MESSAGE:
-            msg = _("If you find AllInKeys useful, consider donating! BTC: 18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y")
-            ttk.Label(self.container, text=msg, font=("Segoe UI", 9, "italic"), foreground="gray").pack(pady=(0, 10))
+            msg = _(
+                "If you find AllInKeys useful, consider donating! BTC: 18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y"
+            )
+            ttk.Label(
+                self.container,
+                text=msg,
+                font=("Segoe UI", 9, "italic"),
+                foreground="gray",
+            ).pack(pady=(0, 10))
 
     def _group_button_set(self, parent, label, col):
         sub_frame = ttk.LabelFrame(parent, text=_(label))
@@ -366,17 +457,23 @@ class DashboardGUI:
                 btn.config(text=_(bname), bootstyle="secondary", state=tk.NORMAL)
 
             if state == "running":
-                btns["Start"].config(text=_("RUNNING"), bootstyle="success", state=tk.DISABLED)
+                btns["Start"].config(
+                    text=_("RUNNING"), bootstyle="success", state=tk.DISABLED
+                )
                 btns["Resume"].config(state=tk.DISABLED)
                 btns["Pause"].config(state=tk.NORMAL)
                 btns["Stop"].config(state=tk.NORMAL)
             elif state == "paused":
-                btns["Pause"].config(text=_("PAUSED"), bootstyle="warning", state=tk.DISABLED)
+                btns["Pause"].config(
+                    text=_("PAUSED"), bootstyle="warning", state=tk.DISABLED
+                )
                 btns["Resume"].config(state=tk.NORMAL)
                 btns["Start"].config(state=tk.DISABLED)
                 btns["Stop"].config(state=tk.NORMAL)
             elif state == "stopped":
-                btns["Stop"].config(text=_("STOPPED"), bootstyle="danger", state=tk.DISABLED)
+                btns["Stop"].config(
+                    text=_("STOPPED"), bootstyle="danger", state=tk.DISABLED
+                )
                 btns["Start"].config(state=tk.NORMAL)
                 btns["Pause"].config(state=tk.DISABLED)
                 btns["Resume"].config(state=tk.DISABLED)
@@ -428,14 +525,24 @@ class DashboardGUI:
 
         mapped = key_map.get(label.lower(), label.lower())
 
-        btns["Start"] = ttk.Button(sub_frame, text=_("Start"), width=8,
-                                   command=lambda: set_state("running"))
-        btns["Stop"] = ttk.Button(sub_frame, text=_("Stop"), width=8,
-                                  command=lambda: set_state("stopped"))
-        btns["Pause"] = ttk.Button(sub_frame, text=_("Pause"), width=8,
-                                   command=lambda m=mapped, lbl=label: self.handle_pause_resume(m, lbl))
-        btns["Resume"] = ttk.Button(sub_frame, text=_("Resume"), width=8,
-                                    command=lambda m=mapped, lbl=label: self.handle_pause_resume(m, lbl))
+        btns["Start"] = ttk.Button(
+            sub_frame, text=_("Start"), width=8, command=lambda: set_state("running")
+        )
+        btns["Stop"] = ttk.Button(
+            sub_frame, text=_("Stop"), width=8, command=lambda: set_state("stopped")
+        )
+        btns["Pause"] = ttk.Button(
+            sub_frame,
+            text=_("Pause"),
+            width=8,
+            command=lambda m=mapped, lbl=label: self.handle_pause_resume(m, lbl),
+        )
+        btns["Resume"] = ttk.Button(
+            sub_frame,
+            text=_("Resume"),
+            width=8,
+            command=lambda m=mapped, lbl=label: self.handle_pause_resume(m, lbl),
+        )
 
         btns["Start"].grid(row=0, column=0)
         btns["Stop"].grid(row=0, column=1)
@@ -454,6 +561,7 @@ class DashboardGUI:
     def update_alert_option(self, name, value):
         try:
             from core import alerts
+
             alerts.set_alert_flag(name, value)
         except Exception as e:
             print(f"[GUI] Failed to update alert option: {e}")
@@ -482,7 +590,8 @@ class DashboardGUI:
     def load_settings_into_checkboxes(self):
         try:
             import importlib
-            cfg = importlib.import_module('config.settings')
+
+            cfg = importlib.import_module("config.settings")
             importlib.reload(cfg)
             for name, var in self.checkbox_vars.items():
                 var.set(getattr(cfg, name, var.get()))
@@ -491,6 +600,7 @@ class DashboardGUI:
 
     def handle_pause_resume(self, module_name, display_label=None):
         from core.dashboard import module_pause_events
+
         ev = module_pause_events.get(module_name)
         if not ev:
             print(f"[GUI] ⚠️ No pause event for {module_name}", flush=True)
@@ -527,7 +637,7 @@ class DashboardGUI:
         items = list(data.items())
         lines = []
         for i in range(0, len(items), per_row):
-            row_parts = [f"{c.upper():<5}: {v:<8}" for c, v in items[i:i+per_row]]
+            row_parts = [f"{c.upper():<5}: {v:<8}" for c, v in items[i : i + per_row]]
             lines.append("   ".join(row_parts))
         return "\n".join(lines)
 
@@ -554,6 +664,7 @@ class DashboardGUI:
     def refresh_loop(self):
         try:
             from core import alerts
+
             stats = get_current_metrics()
             # Sync checkbox states with ALERT_FLAGS
             for name, var in self.checkbox_vars.items():
@@ -593,9 +704,15 @@ class DashboardGUI:
                     if assign and assign != "N/A"
                     else len(progress_data)
                 )
-                for idx, (fname, pct) in enumerate(list(progress_data.items())[:gpu_count]):
-                    ttk.Label(self.backlog_progress_inner, text=fname).grid(row=idx, column=0, sticky="w")
-                    bar = ttk.Progressbar(self.backlog_progress_inner, length=120, mode="determinate")
+                for idx, (fname, pct) in enumerate(
+                    list(progress_data.items())[:gpu_count]
+                ):
+                    ttk.Label(self.backlog_progress_inner, text=fname).grid(
+                        row=idx, column=0, sticky="w"
+                    )
+                    bar = ttk.Progressbar(
+                        self.backlog_progress_inner, length=120, mode="determinate"
+                    )
                     bar.grid(row=idx, column=1, padx=2)
                     try:
                         bar["value"] = float(pct)
@@ -606,7 +723,11 @@ class DashboardGUI:
             value = stats.get(key, "N/A")
             if isinstance(widget, ttk.Progressbar):
                 try:
-                    widget["value"] = float(value.strip('%')) if isinstance(value, str) else float(value)
+                    widget["value"] = (
+                        float(value.strip("%"))
+                        if isinstance(value, str)
+                        else float(value)
+                    )
                 except Exception:
                     widget["value"] = 0
             elif isinstance(widget, tk.Text):
@@ -634,7 +755,7 @@ class DashboardGUI:
                             "altcoin_derive": "Altcoin Derive",
                         }
                         for mod, name in value.items():
-                            title = name_map.get(mod, mod.replace('_', ' ').title())
+                            title = name_map.get(mod, mod.replace("_", " ").title())
                             lines.append(f"{title} → {name}")
                     elif key in (
                         "addresses_generated_lifetime",
@@ -652,13 +773,13 @@ class DashboardGUI:
                     else:
                         for gid, info in value.items():
                             if isinstance(info, dict):
-                                name = info.get('name', '')
-                                usage = info.get('usage', 'N/A')
-                                vram = info.get('vram', 'N/A')
-                                temp = info.get('temp', 'N/A')
+                                name = info.get("name", "")
+                                usage = info.get("usage", "N/A")
+                                vram = info.get("vram", "N/A")
+                                temp = info.get("temp", "N/A")
                                 lines.append(f"{gid}: {name}")
                                 detail = f"  Usage: {usage}  VRAM: {vram}"
-                                if temp and temp != 'N/A':
+                                if temp and temp != "N/A":
                                     detail += f"  Temp: {temp}"
                                 lines.append(detail)
                             else:
@@ -685,7 +806,11 @@ class DashboardGUI:
                     "alerts_sent_today",
                     "alerts_sent_lifetime",
                 ):
-                    disp = self._format_coin_dict(value) if isinstance(value, dict) else str(value)
+                    disp = (
+                        self._format_coin_dict(value)
+                        if isinstance(value, dict)
+                        else str(value)
+                    )
                 elif isinstance(value, dict):
                     lines = [f"{k.upper()}: {v}" for k, v in value.items()]
                     disp = "\n".join(lines)
@@ -708,7 +833,9 @@ class DashboardGUI:
 
     def open_config_file(self):
         if not os.path.exists(CONFIG_FILE_PATH):
-            messagebox.showerror(_("Missing Config"), _("Could not find: %s") % CONFIG_FILE_PATH)
+            messagebox.showerror(
+                _("Missing Config"), _("Could not find: %s") % CONFIG_FILE_PATH
+            )
             return
         try:
             if sys.platform.startswith("win"):
@@ -723,8 +850,11 @@ class DashboardGUI:
     def test_alerts(self):
         try:
             from core.alerts import run_test_alerts_from_csv
+
             run_test_alerts_from_csv()
-            messagebox.showinfo(_("Test Alerts"), _("Test alerts dispatched. Check logs for details."))
+            messagebox.showinfo(
+                _("Test Alerts"), _("Test alerts dispatched. Check logs for details.")
+            )
         except Exception as e:
             messagebox.showerror(_("Error"), _("Failed to send test alerts: %s") % e)
 
@@ -748,8 +878,12 @@ class DashboardGUI:
                 messagebox.showerror(_("Invalid Password"), _("Reset canceled."))
 
     def delete_data_prompt(self):
-        if messagebox.askyesno(_("Confirm Delete"), _("Permanently delete all key/data files?")):
-            really = messagebox.askyesno(_("Double Check"), _("Are you really really sure?"))
+        if messagebox.askyesno(
+            _("Confirm Delete"), _("Permanently delete all key/data files?")
+        ):
+            really = messagebox.askyesno(
+                _("Double Check"), _("Are you really really sure?")
+            )
             if really:
                 pw = self.prompt_password()
                 if self.check_password(pw):
@@ -770,7 +904,9 @@ class DashboardGUI:
             result.append(pw_entry.get())
             pw_window.destroy()
 
-        tk.Button(pw_window, text=_("Submit"), command=submit_pw).grid(row=1, column=0, columnspan=2)
+        tk.Button(pw_window, text=_("Submit"), command=submit_pw).grid(
+            row=1, column=0, columnspan=2
+        )
         self.master.wait_window(pw_window)
         return result[0] if result else ""
 
@@ -791,7 +927,10 @@ def start_dashboard():
     if DASHBOARD_PASSWORD_HASH:
         root.withdraw()
         from tkinter import simpledialog
-        pw = simpledialog.askstring("Dashboard Login", "Password:", show="*", parent=root)
+
+        pw = simpledialog.askstring(
+            "Dashboard Login", "Password:", show="*", parent=root
+        )
         if not pw or not verify_password(pw, DASHBOARD_PASSWORD_HASH):
             messagebox.showerror("Authentication", "Invalid password")
             root.destroy()

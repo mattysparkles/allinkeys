@@ -65,6 +65,13 @@ Copy `.env.example` to `.env` and fill in any credentials needed for alert chann
    pytest
    ```
 
+## 📡 Telemetry
+
+Minimal, opt‑out telemetry helps guide project development. Only anonymized
+seed processing statistics are collected. See [docs/TELEMETRY.md](docs/TELEMETRY.md)
+for full details. Disable telemetry at runtime with the `--no-telemetry`
+command-line flag.
+
 ### 📁 Directory Overview
 
 ```

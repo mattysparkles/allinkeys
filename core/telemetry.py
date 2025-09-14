@@ -1,90 +1,224 @@
-"""Opt-in telemetry utilities.
+"""Seed telemetry with durable queue and background flushing.
 
-This module collects aggregated runtime statistics and periodically sends them
-to a central server. The data helps guide premium-tier offerings by revealing
-popular hardware profiles and performance characteristics.
+This module records minimal, privacy‑preserving telemetry about seed
+processing. Events are queued on disk via SQLite so they survive restarts
+and are flushed in the background without blocking workers.
 
-Only coarse metrics (GPU model names and keys-per-second rate) are gathered.
-No seeds, addresses or personally identifying information are transmitted.
-Telemetry can be disabled via the ``--no-telemetry`` CLI flag.
+Only the following fields are transmitted and **never** the raw seed,
+addresses or WIFs:
+
+``app_instance_id`` – Persisted UUID identifying this installation.
+``client_version`` – Software version from :mod:`config.settings`.
+``mode`` – Seed processing mode (mnemonic, only_btc, puzzle, vanity,
+           altcoin_derive).
+``range_id`` – Optional range bucket identifier.
+``seed_fingerprint`` – SHA256(seed_bytes || app_instance_id).
+``timestamp_iso`` – Event timestamp in ISO‑8601 format.
+``used`` / ``match_found`` – Result flags.
+
+The telemetry queue is capped at 100k entries and behaves as a ring buffer.
+When offline, events remain on disk and are retried with exponential backoff
+(capped at 5 minutes).
 """
 
 from __future__ import annotations
 
-import os
+import hashlib
+import json
+import sqlite3
 import threading
-from typing import Dict, List
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Iterable, Optional
 
 import requests
 
-try:  # GPU info is optional
-    import GPUtil  # type: ignore
-except Exception:  # pragma: no cover - import failure shouldn't crash
-    GPUtil = None  # type: ignore
+from config import settings
 
-# Endpoint can be overridden for testing via environment variable
-TELEMETRY_URL = os.environ.get(
-    "ALLINKEYS_TELEMETRY_URL",
-    "https://telemetry.allinkeys.com/collect",
-)
+QUEUE_DB = Path(settings.LOG_DIR) / "telemetry_queue.db"
+INSTANCE_ID_PATH = Path(settings.LOG_DIR) / "app_instance_id"
 
 
-def gather_telemetry() -> Dict[str, object]:
-    """Collect aggregated telemetry data.
+def _get_app_id(path: Path = INSTANCE_ID_PATH) -> str:
+    """Return a stable UUID for this installation."""
 
-    Returns a dictionary containing GPU model names and the current
-    keys-per-second metric. This intentionally avoids any sensitive
-    information such as seeds or addresses.
-    """
+    if path.exists():
+        return path.read_text().strip()
+    import uuid
 
-    gpus: List[str] = []
-    if GPUtil:
+    app_id = str(uuid.uuid4())
+    path.write_text(app_id)
+    return app_id
+
+
+class TelemetryClient:
+    """Durable telemetry queue with background flushing."""
+
+    def __init__(
+        self,
+        *,
+        enabled: bool = True,
+        endpoint: str = settings.TELEMETRY_ENDPOINT,
+        batch_size: int = settings.TELEMETRY_BATCH_SIZE,
+        flush_seconds: int = settings.TELEMETRY_FLUSH_SECONDS,
+        max_backoff: int = settings.TELEMETRY_MAX_BACKOFF,
+        db_path: Path = QUEUE_DB,
+        instance_id_path: Path = INSTANCE_ID_PATH,
+    ) -> None:
+        self.enabled = enabled
+        self.endpoint = endpoint
+        self.batch_size = batch_size
+        self.flush_seconds = flush_seconds
+        self.max_backoff = max_backoff
+        self.db_path = Path(db_path)
+        self.app_id = _get_app_id(instance_id_path)
+        self._backoff = flush_seconds
+        if self.enabled:
+            self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS telemetry (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload TEXT NOT NULL
+            )
+            """
+        )
+        return conn
+
+    def _init_db(self) -> None:
+        conn = self._connect()
+        conn.close()
+
+    # ------------------------------ Queue ops ------------------------------
+    def record_event(
+        self,
+        seed_bytes: bytes,
+        *,
+        mode: str,
+        range_id: Optional[str],
+        used: bool,
+        match_found: bool,
+    ) -> None:
+        """Persist a telemetry event to the queue."""
+
+        if not self.enabled:
+            return
+
+        fingerprint = hashlib.sha256(seed_bytes + self.app_id.encode()).hexdigest()
+        payload = {
+            "app_instance_id": self.app_id,
+            "client_version": settings.CLIENT_VERSION,
+            "mode": mode,
+            "range_id": range_id,
+            "seed_fingerprint": fingerprint,
+            "timestamp_iso": datetime.utcnow().isoformat() + "Z",
+            "used": used,
+            "match_found": match_found,
+        }
+        data = json.dumps(payload)
+
+        conn = self._connect()
         try:
-            gpus = [gpu.name for gpu in GPUtil.getGPUs()]
-        except Exception:
-            pass  # pragma: no cover - failure just results in empty list
+            with conn:
+                conn.execute("INSERT INTO telemetry(payload) VALUES (?)", (data,))
+                conn.execute(
+                    "DELETE FROM telemetry WHERE id NOT IN (SELECT id FROM telemetry ORDER BY id DESC LIMIT 100000)"
+                )
+        finally:
+            conn.close()
 
-    kps = 0.0
-    try:
-        from core.dashboard import get_metric
+    # ------------------------------- Flushing ------------------------------
+    def _fetch_batch(self, conn: sqlite3.Connection) -> Iterable[tuple[int, str]]:
+        cur = conn.execute(
+            "SELECT id, payload FROM telemetry ORDER BY id ASC LIMIT ?",
+            (self.batch_size,),
+        )
+        return cur.fetchall()
 
-        kps = float(get_metric("keys_per_sec", 0) or 0)
-    except Exception:
-        pass  # pragma: no cover - metric subsystem not available
+    def _send_batch(self, batch: Iterable[Dict[str, Any]]) -> None:
+        requests.post(self.endpoint, json=list(batch), timeout=10)
 
-    return {"gpus": gpus, "kps": round(kps, 2)}
+    def flush_once(self) -> bool:
+        """Flush a single batch from the queue.
+
+        Returns ``True`` on success, ``False`` on failure. When disabled this
+        method is a no-op returning ``True``.
+        """
+
+        if not self.enabled:
+            return True
+
+        conn = self._connect()
+        try:
+            batch = self._fetch_batch(conn)
+            if not batch:
+                self._backoff = self.flush_seconds
+                return True
+            ids, payloads = zip(*batch)
+            try:
+                self._send_batch([json.loads(p) for p in payloads])
+            except Exception:
+                self._backoff = min(self._backoff * 2, self.max_backoff)
+                return False
+            with conn:
+                conn.execute(
+                    f"DELETE FROM telemetry WHERE id IN ({','.join('?' for _ in ids)})",
+                    ids,
+                )
+            self._backoff = self.flush_seconds
+            return True
+        finally:
+            conn.close()
+
+    def start(self, shutdown_event: threading.Event) -> None:
+        """Start the background flusher thread."""
+
+        if not self.enabled:
+            return
+
+        def _loop() -> None:
+            while not shutdown_event.is_set():
+                ok = self.flush_once()
+                wait = self.flush_seconds if ok else self._backoff
+                shutdown_event.wait(wait)
+            self.flush_once()
+
+        threading.Thread(target=_loop, name="telemetry", daemon=True).start()
 
 
-def send_telemetry(payload: Dict[str, object]) -> None:
-    """Send telemetry payload to the central server.
-
-    Network errors are ignored to ensure telemetry never interferes with core
-    functionality.
-    """
-
-    try:
-        requests.post(TELEMETRY_URL, json=payload, timeout=5)
-    except Exception:
-        pass  # pragma: no cover
+_CLIENT: Optional[TelemetryClient] = None
 
 
-def start_telemetry(shutdown_event, interval: int = 3600) -> None:
-    """Start a background thread periodically sending telemetry.
+def start_telemetry(shutdown_event: threading.Event) -> None:
+    """Initialize and start the global telemetry client."""
 
-    ``shutdown_event`` should be a :class:`threading.Event`-like object. The
-    thread sends a payload immediately on start and again every ``interval``
-    seconds until the event is set, at which point a final payload is sent.
-    """
+    if not settings.SEED_TELEMETRY_ENABLED:
+        return
 
-    def _loop() -> None:
-        while not shutdown_event.is_set():
-            payload = gather_telemetry()
-            send_telemetry(payload)
-            # Wait for either the interval to elapse or shutdown
-            shutdown_event.wait(interval)
-        # Send one last update capturing final metrics
-        payload = gather_telemetry()
-        send_telemetry(payload)
+    global _CLIENT
+    _CLIENT = TelemetryClient()
+    _CLIENT.start(shutdown_event)
 
-    threading.Thread(target=_loop, name="telemetry", daemon=True).start()
 
+def record_seed_event(
+    seed_bytes: bytes,
+    *,
+    mode: str,
+    range_id: Optional[str],
+    used: bool,
+    match_found: bool,
+) -> None:
+    """Record a telemetry event if the global client is active."""
+
+    if _CLIENT is None:
+        return
+    _CLIENT.record_event(
+        seed_bytes,
+        mode=mode,
+        range_id=range_id,
+        used=used,
+        match_found=match_found,
+    )

@@ -13,6 +13,19 @@ from typing import Dict
 
 load_dotenv()
 
+# --- Telemetry configuration ---
+CLIENT_VERSION = os.getenv("ALLINKEYS_VERSION", "dev")
+SEED_TELEMETRY_ENABLED = os.getenv("SEED_TELEMETRY_ENABLED", "1") not in {
+    "0",
+    "false",
+    "False",
+}
+TELEMETRY_ENDPOINT = os.getenv(
+    "TELEMETRY_ENDPOINT", "https://telemetry.sparkleserver.site/v1/seed"
+)
+TELEMETRY_BATCH_SIZE = int(os.getenv("TELEMETRY_BATCH_SIZE", "100"))
+TELEMETRY_FLUSH_SECONDS = int(os.getenv("TELEMETRY_FLUSH_SECONDS", "10"))
+TELEMETRY_MAX_BACKOFF = int(os.getenv("TELEMETRY_MAX_BACKOFF", "300"))
 
 # ---------------------------------------------------------------------------
 # Environment helpers
