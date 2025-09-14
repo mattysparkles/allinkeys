@@ -23,7 +23,9 @@ from core.checkpoint import (
     load_keygen_checkpoint as load_checkpoint,
     save_keygen_checkpoint as save_checkpoint,
 )
-from core.gpu_selector import get_vanitysearch_gpu_ids  # ✅ Correct GPU selection integration
+from core.gpu_selector import (
+    get_vanitysearch_gpu_ids,
+)  # ✅ Correct GPU selection integration
 from core.logger import get_logger
 import config.settings as settings
 from core.seed_tracker import seed_in_used_range, record_seed_range
@@ -51,6 +53,7 @@ BTC_COMPRESSED = True
 # ---------------------------------------------------------------------------
 # Public helpers / status
 # ---------------------------------------------------------------------------
+
 
 def run_btc_only(
     compressed: bool,
@@ -86,7 +89,9 @@ def keygen_progress():
     Return a dict of current keygen status for the GUI/dashboard.
     """
     elapsed_seconds = max(1, int(time.time() - keygen_start_time))
-    elapsed_time_str = str(datetime.utcfromtimestamp(elapsed_seconds).strftime("%H:%M:%S"))
+    elapsed_time_str = str(
+        datetime.utcfromtimestamp(elapsed_seconds).strftime("%H:%M:%S")
+    )
     if len(KPS_WINDOW) >= 2:
         keys_per_sec = (KPS_WINDOW[-1][1] - KPS_WINDOW[0][1]) / max(
             1e-6, KPS_WINDOW[-1][0] - KPS_WINDOW[0][0]
@@ -99,7 +104,8 @@ def keygen_progress():
         "index_within_batch": KEYGEN_STATE["index_within_batch"],
         "last_seed": KEYGEN_STATE["last_seed"],
         "elapsed_time": elapsed_time_str,
-        "start_timestamp": datetime.utcfromtimestamp(keygen_start_time).isoformat() + "Z",
+        "start_timestamp": datetime.utcfromtimestamp(keygen_start_time).isoformat()
+        + "Z",
         "keys_per_sec": round(keys_per_sec, 2),
     }
 
@@ -107,6 +113,7 @@ def keygen_progress():
 # ---------------------------------------------------------------------------
 # Seed utilities
 # ---------------------------------------------------------------------------
+
 
 def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1_024_000):
     """
@@ -133,12 +140,15 @@ def generate_random_seed(min_bits=128):
             puzzle_num = getattr(settings, "PUZZLE_NUMBER", None)
             if puzzle_num is not None:
                 from core import puzzle_queue as pq  # depends on SQLite
+
                 chunk_idx = getattr(settings, "PUZZLE_CHUNK_INDEX", None)
                 # Portable host identifier (works on Windows too)
                 host_id = platform.node() if hasattr(platform, "node") else "unknown"
                 seed = pq.next_seed(puzzle_num, host_id, chunk_idx)
                 if seed is None:
-                    raise RuntimeError(f"No remaining puzzle-{puzzle_num} chunks to process")
+                    raise RuntimeError(
+                        f"No remaining puzzle-{puzzle_num} chunks to process"
+                    )
                 if seed_in_used_range(seed):
                     continue
                 return seed
@@ -167,7 +177,10 @@ def generate_random_seed(min_bits=128):
 # VanitySearch runner (single-file run + rotation)
 # ---------------------------------------------------------------------------
 
-def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None):
+
+def run_vanitysearch_stream(
+    initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None
+):
     """
     Run VanitySearch once. VanitySearch writes the output via `-o <file>`.
     We monitor the file for rotation triggers (time/size/line-count) and update metrics.
@@ -175,10 +188,32 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     """
     global total_keys_generated, last_output_file
 
+    # Enforce active puzzle range before any heavy work.  When running in puzzle
+    # mode the seed must stay within the configured [start, end] bounds.  If a
+    # caller somehow provides an out-of-range seed we simply skip processing,
+    # incrementing a diagnostic metric for the dashboard.  This check occurs
+    # early so we avoid spawning VanitySearch or touching the filesystem.
+    if getattr(settings, "PUZZLE_MODE", False):
+        start = int(getattr(settings, "PUZZLE_START", "0"), 16)
+        end = int(getattr(settings, "PUZZLE_END", "0"), 16)
+        if not (start <= initial_seed_int <= end):
+            logger.debug(
+                "Seed %x outside puzzle range [%x, %x] — skipping",
+                initial_seed_int,
+                start,
+                end,
+            )
+            increment_metric("out_of_range_skipped", 1)
+            return False
+
     # GPU runtime toggle exposed to the GUI
     use_gpu = True if gpu_flag is None else bool(gpu_flag.value)
     selected_gpu_ids = get_vanitysearch_gpu_ids() if use_gpu else []
-    gpu_env = {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)} if selected_gpu_ids else {}
+    gpu_env = (
+        {"CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in selected_gpu_ids)}
+        if selected_gpu_ids
+        else {}
+    )
 
     # Seed formatting
     hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
@@ -193,7 +228,9 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
     # Normalize pattern and ensure it's final positional arg
     pattern = str(VANITY_PATTERN).strip()
-    if (pattern.startswith('"') and pattern.endswith('"')) or (pattern.startswith("'") and pattern.endswith("'")):
+    if (pattern.startswith('"') and pattern.endswith('"')) or (
+        pattern.startswith("'") and pattern.endswith("'")
+    ):
         pattern = pattern[1:-1].strip()
     if not pattern:
         pattern = "1**"
@@ -208,8 +245,8 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     if use_gpu:
         cmd.append("-gpu")  # CUDA acceleration
     if not BTC_COMPRESSED:
-        cmd.append("-u")    # uncompressed WIF
-    cmd.append(pattern)     # <<< MUST be last
+        cmd.append("-u")  # uncompressed WIF
+    cmd.append(pattern)  # <<< MUST be last
 
     cmd_preview = " ".join(map(str, cmd))
     logger.info(
@@ -230,7 +267,7 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
     try:
         proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,     # do not tee into the same file
+            stdout=subprocess.DEVNULL,  # do not tee into the same file
             stderr=subprocess.STDOUT,
             env={**os.environ, **gpu_env},
         )
@@ -246,11 +283,15 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
             start = time.time()
             while p.poll() is None:
                 if pause_event and pause_event.is_set():
-                    logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
+                    logger.info(
+                        "⏸️ Pause requested. Terminating VanitySearch process..."
+                    )
                     p.terminate()
                     break
                 if time.time() - start >= ROTATE_INTERVAL_SECONDS:
-                    logger.info("⏱️ Rotation interval reached. Terminating process to rotate file.")
+                    logger.info(
+                        "⏱️ Rotation interval reached. Terminating process to rotate file."
+                    )
                     p.terminate()
                     break
                 try:
@@ -276,7 +317,9 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
                     logger.debug("Output file not yet created during monitoring")
                 time.sleep(1)
 
-        timer_thread = threading.Thread(target=monitor_process, args=(proc, current_output_path))
+        timer_thread = threading.Thread(
+            target=monitor_process, args=(proc, current_output_path)
+        )
         timer_thread.start()
         proc.wait()
         timer_thread.join()
@@ -310,11 +353,16 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
             # Update counters/metrics and seed ranges
             from core.dashboard import update_dashboard_stat, get_metric
+
             total_keys_generated += lines
             increment_metric("keys_generated_today", lines)
             increment_metric("keys_generated_lifetime", lines)
-            update_dashboard_stat("keys_generated_today", get_metric("keys_generated_today"))
-            update_dashboard_stat("keys_generated_lifetime", get_metric("keys_generated_lifetime"))
+            update_dashboard_stat(
+                "keys_generated_today", get_metric("keys_generated_today")
+            )
+            update_dashboard_stat(
+                "keys_generated_lifetime", get_metric("keys_generated_lifetime")
+            )
             if first_seed is not None and last_seed is not None:
                 record_seed_range(first_seed, last_seed)
 
@@ -328,14 +376,22 @@ def run_vanitysearch_stream(initial_seed_int, batch_id, index_within_batch, paus
 
 
 # Dashboard metric helpers (imported here to keep module import order)
-from core.dashboard import init_shared_metrics, set_metric, increment_metric, get_metric  # noqa: E402
+from core.dashboard import (
+    init_shared_metrics,
+    set_metric,
+    increment_metric,
+    get_metric,
+)  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
-def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None, gpu_flag=None):
+
+def start_keygen_loop(
+    shared_metrics=None, shutdown_event=None, pause_event=None, gpu_flag=None
+):
     """
     Main keygen loop:
     - Initializes dashboard & control events
@@ -352,6 +408,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
 
     # Control events for GUI
     from core.dashboard import register_control_events
+
     register_control_events(shutdown_event, pause_event, module="keygen")
 
     # Ensure output directory exists
@@ -359,8 +416,12 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         os.makedirs(VANITY_OUTPUT_DIR, exist_ok=True)
 
     # Puzzle mode queue prepare (deterministic ranges)
-    if getattr(settings, "PUZZLE_MODE", False) and getattr(settings, "PUZZLE_NUMBER", None) is not None:
+    if (
+        getattr(settings, "PUZZLE_MODE", False)
+        and getattr(settings, "PUZZLE_NUMBER", None) is not None
+    ):
         from core import puzzle_queue as pq
+
         pq.init_work_queue()
 
     # Load or randomize starting batch/index
@@ -379,10 +440,18 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
     set_metric("vanity_progress_percent", 0)
     set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
     set_metric("current_seed", KEYGEN_STATE.get("last_seed", "0x0"))
+    if getattr(settings, "PUZZLE_MODE", False):
+        # Track seeds discarded for falling outside the active puzzle range.
+        set_metric("out_of_range_skipped", 0)
 
     try:
         set_metric("status.keygen", "Running")
-        from core.dashboard import set_thread_health, get_shutdown_event, get_pause_event
+        from core.dashboard import (
+            set_thread_health,
+            get_shutdown_event,
+            get_pause_event,
+        )
+
         set_thread_health("keygen", True)
 
         shutdown_evt = get_shutdown_event("keygen")
@@ -441,16 +510,20 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
                 progress = round((index / float(FILES_PER_BATCH)) * 100, 2)
                 set_metric("vanity_progress_percent", progress)
 
-                success = run_vanitysearch_stream(seed, KEYGEN_STATE["batch_id"], index, pause_evt, gpu_flag)
+                success = run_vanitysearch_stream(
+                    seed, KEYGEN_STATE["batch_id"], index, pause_evt, gpu_flag
+                )
                 if not success:
                     time.sleep(1)
                     continue
 
                 # Save after each file so progress can resume mid-batch
-                save_checkpoint({
-                    "batch_id": KEYGEN_STATE["batch_id"],
-                    "index_within_batch": index + 1,
-                })
+                save_checkpoint(
+                    {
+                        "batch_id": KEYGEN_STATE["batch_id"],
+                        "index_within_batch": index + 1,
+                    }
+                )
                 index += 1
 
             batch_end = time.perf_counter()
@@ -465,10 +538,12 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
             KEYGEN_STATE["index_within_batch"] = 0
             set_metric("vanity_progress_percent", 0)
             # Record start of next batch so restarts begin at correct position
-            save_checkpoint({
-                "batch_id": KEYGEN_STATE["batch_id"],
-                "index_within_batch": 0,
-            })
+            save_checkpoint(
+                {
+                    "batch_id": KEYGEN_STATE["batch_id"],
+                    "index_within_batch": 0,
+                }
+            )
 
     except KeyboardInterrupt:
         logger.info("🛑 Keygen loop interrupted by user. Exiting cleanly.")
@@ -478,6 +553,7 @@ def start_keygen_loop(shared_metrics=None, shutdown_event=None, pause_event=None
         set_metric("status.keygen", "Stopped")
         try:
             from core.dashboard import set_thread_health
+
             set_thread_health("keygen", False)
         except Exception:
             logger.warning("Failed to update keygen thread health", exc_info=True)
