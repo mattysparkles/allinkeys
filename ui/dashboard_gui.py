@@ -180,6 +180,7 @@ class DashboardGUI:
             "keys_per_sec", "keys_generated_today", "keys_generated_lifetime",
             "current_seed_index", "current_seed", "altcoin_files_converted",
             "derived_addresses_today", "vanity_backlog_count",
+            "derive_kps", "rows_per_sec", "current_file", "last_rotation", "derive_recoveries",
             "btc_only_files_checked_today", "btc_only_matches_found_today",
             "new_btc_ranges_size_bytes", "btc_ranges_progress", "btc_ranges_last_updated",
             "vanitysearch_current_mkeys", "vanitysearch_backend", "vanitysearch_device_name",

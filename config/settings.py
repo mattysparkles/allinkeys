@@ -260,6 +260,7 @@ MAX_OUTPUT_FILE_SIZE = VANITY_MAX_BYTES  # legacy alias
 USE_GPU = True
 ROTATE_INTERVAL_SECONDS = 60
 ROTATE_MAX_WAIT_SECONDS = int(os.getenv("ROTATE_MAX_WAIT_SECONDS", "600"))
+DERIVE_STALL_SECONDS = int(os.getenv("DERIVE_STALL_SECONDS", "120"))
 VANITY_MODE = "both"  # 'both' -> -b, 'uncompressed' -> -u, 'compressed' -> (no flag)
 
 # ===================== ✅ ENABLED FEATURES ==========================
@@ -733,6 +734,11 @@ STATS_TO_DISPLAY = {
     "gpu_assignment": True,
     "vanity_gpu_on": True,
     "altcoin_gpu_on": True,
+    "derive_kps": True,
+    "rows_per_sec": True,
+    "current_file": True,
+    "last_rotation": True,
+    "derive_recoveries": True,
     "status": True,
     "last_updated": True,
 }
@@ -791,6 +797,11 @@ METRICS_LABEL_MAP = {
     "gpu_assignment": "Active Assignment",
     "vanity_gpu_on": "Vanity GPU",
     "altcoin_gpu_on": "Altcoin Derive GPU",
+    "derive_kps": "Derive KPS",
+    "rows_per_sec": "Rows/sec",
+    "current_file": "Current File",
+    "last_rotation": "Last Rotation",
+    "derive_recoveries": "Derive Recoveries",
     "status": "Module Status",
     "last_updated": "Last Updated",
 }

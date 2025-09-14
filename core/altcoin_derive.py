@@ -46,6 +46,10 @@ from config.settings import (
     ALTCOIN_GPUS_INDEX,
     LOG_LEVEL,
     EXCLUDE_ETH_FROM_DERIVE,
+    DERIVE_STALL_SECONDS,
+    MAX_OUTPUT_FILE_SIZE,
+    MAX_OUTPUT_LINES,
+    ROTATE_INTERVAL_SECONDS,
 )
 from core.logger import log_message
 from core.dashboard import update_dashboard_stat, get_metric, record_rate
@@ -133,6 +137,79 @@ def list_vanity_txt_files() -> list[str]:
         ]
     except FileNotFoundError:
         return []
+
+
+def _monitor_watchdogs(watchdogs, processes, gpu_queues, backoff):
+    """Monitor output files for stalls and handle rotation/restart."""
+    for gid, info in list(watchdogs.items()):
+        proc = processes.get(gid)
+        if not proc:
+            continue
+        path = info["path"]
+        now = time.time()
+        try:
+            size = os.path.getsize(path)
+            with open(path, "r", encoding="utf-8", errors="ignore") as wf:
+                lines = sum(1 for _ in wf)
+        except FileNotFoundError:
+            size = 0
+            lines = 0
+        if size != info["last_size"] or lines != info["last_lines"]:
+            info["last_size"] = size
+            info["last_lines"] = lines
+            info["last_time"] = now
+            info["saw_growth"] = True
+        else:
+            if now - info["last_time"] >= DERIVE_STALL_SECONDS:
+                log_message(
+                    f"⚠️ Derive stall detected for {info['txt']} on GPU {gid}; restarting",
+                    "WARNING",
+                )
+                safe_increment_metric("derive_recoveries", 1)
+                try:
+                    proc.terminate()
+                    proc.join(timeout=5)
+                except Exception:
+                    pass
+                try:
+                    finalize_csv(path, path.replace(".partial", ""))
+                except Exception:
+                    pass
+                gpu_queues[gid].insert(0, info["txt"])
+                processes[gid] = None
+                watchdogs.pop(gid, None)
+                safe_update_dashboard_stat("last_rotation", time.time())
+                delay = backoff.get(gid, 1)
+                time.sleep(delay)
+                backoff[gid] = min(delay * 2, 30)
+                continue
+        if info["saw_growth"]:
+            if (
+                size >= MAX_OUTPUT_FILE_SIZE
+                or lines >= MAX_OUTPUT_LINES
+                or (now - info["start"] >= ROTATE_INTERVAL_SECONDS)
+            ):
+                log_message(
+                    f"⏱️ Rotation trigger for {info['txt']} on GPU {gid}",
+                    "INFO",
+                )
+                try:
+                    proc.terminate()
+                    proc.join(timeout=5)
+                except Exception:
+                    pass
+                try:
+                    finalize_csv(path, path.replace(".partial", ""))
+                except Exception:
+                    pass
+                gpu_queues[gid].insert(0, info["txt"])
+                processes[gid] = None
+                watchdogs.pop(gid, None)
+                safe_update_dashboard_stat("last_rotation", time.time())
+                delay = backoff.get(gid, 1)
+                time.sleep(delay)
+                backoff[gid] = 1
+                continue
 
 
 def open_new_csv_writer(index, base_name=None):
@@ -1165,6 +1242,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     gpu_ids_all = selected_gpus if selected_gpus else [None]
     processes = {gid: None for gid in gpu_ids_all}
     gpu_queues = {gid: [] for gid in gpu_ids_all}
+    watchdogs = {}
+    backoff = {gid: 1 for gid in gpu_ids_all}
 
     log_message(
         f"[GPU] Using {len(gpu_ids_all)} worker(s) for altcoin derive: {gpu_ids_all}",
@@ -1264,6 +1343,20 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                         )
                         processes[gid] = p
                         queued.add(txt)
+                        base = os.path.splitext(txt)[0]
+                        if gid is not None:
+                            base = f"{base}_gpu{gid}"
+                        partial = os.path.join(CSV_DIR, f"{base}_part_0.partial.csv")
+                        watchdogs[gid] = {
+                            "path": partial,
+                            "last_size": 0,
+                            "last_lines": 0,
+                            "last_time": time.time(),
+                            "start": time.time(),
+                            "saw_growth": False,
+                            "txt": txt,
+                        }
+                        safe_update_dashboard_stat("current_file", txt)
 
                 try:
                     while True:
@@ -1287,6 +1380,8 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                             safe_increment_metric("backlog_files_completed", 1)
                             if dur > 0:
                                 rps = rows / dur
+                                record_rate("derive_kps", rps)
+                                safe_update_dashboard_stat("rows_per_sec", round(rps, 2))
                                 log_message(
                                     f"[STATS] {txt_file} → {rows} rows in {dur:.2f}s ({rps:.1f} rows/s)",
                                     "DEBUG",
@@ -1302,6 +1397,9 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                         if proc:
                             proc.join()
                             processes[gid] = None
+                            watchdogs.pop(gid, None)
+                            backoff[gid] = 1
+                            safe_update_dashboard_stat("last_rotation", time.time())
                 except Empty:
                     pass
 
@@ -1310,9 +1408,15 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                     if proc and not proc.is_alive():
                         proc.join()
                         processes[gid] = None
+                        watchdogs.pop(gid, None)
+
+                _monitor_watchdogs(watchdogs, processes, gpu_queues, backoff)
 
                 safe_update_dashboard_stat(
                     "backlog_current_file", next(iter(queued), "")
+                )
+                safe_update_dashboard_stat(
+                    "current_file", next(iter(queued), "")
                 )
                 if not any(processes.values()) and not all_txt:
                     time.sleep(3)
