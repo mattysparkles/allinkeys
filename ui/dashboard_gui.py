@@ -30,7 +30,6 @@ from config.settings import (
     ALERT_CHECKBOXES,
     ALERT_CREDENTIAL_WARNINGS,
     DASHBOARD_PASSWORD_HASH,
-    SHOW_ALERTS_SUCCESSFULLY_CONFIGURED_TYPES,
     SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES,
     SHOW_CONTROL_BUTTONS_MAIN,
     SHOW_DELETE_DASHBOARD_DATA_BUTTON,
@@ -798,7 +797,7 @@ def start_dashboard():
             root.destroy()
             return
         root.deiconify()
-    app = DashboardGUI(root)
+    DashboardGUI(root)
     root.mainloop()
 
 
