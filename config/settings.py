@@ -259,6 +259,7 @@ MAX_OUTPUT_LINES = VANITY_ROTATE_LINES  # legacy alias
 MAX_OUTPUT_FILE_SIZE = VANITY_MAX_BYTES  # legacy alias
 USE_GPU = True
 ROTATE_INTERVAL_SECONDS = 60
+ROTATE_MAX_WAIT_SECONDS = int(os.getenv("ROTATE_MAX_WAIT_SECONDS", "600"))
 VANITY_MODE = "both"  # 'both' -> -b, 'uncompressed' -> -u, 'compressed' -> (no flag)
 
 # ===================== ✅ ENABLED FEATURES ==========================
