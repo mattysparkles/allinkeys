@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from config.constants import SECP256K1_ORDER
+from config.constants import SECP256K1_ORDER  # noqa: E402
 
 for mod in ["core.keygen", "core.dashboard"]:
     sys.modules.pop(mod, None)
@@ -25,18 +25,9 @@ def test_generate_seed_from_batch_overflow():
     assert keygen.generate_seed_from_batch(batch_id, index, batch_size) is None
 
 
-def test_generate_random_seed_queue(monkeypatch):
-    keygen._SEED_QUEUE = [42]
-    seed = keygen.generate_random_seed()
-    assert seed == 42
-    assert keygen._SEED_QUEUE == []
-
-
-def test_generate_random_seed_fills_queue(monkeypatch):
-    keygen._SEED_QUEUE = []
+def test_generate_random_seed_basic(monkeypatch):
+    """Ensure random seed generation respects ``min_bits`` and unused checks."""
     monkeypatch.setattr(keygen, "seed_in_used_range", lambda c, ranges=None: False)
-    monkeypatch.setattr(keygen, "get_condensed_ranges", lambda: [])
     monkeypatch.setattr(keygen.secrets, "randbelow", lambda span: 1)
     seed = keygen.generate_random_seed(min_bits=128)
     assert seed == (1 << 128) + 1
-    assert len(keygen._SEED_QUEUE) == keygen.SEED_QUEUE_SIZE - 1

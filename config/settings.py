@@ -5,6 +5,7 @@ Auto-merged to restore full functionality.
 
 import os
 import shutil
+import warnings
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -68,6 +69,7 @@ def rotate_api_keys():
             globals()["TWILIO_TOKEN"] = new_val
             os.environ["TWILIO_TOKEN"] = new_val
 
+
 # ===================== 🔌 SYSTEM PATHS ==========================
 # Root of the repository
 BASE_DIR = env_path("ALLINKEYS_BASE_DIR", Path(__file__).resolve().parents[1])
@@ -84,27 +86,33 @@ UNIQUE_DIR = env_path("ALLINKEYS_UNIQUE_DIR", DOWNLOADS_DIR / "unique")
 # Where matches and encrypted alerts are archived
 MATCHES_DIR = env_path("ALLINKEYS_MATCHES_DIR", BASE_DIR / "matches")
 # VanitySearch text outputs
-# Results now live under ``output/vanity_output``. To keep using the legacy
-# top-level ``vanity_output`` directory, set ``ALLINKEYS_VANITY_TXT_DIR`` to
-# ``BASE_DIR/vanity_output`` (``ALLINKEYS_VANITY_OUTPUT_DIR`` is also honored).
+# Results now live under ``output/vanity_output``. Older configurations used
+# ``ALLINKEYS_VANITY_TXT_DIR`` so we still honor it but emit a deprecation
+# warning when accessed via the old ``VANITY_TXT_DIR`` attribute.  The new
+# canonical name is ``VANITY_OUTPUT_DIR`` and all code should reference it.
 _VANITY_DIR_DEFAULT = BASE_DIR / "output" / "vanity_output"
-VANITY_TXT_DIR = env_path(
-    "ALLINKEYS_VANITY_TXT_DIR",
-    env_path("ALLINKEYS_VANITY_OUTPUT_DIR", _VANITY_DIR_DEFAULT),
+VANITY_OUTPUT_DIR = env_path(
+    "ALLINKEYS_VANITY_OUTPUT_DIR",
+    env_path("ALLINKEYS_VANITY_TXT_DIR", _VANITY_DIR_DEFAULT),
 )
-VANITY_OUTPUT_DIR = VANITY_TXT_DIR  # legacy alias
 # Mnemonic mode text outputs
 MNEMONIC_TXT_DIR = env_path(
     "ALLINKEYS_MNEMONIC_TXT_DIR", BASE_DIR / "output" / "mnemonic_output"
 )
 # Local audio clips for alerts
 SOUND_CLIPS_DIR = env_path("ALLINKEYS_SOUND_CLIPS_DIR", BASE_DIR / "alerts" / "sounds")
-CHECKPOINT_PATH = env_path("ALLINKEYS_CHECKPOINT_PATH", LOG_DIR / "restore_checkpoint.json")
+CHECKPOINT_PATH = env_path(
+    "ALLINKEYS_CHECKPOINT_PATH", LOG_DIR / "restore_checkpoint.json"
+)
 # Track which CSVs have been processed
 CHECKED_CSV_LOG = env_path("ALLINKEYS_CHECKED_CSV_LOG", LOG_DIR / "checked_csvs.txt")
-RECHECKED_CSV_LOG = env_path("ALLINKEYS_RECHECKED_CSV_LOG", LOG_DIR / "rechecked_csvs.txt")
+RECHECKED_CSV_LOG = env_path(
+    "ALLINKEYS_RECHECKED_CSV_LOG", LOG_DIR / "rechecked_csvs.txt"
+)
 # Track per-file progress for the CSV checker
-CSV_CHECKPOINT_STATE = env_path("ALLINKEYS_CSV_CHECKPOINT_STATE", LOG_DIR / "csv_checker_state.json")
+CSV_CHECKPOINT_STATE = env_path(
+    "ALLINKEYS_CSV_CHECKPOINT_STATE", LOG_DIR / "csv_checker_state.json"
+)
 # Alias for backward compatibility
 DOWNLOAD_DIR = DOWNLOADS_DIR
 CHECKPOINT_FILE = env_path("ALLINKEYS_CHECKPOINT_FILE", BASE_DIR / "checkpoint.json")
@@ -114,7 +122,9 @@ RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
 
 # === BTC-only mode settings ===
 ALL_BTC_ADDRESSES_URL = "https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"  # Source list of all BTC addresses
-ALL_BTC_ADDRESSES_DIR = BASE_DIR / "all_btc_addresses"  # Where the downloaded list is stored
+ALL_BTC_ADDRESSES_DIR = (
+    BASE_DIR / "all_btc_addresses"
+)  # Where the downloaded list is stored
 ALL_BTC_RANGES_COUNT = 20  # Number of range files to split the list into
 ALL_BTC_GZ_LOCAL = env_path(
     "ALLINKEYS_ALL_BTC_GZ_LOCAL",
@@ -124,20 +134,18 @@ BTC_RANGE_FILE_PATTERN = "btc_range_{:02d}.txt"  # Range file naming pattern 00.
 
 # Backlog pause control (creation vs. consumption)
 BACKLOG_PAUSE_THRESHOLD = int(
-    os.getenv("BACKLOG_PAUSE_THRESHOLD", os.getenv("CHECKER_BACKLOG_PAUSE_THRESHOLD", "20000"))
+    os.getenv(
+        "BACKLOG_PAUSE_THRESHOLD", os.getenv("CHECKER_BACKLOG_PAUSE_THRESHOLD", "20000")
+    )
 )
-BACKLOG_RESUME_THRESHOLD = int(
-    os.getenv("BACKLOG_RESUME_THRESHOLD", "18000")
-)
+BACKLOG_RESUME_THRESHOLD = int(os.getenv("BACKLOG_RESUME_THRESHOLD", "18000"))
 # Warning rate-limit (seconds), per event name
 PAUSE_WARNING_RATELIMIT_SECONDS = int(
     os.getenv("PAUSE_WARNING_RATELIMIT_SECONDS", "30")
 )
 
 # Polling intervals for status updates
-METRICS_POLL_INTERVAL_SECONDS = int(
-    os.getenv("METRICS_POLL_INTERVAL_SECONDS", "3")
-)
+METRICS_POLL_INTERVAL_SECONDS = int(os.getenv("METRICS_POLL_INTERVAL_SECONDS", "3"))
 BACKLOG_MONITOR_INTERVAL_SECONDS = int(
     os.getenv("BACKLOG_MONITOR_INTERVAL_SECONDS", "2")
 )
@@ -146,10 +154,12 @@ BACKLOG_MONITOR_INTERVAL_SECONDS = int(
 CHECKER_BACKLOG_PAUSE_THRESHOLD = BACKLOG_PAUSE_THRESHOLD
 
 # BTC-only processing stability settings
-BTC_FILE_STABILITY_WINDOW_SEC = 3.0   # how long size must remain unchanged
-BTC_FILE_STABILITY_POLLS = 6          # number of polls
-BTC_FILE_STABILITY_INTERVAL_SEC = BTC_FILE_STABILITY_WINDOW_SEC / BTC_FILE_STABILITY_POLLS
-BTC_MIN_FILE_AGE_SEC = 2.0            # ignore files newer than this
+BTC_FILE_STABILITY_WINDOW_SEC = 3.0  # how long size must remain unchanged
+BTC_FILE_STABILITY_POLLS = 6  # number of polls
+BTC_FILE_STABILITY_INTERVAL_SEC = (
+    BTC_FILE_STABILITY_WINDOW_SEC / BTC_FILE_STABILITY_POLLS
+)
+BTC_MIN_FILE_AGE_SEC = 2.0  # ignore files newer than this
 
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
@@ -189,7 +199,11 @@ def find_vanitysearch_binary():
     # Windows prefers ``.exe`` binaries while POSIX environments prefer the
     # extensionless names.  Include both sets so running a Windows binary from
     # WSL (or vice-versa) still works.
-    candidates = exe_candidates + nix_candidates if os.name == "nt" else nix_candidates + exe_candidates
+    candidates = (
+        exe_candidates + nix_candidates
+        if os.name == "nt"
+        else nix_candidates + exe_candidates
+    )
 
     for cand in candidates:
         # Resolve absolute/relative candidates and ensure executability.
@@ -237,7 +251,7 @@ OCLVANITYGEN_PATH = Path(_oclvanitygen) if _oclvanitygen else None
 _oclvanityminer = find_oclvanity_binary("oclvanityminer")
 OCLVANITYMINER_PATH = Path(_oclvanityminer) if _oclvanityminer else None
 KEYCONV_PATH = env_path("ALLINKEYS_KEYCONV_PATH", BASE_DIR / "bin" / "keyconv.exe")
-MAX_KEYS_PER_FILE = 100_000  #Deprecated
+MAX_KEYS_PER_FILE = 100_000  # Deprecated
 # Output file rotation config (for VanitySearch stream)
 VANITY_ROTATE_LINES = 200_000
 VANITY_MAX_BYTES = 500 * 1024 * 1024
@@ -266,10 +280,10 @@ ENABLE_ALERTS = True
 ENABLE_BACKLOG_CONVERSION = True
 # Initial day-one funded address checks
 ENABLE_DAY_ONE_CHECKS = True
-ENABLE_DAY_ONE_CHECK = ENABLE_DAY_ONE_CHECKS # Alias do not change
+ENABLE_DAY_ONE_CHECK = ENABLE_DAY_ONE_CHECKS  # Alias do not change
 # Daily recheck of unique CSVs
 ENABLE_DAILY_UNIQUE_RECHECK = True
-ENABLE_UNIQUE_RECHECK = ENABLE_DAILY_UNIQUE_RECHECK # Alias do not change
+ENABLE_UNIQUE_RECHECK = ENABLE_DAILY_UNIQUE_RECHECK  # Alias do not change
 # Derive altcoin addresses from generated keys
 ENABLE_ALTCOIN_DERIVATION = True
 ENABLE_SEED_VERIFICATION = False
@@ -321,23 +335,23 @@ COIN_DOWNLOAD_URLS = {
     "ltc": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Litecoin/Latest_Litecoin_Addresses.tsv.gz",
     "eth": "https://raw.githubusercontent.com/Pymmdrza/Rich-Address-Wallet/refs/heads/main/ETHEREUM/EthRich.txt",
     "bch": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/BitcoinCash/Latest_BitcoinCash_Addresses.tsv.gz",
-    "dash": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Dash/Latest_Dash_Addresses.tsv.gz"
+    "dash": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Dash/Latest_Dash_Addresses.tsv.gz",
 }
 MAX_DAILY_FILES_PER_COIN = 2
 FILTER_ONLY_P2PKH = False
 
 # Address generation toggles
-ENABLE_P2PKH = True          # legacy "1" prefix (P2PKH)
+ENABLE_P2PKH = True  # legacy "1" prefix (P2PKH)
 # SegWit address generation toggles (bc1)
 ENABLE_BC1_DEFAULT = False
 ENABLE_BECH32_DEFAULT = ENABLE_BC1_DEFAULT  # deprecated alias
-ENABLE_P2WPKH = ENABLE_BC1_DEFAULT         # bc1q… (Bech32 v0)
-ENABLE_TAPROOT = ENABLE_BC1_DEFAULT        # bc1p… (Bech32m v1)
+ENABLE_P2WPKH = ENABLE_BC1_DEFAULT  # bc1q… (Bech32 v0)
+ENABLE_TAPROOT = ENABLE_BC1_DEFAULT  # bc1p… (Bech32m v1)
 
 # GUI default patterns used when “All” selected
-DEFAULT_BTC_PATTERNS = ["1**"]                # legacy
-DEFAULT_BTC_PATTERNS_BECH32 = ["bc1q**"]      # v0
-DEFAULT_BTC_PATTERNS_BECH32M = ["bc1p**"]     # v1
+DEFAULT_BTC_PATTERNS = ["1**"]  # legacy
+DEFAULT_BTC_PATTERNS_BECH32 = ["bc1q**"]  # v0
+DEFAULT_BTC_PATTERNS_BECH32M = ["bc1p**"]  # v1
 
 # Normalize bech32 case to lowercase (spec-compliant)
 NORMALIZE_BECH32_LOWER = True
@@ -362,7 +376,7 @@ VANITY_GPU_INDEX = [0]
 # These settings only apply when running the full `main.py` pipeline.
 GPU_STRATEGY = "vanity_priority"  # Options: "vanity_priority", "csv_priority", "swing"
 MAX_BACKLOG_THRESHOLD = 10  # backlog size to trigger GPU reassignment
-MIN_BACKLOG_THRESHOLD = 1   # backlog size to resume vanity GPU keygen
+MIN_BACKLOG_THRESHOLD = 1  # backlog size to resume vanity GPU keygen
 GPU_VENDOR = "auto"  # "nvidia", "amd", or "auto"
 
 # ===================== ALTCOIN ==========================
@@ -371,7 +385,7 @@ GPU_VENDOR = "auto"  # "nvidia", "amd", or "auto"
 # fall back to CPU and produce no GPU-accelerated output.
 ALTCOIN_GPUS_INDEX = [0]
 CSV_MAX_SIZE_MB = 200
-MAX_CSV_MB = CSV_MAX_SIZE_MB # alias do not change
+MAX_CSV_MB = CSV_MAX_SIZE_MB  # alias do not change
 CSV_MAX_ROWS = 200000
 BCH_CASHADDR_ENABLED = True
 EXCLUDE_ETH_FROM_DERIVE = False
@@ -383,7 +397,7 @@ ENABLED_COINS = {
     "DASH": True,
     "BCH": True,
     "RVN": True,
-    "PEP": True
+    "PEP": True,
 }
 # === Coin Toggle Shorthands ===
 BTC = ENABLED_COINS["BTC"]
@@ -417,7 +431,9 @@ SHOW_AVERAGE_TIME_PER_BACKLOG_FILE = True
 SHOW_PROGRESS_BAR_CURRENT_BACKLOG_FILENAME_PROCESSING = True
 SHOW_CONTROL_BUTTONS_MAIN = True
 SHOW_DISK_FREE = True
-SHOW_BUTTONS_START_STOP_PAUSE_RESUME = True  # Shows main control buttons for the dashboard
+SHOW_BUTTONS_START_STOP_PAUSE_RESUME = (
+    True  # Shows main control buttons for the dashboard
+)
 SHOW_SAVE_DIRECTORIES = True
 SHOW_UPTIME = True
 SHOW_MATCHES_LIFETIME = True
@@ -429,7 +445,9 @@ SHOW_CSV_CREATED_LIFETIME = True
 SHOW_NEW_CSV_CHECKED_TODAY_TOTAL = True
 SHOW_CSV_RECHECKED_TOTAL_TODAY = True
 SHOW_ADDRESS_COUNTS_LIFETIME = True  # Show total addresses created lifetime (per coin)
-SHOW_ADDRESS_CREATED_COUNTS_TODAY = True  # Show total addresses created today (per coin)
+SHOW_ADDRESS_CREATED_COUNTS_TODAY = (
+    True  # Show total addresses created today (per coin)
+)
 SHOW_ADDRESS_CHECKED_COUNTS_TODAY = True
 SHOW_ADDRESS_CHECKED_COUNTS_LIFETIME = True
 
@@ -491,7 +509,7 @@ DELETE_SYSTEM_LOGS = True
 DELETE_CSV_CHECKING_LOGS = True
 
 # ===================== 📜 LOGGING ================================
-LOG_LEVEL = "INFO" # Options include: INFO, DEBUG, TRACE,
+LOG_LEVEL = "INFO"  # Options include: INFO, DEBUG, TRACE,
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
 LOGGING_ENABLED = True  # or False if you want to disable it
@@ -525,7 +543,7 @@ DONATION_ADDRESSES = {
     "BTG": "GRt4a119DHFSN9oGGw1tGwUzg5qtNCprCH",
     "PEP": "PbCiPTNrYaCgv1aqNCds5n7Q73znGrTkgp",
     "BCH_BSV": "bitcoincash:qpnyvtz65u9nf4ddd0wewjrge4jedu7l2sayuy09fw",
-    "XLM": "GBGMRI6Z3JFMEZSUSZROASNLWOIDLRAUEX5RNAVCAFC7A52X5HCG5UYJ"
+    "XLM": "GBGMRI6Z3JFMEZSUSZROASNLWOIDLRAUEX5RNAVCAFC7A52X5HCG5UYJ",
 }
 
 # ===================== 🔔 ALERTS + NOTIFICATIONS ====================
@@ -545,7 +563,9 @@ ALERT_SOUND_FILE = env_path(
 ENABLE_DESKTOP_WINDOW_ALERT = True
 ALERT_POPUP_COLOR_1 = "#FF0000"  # First flash color
 ALERT_POPUP_COLOR_2 = "#000000"  # Second flash color
-ALERT_PHRASE = "The Beacons Have Been Lit, Gondor Calls for Aid!"  # Message shown in window
+ALERT_PHRASE = (
+    "The Beacons Have Been Lit, Gondor Calls for Aid!"  # Message shown in window
+)
 
 # === PGP ENCRYPTED MATCH ALERT OUTPUT ===
 ENABLE_PGP = False
@@ -558,51 +578,61 @@ PGP_PUBLIC_KEY_PATH = env_path(
 ALERT_EMAIL_ENABLED = True
 ALERT_EMAIL_SENDER = os.getenv("ALERT_EMAIL_SENDER", "emailsenderbtc@gmail.com")
 ALERT_EMAIL_PASSWORD = os.getenv("ALERT_EMAIL_PASSWORD", "")
-ALERT_EMAIL_RECIPIENTS = os.getenv("ALERT_EMAIL_RECIPIENTS", "").split(",") if os.getenv("ALERT_EMAIL_RECIPIENTS") else []
+ALERT_EMAIL_RECIPIENTS = (
+    os.getenv("ALERT_EMAIL_RECIPIENTS", "").split(",")
+    if os.getenv("ALERT_EMAIL_RECIPIENTS")
+    else []
+)
 EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER", "smtp.gmail.com")
 EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", 587))
 INCLUDE_MATCH_INFO = True
 ENCRYPTED_MESSAGE = False
 # SMTP Credentials (required if ALERT_EMAIL_ENABLED is True)
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")           # Or use your provider's SMTP host
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))                          # TLS port (use 465 for SSL)
-SMTP_USERNAME = os.getenv("SMTP_USERNAME", "emailsenderbtc@gmail.com")        # Replace with your actual sending email
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")    # App password if using Gmail 2FA
+SMTP_SERVER = os.getenv(
+    "SMTP_SERVER", "smtp.gmail.com"
+)  # Or use your provider's SMTP host
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))  # TLS port (use 465 for SSL)
+SMTP_USERNAME = os.getenv(
+    "SMTP_USERNAME", "emailsenderbtc@gmail.com"
+)  # Replace with your actual sending email
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")  # App password if using Gmail 2FA
 ALERT_EMAIL_FROM = SMTP_USERNAME  # or hardcode like "you@example.com"
 ALERT_EMAIL_TO = ALERT_EMAIL_RECIPIENTS  # DONT CHANGE HERE CHANGE ALERT_EMAIL_RECIPIENTS OPTION ABOVE
 
 
 # === TELEGRAM BOT ALERT CONFIGURATION ===
 ALERT_TELEGRAM_ENABLED = True
-ENABLE_TELEGRAM_ALERT = ALERT_TELEGRAM_ENABLED # alias for backward compatibility dont modify
+ENABLE_TELEGRAM_ALERT = (
+    ALERT_TELEGRAM_ENABLED  # alias for backward compatibility dont modify
+)
 TELEGRAM_BOT_TOKEN = _init_api_key("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # === SMS VIA TWILIO ===
 ALERT_SMS_ENABLED = True
-ENABLE_SMS_ALERT = ALERT_SMS_ENABLED # alias for backward compatibility dont modify
+ENABLE_SMS_ALERT = ALERT_SMS_ENABLED  # alias for backward compatibility dont modify
 TWILIO_SID = _init_api_key("TWILIO_SID")
 TWILIO_AUTH_TOKEN = _init_api_key("TWILIO_AUTH_TOKEN")
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
 TWILIO_TO_NUMBER = os.getenv("TWILIO_TO_NUMBER", "")
-TWILIO_TO = TWILIO_TO_NUMBER # Alias do not change
+TWILIO_TO = TWILIO_TO_NUMBER  # Alias do not change
 TWILIO_TO_SMS = TWILIO_TO_NUMBER  # alias for backward compatibility
 TWILIO_FROM = TWILIO_FROM_NUMBER  # alias for backward compatibility
 ENABLE_PHONE_CALL_ALERT = True
 TWILIO_CALL_TO_NUMBER = os.getenv("TWILIO_CALL_TO_NUMBER", "")
 TWILIO_TOKEN = TWILIO_AUTH_TOKEN  # Alias do not change
-TWILIO_TO_CALL = TWILIO_CALL_TO_NUMBER # Alias do not change
+TWILIO_TO_CALL = TWILIO_CALL_TO_NUMBER  # Alias do not change
 
 # === DISCORD WEBHOOK ALERTS ===
 ALERT_DISCORD_ENABLED = False
-ENABLE_DISCORD_ALERT = ALERT_DISCORD_ENABLED # Alias do not change
+ENABLE_DISCORD_ALERT = ALERT_DISCORD_ENABLED  # Alias do not change
 DISCORD_WEBHOOK_URL = _init_api_key("DISCORD_WEBHOOK_URL")
 
 # === HOME ASSISTANT / IoT WEBHOOK ===
 ALERT_HOME_ASSISTANT_ENABLED = False
-ENABLE_HOME_ASSISTANT_ALERT = ALERT_HOME_ASSISTANT_ENABLED # Alias do not change
+ENABLE_HOME_ASSISTANT_ALERT = ALERT_HOME_ASSISTANT_ENABLED  # Alias do not change
 HOME_ASSISTANT_WEBHOOK = os.getenv("HOME_ASSISTANT_WEBHOOK", "")
-HOME_ASSISTANT_URL = HOME_ASSISTANT_WEBHOOK # Alias do not change
+HOME_ASSISTANT_URL = HOME_ASSISTANT_WEBHOOK  # Alias do not change
 HOME_ASSISTANT_TOKEN = _init_api_key("HOME_ASSISTANT_TOKEN")
 
 # === CLOUD STORAGE MATCH BACKUPS ===
@@ -612,7 +642,7 @@ ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE = False
 ICLOUD_LOGIN = os.getenv("ICLOUD_LOGIN", "you@icloud.com")
 ICLOUD_PASSWORD = os.getenv("ICLOUD_PASSWORD", "")
 ICLOUD_DRIVE_PATH = os.getenv("ICLOUD_DRIVE_PATH", "/path/on/icloud")
-ENABLE_CLOUD_UPLOAD = ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE # Alias do not change
+ENABLE_CLOUD_UPLOAD = ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE  # Alias do not change
 
 # Google Drive
 ALERT_SAVE_MATCHES_TO_GOOGLE_DRIVE = False
@@ -629,7 +659,7 @@ DROPBOX_FILE_PATH = os.getenv("DROPBOX_FILE_PATH", "/dropbox/folder")
 # === LOCAL MATCH FILE SAVE ===
 ALERT_SAVE_MATCHES_TO_LOCAL_FILE = True
 FILE_PATH = MATCHES_DIR  # Matches folder
-MATCH_LOG_DIR = MATCHES_DIR # Alias do not change
+MATCH_LOG_DIR = MATCHES_DIR  # Alias do not change
 INCLUDE_MATCH_INFO = True
 ENCRYPTED_MESSAGE = False
 
@@ -797,50 +827,63 @@ ALERT_CHECKBOXES = {
 }
 # ===================== ⚠️ ALERT CREDENTIAL WARNINGS ======================
 ALERT_CREDENTIAL_WARNINGS = {
-    "ALERT_EMAIL_ENABLED": not all([
-        'ALERT_EMAIL_SENDER' in globals(),
-        'ALERT_EMAIL_PASSWORD' in globals(),
-        'ALERT_EMAIL_RECIPIENTS' in globals()
-    ]),
-    "ALERT_TELEGRAM_ENABLED": not all([
-        'TELEGRAM_BOT_TOKEN' in globals(),
-        'TELEGRAM_CHAT_ID' in globals()
-    ]),
-    "ALERT_SMS_ENABLED": not all([
-        'TWILIO_SID' in globals(),
-        'TWILIO_TOKEN' in globals(),
-        'TWILIO_FROM' in globals(),
-        'TWILIO_TO_SMS' in globals()
-    ]),
-    "ENABLE_SMS_ALERT": not all([
-        'TWILIO_SID' in globals(),
-        'TWILIO_TOKEN' in globals(),
-        'TWILIO_FROM' in globals(),
-        'TWILIO_TO_SMS' in globals()
-    ]),
-    "ENABLE_PHONE_CALL_ALERT": not all([
-        'TWILIO_SID' in globals(),
-        'TWILIO_TOKEN' in globals(),
-        'TWILIO_FROM' in globals(),
-        'TWILIO_TO_CALL' in globals()
-    ]),
-    "ALERT_DISCORD_ENABLED": not ('DISCORD_WEBHOOK_URL' in globals()),
-    "ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE": not all([
-        'ICLOUD_LOGIN' in globals(),
-        'ICLOUD_PASSWORD' in globals(),
-        'ICLOUD_DRIVE' in globals()
-    ]),
-    "ALERT_SAVE_MATCHES_TO_GOOGLE_DRIVE": not all([
-        'GOOGLE_DRIVE_LOGIN' in globals(),
-        'GOOGLE_DRIVE_PASSWORD' in globals(),
-        'GOOGLE_DRIVE_FILE_PATH' in globals()
-    ]),
-    "ALERT_SAVE_MATCHES_TO_DROPBOX": not all([
-        'DROPBOX_LOGIN' in globals(),
-        'DROPBOX_PASSWORD' in globals(),
-        'DROPBOX_FILE_PATH' in globals()
-    ]),
-    "ALERT_HOME_ASSISTANT_ENABLED": not ('HOME_ASSISTANT_WEBHOOK' in globals())
+    "ALERT_EMAIL_ENABLED": not all(
+        [
+            "ALERT_EMAIL_SENDER" in globals(),
+            "ALERT_EMAIL_PASSWORD" in globals(),
+            "ALERT_EMAIL_RECIPIENTS" in globals(),
+        ]
+    ),
+    "ALERT_TELEGRAM_ENABLED": not all(
+        ["TELEGRAM_BOT_TOKEN" in globals(), "TELEGRAM_CHAT_ID" in globals()]
+    ),
+    "ALERT_SMS_ENABLED": not all(
+        [
+            "TWILIO_SID" in globals(),
+            "TWILIO_TOKEN" in globals(),
+            "TWILIO_FROM" in globals(),
+            "TWILIO_TO_SMS" in globals(),
+        ]
+    ),
+    "ENABLE_SMS_ALERT": not all(
+        [
+            "TWILIO_SID" in globals(),
+            "TWILIO_TOKEN" in globals(),
+            "TWILIO_FROM" in globals(),
+            "TWILIO_TO_SMS" in globals(),
+        ]
+    ),
+    "ENABLE_PHONE_CALL_ALERT": not all(
+        [
+            "TWILIO_SID" in globals(),
+            "TWILIO_TOKEN" in globals(),
+            "TWILIO_FROM" in globals(),
+            "TWILIO_TO_CALL" in globals(),
+        ]
+    ),
+    "ALERT_DISCORD_ENABLED": "DISCORD_WEBHOOK_URL" not in globals(),
+    "ALERT_SAVE_MATCHES_TO_ICLOUD_DRIVE": not all(
+        [
+            "ICLOUD_LOGIN" in globals(),
+            "ICLOUD_PASSWORD" in globals(),
+            "ICLOUD_DRIVE" in globals(),
+        ]
+    ),
+    "ALERT_SAVE_MATCHES_TO_GOOGLE_DRIVE": not all(
+        [
+            "GOOGLE_DRIVE_LOGIN" in globals(),
+            "GOOGLE_DRIVE_PASSWORD" in globals(),
+            "GOOGLE_DRIVE_FILE_PATH" in globals(),
+        ]
+    ),
+    "ALERT_SAVE_MATCHES_TO_DROPBOX": not all(
+        [
+            "DROPBOX_LOGIN" in globals(),
+            "DROPBOX_PASSWORD" in globals(),
+            "DROPBOX_FILE_PATH" in globals(),
+        ]
+    ),
+    "ALERT_HOME_ASSISTANT_ENABLED": "HOME_ASSISTANT_WEBHOOK" not in globals(),
 }
 
 
@@ -850,13 +893,15 @@ BUTTONS_ENABLED = {
     "altcoin": ALTCOIN_BUTTON_CONTROL,
     "csv_check": CSV_CHECK_BUTTON_CONTROL,
     "csv_recheck": CSV_RECHECK_BUTTON_CONTROL,
-    "alerts": ALERTS_BUTTON_CONTROL
+    "alerts": ALERTS_BUTTON_CONTROL,
 }
 
 # ===================== 🖥️ GPU/CPU BACKENDS ==========================
 # GPU/CPU selection & binaries
 # Only the CUDA-enabled VanitySearch binary is bundled.
-GPU_BACKEND = os.getenv("GPU_BACKEND", "cuda")  # cuda, opencl, cpu, auto, or oclvanitygen
+GPU_BACKEND = os.getenv(
+    "GPU_BACKEND", "cuda"
+)  # cuda, opencl, cpu, auto, or oclvanitygen
 VANITYSEARCH_BIN_CUDA = VANITYSEARCH_PATH or ""
 VANITYSEARCH_BIN_OPENCL = ""  # placeholder for future OpenCL support
 VANITYSEARCH_BIN_CPU = VANITYSEARCH_PATH or ""  # CPU fallback shares the same binary
@@ -870,7 +915,29 @@ ENABLE_PHONE_CALL_ALERT = ENABLE_PHONE_CALL_ALERT
 
 # PGP
 ENABLE_PGP_ENCRYPTION = False
-PGP_RECIPIENT = ""          # key email or uid fragment
+PGP_RECIPIENT = ""  # key email or uid fragment
 PGP_KEYRING_PATH = r"P:\\ALLINKEYS\\pgp\\pubring.kbx"  # ok if empty; use default
 
 
+# ---------------------------------------------------------------------------
+# Backward-compatible aliases
+# ---------------------------------------------------------------------------
+
+
+def __getattr__(name: str):
+    """Provide deprecated access to renamed settings.
+
+    Currently only supports ``VANITY_TXT_DIR`` which has been replaced by
+    ``VANITY_OUTPUT_DIR``. Accessing the old name emits a ``DeprecationWarning``
+    to help downstream users migrate. Additional aliases should be handled
+    here and removed in the next release cycle.
+    """
+
+    if name == "VANITY_TXT_DIR":
+        warnings.warn(
+            "VANITY_TXT_DIR is deprecated; use VANITY_OUTPUT_DIR",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return VANITY_OUTPUT_DIR
+    raise AttributeError(f"module 'config.settings' has no attribute {name!r}")
