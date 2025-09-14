@@ -6,6 +6,7 @@ import subprocess
 import threading
 import secrets
 import platform
+import re
 from datetime import datetime
 from collections import deque
 
@@ -17,6 +18,7 @@ from config.settings import (
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
     FILES_PER_BATCH,
+    ROTATE_MAX_WAIT_SECONDS,
 )
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import (
@@ -174,6 +176,51 @@ def generate_random_seed(min_bits=128):
 
 
 # ---------------------------------------------------------------------------
+# VanitySearch output parsing
+# ---------------------------------------------------------------------------
+
+
+def parse_vanity_file(path):
+    """Return number of keys and first/last seed from a VanitySearch file.
+
+    Supports both ``Priv (HEX):`` (VanitySearch) and ``Privkey:`` (oclvanity*)
+    line formats. Falls back to a regex search and skips malformed lines.
+    """
+
+    lines = 0
+    first_seed = None
+    last_seed = None
+    pattern = re.compile(r"(?i)priv(?:key)?(?: \(hex\))?:\s*(?:0x)?([0-9a-f]+)")
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            for raw in fh:
+                line = raw.strip()
+                hex_part = None
+                if line.startswith("Priv (HEX):") or line.startswith("Privkey:"):
+                    hex_part = line.split(":", 1)[1].strip()
+                else:
+                    m = pattern.search(line)
+                    if m:
+                        hex_part = m.group(1)
+                if not hex_part:
+                    continue
+                hex_part = hex_part.replace("0x", "")
+                try:
+                    seed_int = int(hex_part, 16)
+                except ValueError:
+                    continue
+                if first_seed is None:
+                    first_seed = seed_int
+                last_seed = seed_int
+                lines += 1
+    except FileNotFoundError:
+        return 0, None, None
+
+    return lines, first_seed, last_seed
+
+
+# ---------------------------------------------------------------------------
 # VanitySearch runner (single-file run + rotation)
 # ---------------------------------------------------------------------------
 
@@ -281,30 +328,45 @@ def run_vanitysearch_stream(
             - rotate by lines (MAX_OUTPUT_LINES)
             """
             start = time.time()
+            last_size = -1
+            saw_growth = False
             while p.poll() is None:
                 if pause_event and pause_event.is_set():
                     logger.info(
-                        "⏸️ Pause requested. Terminating VanitySearch process..."
+                        "⏸️ Pause requested. Terminating VanitySearch process...",
                     )
                     p.terminate()
                     break
-                if time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                now = time.time()
+                if saw_growth and now - start >= ROTATE_INTERVAL_SECONDS:
                     logger.info(
-                        "⏱️ Rotation interval reached. Terminating process to rotate file."
+                        "⏱️ Rotation interval reached. Terminating process to rotate file.",
+                    )
+                    p.terminate()
+                    break
+                if (not saw_growth) and now - start >= ROTATE_MAX_WAIT_SECONDS:
+                    logger.warning(
+                        "⚠️ No output detected; terminating to avoid hang after %s seconds",
+                        ROTATE_MAX_WAIT_SECONDS,
                     )
                     p.terminate()
                     break
                 try:
                     if os.path.exists(path):
-                        # Size-based rotation
-                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
+                        size = os.path.getsize(path)
+                        if size != last_size:
+                            if size > 0 and size > last_size:
+                                if not saw_growth:
+                                    saw_growth = True
+                                    start = now
+                            last_size = size
+                        if size >= MAX_OUTPUT_FILE_SIZE:
                             logger.info(
                                 f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). "
                                 f"Rotating file {os.path.basename(path)}"
                             )
                             p.terminate()
                             break
-                        # Line-count rotation
                         with open(path, "r", encoding="utf-8", errors="ignore") as f:
                             if sum(1 for _ in f) >= MAX_OUTPUT_LINES:
                                 logger.info(
@@ -327,31 +389,16 @@ def run_vanitysearch_stream(
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
 
-    # Post-process output file: delete only if truly empty; update metrics
+    # Post-process output file: use parser; do not delete zero-byte files
     if os.path.exists(current_output_path):
         size = os.path.getsize(current_output_path)
         if size == 0:
             logger.warning(f"⚠️ Output file empty: {current_output_path}")
-            os.remove(current_output_path)
             return False
 
         try:
-            with open(current_output_path, "r", encoding="utf-8") as f:
-                logger.info(f"Opened {current_output_path} for reading")
-                lines = 0
-                first_seed = None
-                last_seed = None
-                for line in f:
-                    # Keep existing marker; widen here if needed to also accept "Privkey:"
-                    if line.startswith("Priv (HEX):"):
-                        hex_val = line.split(":", 1)[1].strip().replace("0x", "")
-                        seed_int = int(hex_val, 16)
-                        if first_seed is None:
-                            first_seed = seed_int
-                        last_seed = seed_int
-                        lines += 1
+            lines, first_seed, last_seed = parse_vanity_file(current_output_path)
 
-            # Update counters/metrics and seed ranges
             from core.dashboard import update_dashboard_stat, get_metric
 
             total_keys_generated += lines
@@ -368,7 +415,7 @@ def run_vanitysearch_stream(
 
             logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
         except Exception as e:
-            logger.warning(f"⚠️ Failed to count lines in {current_output_path}: {e}")
+            logger.warning(f"⚠️ Failed to parse {current_output_path}: {e}")
         return True
 
     logger.error(f"❌ Output file not created: {current_output_path}")
@@ -376,12 +423,12 @@ def run_vanitysearch_stream(
 
 
 # Dashboard metric helpers (imported here to keep module import order)
-from core.dashboard import (
+from core.dashboard import (  # noqa: E402
     init_shared_metrics,
     set_metric,
     increment_metric,
     get_metric,
-)  # noqa: E402
+)
 
 
 # ---------------------------------------------------------------------------
