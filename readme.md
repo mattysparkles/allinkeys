@@ -19,6 +19,7 @@ This repository was recently opened to the public and remains a work in progress
 * Python 3.9+
 * Git
 * Optional: CUDA/OpenCL drivers and `pyopencl` for GPU support
+* Optional: additional development tools in `requirements-dev.txt` if you plan to run tests or linters
 
 ```bash
 git clone https://github.com/mattysparkles/allinkeys.git
@@ -26,6 +27,8 @@ cd allinkeys
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+# For development and tests
+pip install -r requirements-dev.txt
 ```
 
 Copy `.env.example` to `.env` and fill in any credentials needed for alert channels (email, Telegram, Twilio, etc.).
@@ -64,13 +67,14 @@ Copy `.env.example` to `.env` and fill in any credentials needed for alert chann
    ```bash
    pytest
    ```
+   Requires packages from `requirements-dev.txt`.
 
 ## 📡 Telemetry
 
 Minimal, opt‑out telemetry helps guide project development. Only anonymized
-seed processing statistics are collected. See [docs/TELEMETRY.md](docs/TELEMETRY.md)
-for full details. Disable telemetry at runtime with the `--no-telemetry`
-command-line flag.
+seed processing statistics are sent to a privacy‑safe central service through an encrypted queue.
+See [docs/TELEMETRY.md](docs/TELEMETRY.md) for full details. Disable telemetry at runtime
+with the `--no-telemetry` command-line flag.
 
 ### 📁 Directory Overview
 
@@ -395,6 +399,9 @@ Produces `dist/main.exe` — a standalone binary.
 
 ### [Unreleased]
 
+- Added privacy-safe central telemetry with durable seed queue
+- Enforced puzzle mode range validation and hardened seed tracker
+- Added rolling metrics and mode-aware GUI for real-time insights
 - Added `env_path` helper and migrated many modules to `pathlib`-based paths
 - Introduced `--purge` command with dry-run for cleaning old downloads
 - Added opt-in telemetry module and consent logging with alert redaction
