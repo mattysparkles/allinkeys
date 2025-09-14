@@ -14,9 +14,8 @@ so it matches the naming convention expected by the application.
 - **Line 82 – FULL_DIR**: `env_path("ALLINKEYS_FULL_DIR", DOWNLOADS_DIR / "full")`
 - **Line 83 – UNIQUE_DIR**: `env_path("ALLINKEYS_UNIQUE_DIR", DOWNLOADS_DIR / "unique")`
 - **Line 85 – MATCHES_DIR**: `env_path("ALLINKEYS_MATCHES_DIR", BASE_DIR / "matches")`
-- **Line 90 – _VANITY_DIR_DEFAULT**: `BASE_DIR / "output" / "vanity_output"`
-- **Line 91 – VANITY_TXT_DIR**: `env_path(`
-- **Line 95 – VANITY_OUTPUT_DIR**: `VANITY_TXT_DIR` – legacy alias
+- **Line 92 – _VANITY_DIR_DEFAULT**: `BASE_DIR / "output" / "vanity_output"`
+- **Line 93 – VANITY_OUTPUT_DIR**: `env_path("ALLINKEYS_VANITY_OUTPUT_DIR", env_path("ALLINKEYS_VANITY_TXT_DIR", _VANITY_DIR_DEFAULT))`
 - **Line 97 – MNEMONIC_TXT_DIR**: `env_path(`
 - **Line 101 – SOUND_CLIPS_DIR**: `env_path("ALLINKEYS_SOUND_CLIPS_DIR", BASE_DIR / "alerts" / "sounds")`
 - **Line 102 – CHECKPOINT_PATH**: `env_path("ALLINKEYS_CHECKPOINT_PATH", LOG_DIR / "restore_checkpoint.json")`

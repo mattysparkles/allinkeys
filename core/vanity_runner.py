@@ -20,7 +20,7 @@ from config.settings import (
     DEFAULT_BTC_PATTERNS,
     DEFAULT_BTC_PATTERNS_BECH32,
     DEFAULT_BTC_PATTERNS_BECH32M,
-    VANITY_TXT_DIR,
+    VANITY_OUTPUT_DIR,
     VANITY_ROTATE_LINES,
     VANITY_MAX_BYTES,
     ENABLE_BC1_DEFAULT,
@@ -28,14 +28,16 @@ from config.settings import (
     OCLVANITYGEN_PATH,
     find_vanitysearch_binary,
 )
-from core.logger import get_logger, log_message
+from core.logger import get_logger
 from core.dashboard import update_dashboard_stat
 from core.utils.io_safety import atomic_open, atomic_commit
 from core.vanity_io import RollingAtomicWriter, ensure_dir
 from core.oclvanity_runner import run_oclvanitygen
 
 logger = get_logger(__name__)
-logger.info("Atomic writes enabled for vanity outputs (temp → rename). Empty outputs are skipped.")
+logger.info(
+    "Atomic writes enabled for vanity outputs (temp → rename). Empty outputs are skipped."
+)
 
 # throttle warning frequency
 _LAST_WARN: Dict[str, float] = {}
@@ -51,7 +53,9 @@ def _warn_once(name: str, msg: str, interval: float = 30.0) -> None:
 
 def _run_binary(binary: str, args: List[str]) -> str:
     try:
-        return subprocess.check_output([binary] + args, stderr=subprocess.STDOUT, text=True)
+        return subprocess.check_output(
+            [binary] + args, stderr=subprocess.STDOUT, text=True
+        )
     except Exception as exc:
         logger.debug(f"Device probe failed for {binary}: {exc}")
         return ""
@@ -136,7 +140,10 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
     if backend in ("cuda", "opencl", "oclvanitygen") and (
         not binary or not Path(binary).exists()
     ):
-        _warn_once("binary_missing", f"GPU backend {backend} selected but binary missing. Falling back to CPU")
+        _warn_once(
+            "binary_missing",
+            f"GPU backend {backend} selected but binary missing. Falling back to CPU",
+        )
         backend = "cpu"
         device_id = None
         device_name = "CPU"
@@ -168,10 +175,12 @@ def probe_device() -> Tuple[str, Optional[int], str, str]:
     _SELECTED_DEVICE_NAME = device_name
     _SELECTED_BINARY = binary
 
-    update_dashboard_stat({
-        "vanitysearch_backend": backend,
-        "vanitysearch_device_name": device_name,
-    })
+    update_dashboard_stat(
+        {
+            "vanitysearch_backend": backend,
+            "vanitysearch_device_name": device_name,
+        }
+    )
     logger.info(
         f"VanitySearch device: {device_name} | backend: {backend} | binary: {binary} | FORCE_CPU_FALLBACK={FORCE_CPU_FALLBACK}"
     )
@@ -217,7 +226,13 @@ def run_vanitysearch(
 
     if backend == "oclvanitygen":
         pattern = seed_args[0] if seed_args else DEFAULT_BTC_PATTERNS[0]
-        return run_oclvanitygen(pattern, output_path, timeout=timeout, pause_event=pause_event, addr_mode=addr_mode)
+        return run_oclvanitygen(
+            pattern,
+            output_path,
+            timeout=timeout,
+            pause_event=pause_event,
+            addr_mode=addr_mode,
+        )
 
     binary = resolve_vanitysearch_binary(backend)
     base_cmd = [binary] + seed_args
@@ -278,7 +293,10 @@ def run_vanitysearch(
                 proc.terminate()
             if timeout and time.time() - start > timeout:
                 proc.terminate()
-            if Path(tmp_path).exists() and Path(tmp_path).stat().st_size >= MAX_OUTPUT_FILE_SIZE:
+            if (
+                Path(tmp_path).exists()
+                and Path(tmp_path).stat().st_size >= MAX_OUTPUT_FILE_SIZE
+            ):
                 proc.terminate()
         proc.wait()
     except Exception:
@@ -302,9 +320,21 @@ def run_vanitysearch(
 
 
 # Expose selected device info for callers
-get_selected_backend = lambda: _SELECTED_BACKEND
-get_selected_device_id = lambda: _SELECTED_DEVICE_ID
-get_selected_device_name = lambda: _SELECTED_DEVICE_NAME
+
+
+def get_selected_backend():
+    """Return the active GPU backend selected at runtime."""
+    return _SELECTED_BACKEND
+
+
+def get_selected_device_id():
+    """Return the numeric identifier of the chosen GPU device."""
+    return _SELECTED_DEVICE_ID
+
+
+def get_selected_device_name():
+    """Return the display name of the selected GPU device."""
+    return _SELECTED_DEVICE_NAME
 
 
 # --- New unified generator --------------------------------------------------
@@ -324,7 +354,7 @@ def _normalize_seed(seed_val: int) -> str:
 
 def _filter_patterns(pats: List[str]) -> List[str]:
     out = []
-    for p in (pats or []):
+    for p in pats or []:
         if not p or not isinstance(p, str):
             continue
         if p.lower().startswith("bc1") and not ENABLE_BC1_DEFAULT:
@@ -336,11 +366,11 @@ def _filter_patterns(pats: List[str]) -> List[str]:
 def _apply_mode_flags(args: List[str]) -> None:
     mode = (VANITY_MODE or "both").lower()
     if mode == "both":
-        args.append("-b")            # both compressed & uncompressed
+        args.append("-b")  # both compressed & uncompressed
     elif mode == "uncompressed":
-        args.append("-u")            # uncompressed only
+        args.append("-u")  # uncompressed only
     else:
-        pass                         # compressed-only (no flag)
+        pass  # compressed-only (no flag)
 
 
 def _popen_stream(args: List[str]) -> subprocess.Popen:
@@ -355,7 +385,9 @@ def _popen_stream(args: List[str]) -> subprocess.Popen:
     )
 
 
-def _warn_zero_matches(mode: str, pattern_count: int, used_file: bool, seed: str) -> None:
+def _warn_zero_matches(
+    mode: str, pattern_count: int, used_file: bool, seed: str
+) -> None:
     """Log detailed warning when a mode exits with no vanity lines."""
     logger.warning(
         f"⚠️ VanitySearch exited cleanly with 0 matches | mode={mode} | patterns={pattern_count} | "
@@ -371,7 +403,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
       - Multiple prefixes -> write to temp file and pass -i <file>
     Streams stdout into RollingAtomicWriter with atomic rotation.
     """
-    out_dir = ensure_dir(VANITY_TXT_DIR)
+    out_dir = ensure_dir(VANITY_OUTPUT_DIR)
     # ``ensure_dir`` now returns a string path. Wrap with ``Path`` so ``resolve``
     # is always available while still providing the string to callers that expect
     # one. The previous direct ``out_dir.resolve()`` call triggered an
@@ -405,7 +437,9 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
             single_suffix = [pats[0]]
             multi_suffix: List[str] = []
         else:
-            fd, tmpfile = tempfile.mkstemp(prefix="vanity_prefixes_", suffix=".txt", dir=out_dir)
+            fd, tmpfile = tempfile.mkstemp(
+                prefix="vanity_prefixes_", suffix=".txt", dir=out_dir
+            )
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write("\n".join(pats) + "\n")
             single_suffix = []
@@ -415,7 +449,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
             r"^(?:PubAddr(?:ess)?\s*:\s*)?"  # optional "PubAddress:" prefix
             r"(1[1-9A-HJ-NP-Za-km-z]{25,34}|"  # legacy Base58 addresses
             r"3[1-9A-HJ-NP-Za-km-z]{25,34}|"  # P2SH addresses
-            r"bc1[0-9ac-hj-np-z]{11,71})",    # Bech32 addresses
+            r"bc1[0-9ac-hj-np-z]{11,71})",  # Bech32 addresses
             re.IGNORECASE,
         )
 
@@ -425,11 +459,16 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
 
             while True:
                 writer = RollingAtomicWriter(
-                    out_dir, rotate_lines=VANITY_ROTATE_LINES, max_bytes=VANITY_MAX_BYTES, prefix="vanity"
+                    out_dir,
+                    rotate_lines=VANITY_ROTATE_LINES,
+                    max_bytes=VANITY_MAX_BYTES,
+                    prefix="vanity",
                 )
                 total_lines = 0
                 try:
-                    logger.info(f"🧪 VanitySearch ({mode_name}) command: {' '.join(args)}")
+                    logger.info(
+                        f"🧪 VanitySearch ({mode_name}) command: {' '.join(args)}"
+                    )
                     logger.info(f"Popen args ({mode_name}): {args}")
                     proc = _popen_stream(args)
                     last_line_ts = mode_start = time.time()
@@ -445,7 +484,9 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                             if proc.poll() is not None:
                                 break
                             if time.time() - last_line_ts > 5:
-                                logger.debug("⏳ VanitySearch running (no output yet)...")
+                                logger.debug(
+                                    "⏳ VanitySearch running (no output yet)..."
+                                )
                                 last_line_ts = time.time()
                             if (
                                 attempt_fallback
@@ -454,7 +495,9 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                             ):
                                 proc.terminate()
                                 writer.abort()
-                                logger.warning("⚠️ No output for 10s; sanity-checking with 1**")
+                                logger.warning(
+                                    "⚠️ No output for 10s; sanity-checking with 1**"
+                                )
                                 args = base + mode_flag + ["1**"]
                                 attempt_fallback = False
                                 fallback_triggered = True
@@ -488,7 +531,9 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                     return total_lines
                 else:
                     if rc == 0:
-                        _warn_zero_matches(mode_name, len(pats), bool(multi_suffix), seed)
+                        _warn_zero_matches(
+                            mode_name, len(pats), bool(multi_suffix), seed
+                        )
                     else:
                         logger.warning(
                             f"⚠️ VanitySearch exited rc={rc}, matches={total_lines}. Trying next mode..."
