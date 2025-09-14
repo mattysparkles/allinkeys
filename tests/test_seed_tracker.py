@@ -1,10 +1,12 @@
-import json
+import threading
+import sqlite3
+
 from core import seed_tracker
 
 
 def test_seed_tracker_roundtrip(tmp_path, monkeypatch):
-    log_path = tmp_path / "ranges.json"
-    monkeypatch.setattr(seed_tracker, "SEED_RANGES_PATH", str(log_path))
+    db_path = tmp_path / "used_seeds.db"
+    monkeypatch.setattr(seed_tracker, "SEED_DB_PATH", str(db_path))
 
     assert seed_tracker.seed_in_used_range(10) is False
     seed_tracker.record_seed_range(5, 15)
@@ -13,9 +15,29 @@ def test_seed_tracker_roundtrip(tmp_path, monkeypatch):
 
     ranges = seed_tracker.get_condensed_ranges()
     assert ranges == [(5, 25)]
-    assert seed_tracker.seed_in_used_range(10, ranges) is True
-    assert seed_tracker.seed_in_used_range(30, ranges) is False
+    assert seed_tracker.seed_in_used_range(10) is True
+    assert seed_tracker.seed_in_used_range(30) is False
 
-    with open(log_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    assert data == [{"start": 5, "end": 25}]
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute("SELECT COUNT(*) FROM used_seeds").fetchone()[0]
+    finally:
+        conn.close()
+    assert rows == 21  # seeds 5..25 inclusive
+
+
+def test_seed_tracker_concurrency(tmp_path, monkeypatch):
+    db_path = tmp_path / "used_seeds.db"
+    monkeypatch.setattr(seed_tracker, "SEED_DB_PATH", str(db_path))
+
+    def worker():
+        seed_tracker.record_seed_range(1, 5)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    ranges = seed_tracker.get_condensed_ranges()
+    assert ranges == [(1, 5)]
