@@ -11,6 +11,7 @@ import subprocess
 from datetime import datetime, timedelta
 from multiprocessing import Process
 import psutil
+from dashboard.metrics_window import CPUPercent
 from core.logger import get_logger
 
 # Wrap stdout once with UTF-8 encoding if not already wrapped
@@ -110,6 +111,7 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
         print(f"[error] ensure_metrics_ready failed in {__name__}: {e}", flush=True)
     last_kps = 0.0
     stop_event = shutdown_event or threading.Event()
+    cpu_sampler = CPUPercent()
 
     def update():
         nonlocal last_kps
@@ -137,7 +139,7 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
             vm = psutil.virtual_memory()
             ram_percent = vm.percent
             stats = {
-                'cpu_usage': f"{psutil.cpu_percent()}%",
+                'cpu_usage': f"{cpu_sampler.sample():.1f}%",
                 'ram_usage': f"{vm.used / (1024 ** 3):.1f} GB / {vm.total / (1024 ** 3):.1f} GB ({ram_percent}%)",
                 'disk_free_gb': round(disk_free / (1024 ** 3), 2),
                 'disk_fill_eta': disk_eta,
