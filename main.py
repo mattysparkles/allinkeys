@@ -17,10 +17,7 @@ from core.logger import get_logger
 # Wrap stdout once with UTF-8 encoding if not already wrapped
 if not isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout = io.TextIOWrapper(
-        sys.stdout.buffer,
-        encoding='utf-8',
-        errors='replace',
-        line_buffering=True
+        sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True
     )
 
 try:
@@ -34,7 +31,7 @@ except ImportError:
     cl = None
 
 # Track disk free space to estimate fill ETA
-_last_disk_check = (time.time(), psutil.disk_usage('/').free)
+_last_disk_check = (time.time(), psutil.disk_usage("/").free)
 # Track backlog processing for ETA calculations
 _backlog_total_time = 0.0
 _backlog_processed = 0
@@ -45,10 +42,19 @@ logger = get_logger(__name__)
 
 import config.settings as settings
 from config.settings import (
-    ENABLE_CHECKPOINT_RESTORE, CHECKPOINT_INTERVAL_SECONDS,
-    LOGO_ART, ENABLE_DAY_ONE_CHECK, ENABLE_UNIQUE_RECHECK,
-    ENABLE_DASHBOARD, ENABLE_KEYGEN, ENABLE_ALERTS,
-    ENABLE_BACKLOG_CONVERSION, LOG_DIR, CSV_DIR, DOWNLOAD_DIR, VANITY_OUTPUT_DIR,
+    ENABLE_CHECKPOINT_RESTORE,
+    CHECKPOINT_INTERVAL_SECONDS,
+    LOGO_ART,
+    ENABLE_DAY_ONE_CHECK,
+    ENABLE_UNIQUE_RECHECK,
+    ENABLE_DASHBOARD,
+    ENABLE_KEYGEN,
+    ENABLE_ALERTS,
+    ENABLE_BACKLOG_CONVERSION,
+    LOG_DIR,
+    CSV_DIR,
+    DOWNLOAD_DIR,
+    VANITY_OUTPUT_DIR,
     find_vanitysearch_binary,
 )
 
@@ -78,7 +84,10 @@ def display_logo():
     print("BTC: 18RWVyEciKq8NLz5Q1uEzNGXzTs5ivo37y", flush=True)
     print("LTC: LNmgLkonXtecopmGauqsDFvci4XQTZAWmg", flush=True)
     print("DOGE: DPoHJNbYHEuvNHyCFcUnvtTVmRDMNgnAs5", flush=True)
-    print("XMR: 43DUJ1MA7Mv1n4BTRHemEbDmvYzMysVt2djHnjGzrHZBb4WgMDtQHWh51ZfbcVwHP8We6pML4f1Q7SNEtveYCk4HDdb14ik", flush=True)
+    print(
+        "XMR: 43DUJ1MA7Mv1n4BTRHemEbDmvYzMysVt2djHnjGzrHZBb4WgMDtQHWh51ZfbcVwHP8We6pML4f1Q7SNEtveYCk4HDdb14ik",
+        flush=True,
+    )
     print("ETH: 0xCb8B2937D60c47438562A2E53d08B85865B57741", flush=True)
     print("PEP: PbCiPTNrYaCgv1aqNCds5n7Q73znGrTkgp\n", flush=True)
 
@@ -87,6 +96,7 @@ def save_checkpoint_loop():
     while True:
         try:
             from core.keygen import keygen_progress
+
             save_keygen_checkpoint(keygen_progress())
             logger.debug("💾 Checkpoint saved.")
         except Exception as e:
@@ -94,7 +104,6 @@ def save_checkpoint_loop():
         time.sleep(CHECKPOINT_INTERVAL_SECONDS)
 
 
-from core.dashboard import init_shared_metrics
 from core.gpu_selector import (
     get_vanitysearch_gpu_ids,
     get_altcoin_gpu_ids,
@@ -104,6 +113,7 @@ from core.gpu_selector import (
 
 def metrics_updater(shared_metrics=None, shutdown_event=None):
     from core.worker_bootstrap import ensure_metrics_ready
+
     try:
         ensure_metrics_ready(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -120,10 +130,12 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
         global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
         try:
             from core.dashboard import reset_daily_metrics_if_needed
+
             reset_daily_metrics_if_needed()
             from core.keygen import keygen_progress
+
             now = time.time()
-            disk_free = psutil.disk_usage('/').free
+            disk_free = psutil.disk_usage("/").free
             prev_t, prev_free = _last_disk_check
             _last_disk_check = (now, disk_free)
             rate = (prev_free - disk_free) / max(1, now - prev_t)
@@ -139,12 +151,12 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
             vm = psutil.virtual_memory()
             ram_percent = vm.percent
             stats = {
-                'cpu_usage': f"{cpu_sampler.sample():.1f}%",
-                'ram_usage': f"{vm.used / (1024 ** 3):.1f} GB / {vm.total / (1024 ** 3):.1f} GB ({ram_percent}%)",
-                'disk_free_gb': round(disk_free / (1024 ** 3), 2),
-                'disk_fill_eta': disk_eta,
-                'gpu_stats': {},
-                'gpu_assignments': get_gpu_assignments(),
+                "cpu_usage": f"{cpu_sampler.sample():.1f}%",
+                "ram_usage": f"{vm.used / (1024 ** 3):.1f} GB / {vm.total / (1024 ** 3):.1f} GB ({ram_percent}%)",
+                "disk_free_gb": round(disk_free / (1024**3), 2),
+                "disk_fill_eta": disk_eta,
+                "gpu_stats": {},
+                "gpu_assignments": get_gpu_assignments(),
             }
             vs_ids = set(get_vanitysearch_gpu_ids())
             ad_ids = set(get_altcoin_gpu_ids())
@@ -165,41 +177,49 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
                         if gpu.id in ad_ids:
                             name += " (AD)"
                         if usage in ["N/A", None]:
-                            usage = "Active (No Stats)" if gpu.id in ad_ids | vs_ids else "N/A"
-                        stats['gpu_stats'][f"GPU{gpu.id}"] = {
-                            'name': name,
-                            'usage': usage,
-                            'vram': vram,
-                            'temp': f"{gpu.temperature}°C" if hasattr(gpu, 'temperature') else 'N/A',
+                            usage = (
+                                "Active (No Stats)"
+                                if gpu.id in ad_ids | vs_ids
+                                else "N/A"
+                            )
+                        stats["gpu_stats"][f"GPU{gpu.id}"] = {
+                            "name": name,
+                            "usage": usage,
+                            "vram": vram,
+                            "temp": (
+                                f"{gpu.temperature}°C"
+                                if hasattr(gpu, "temperature")
+                                else "N/A"
+                            ),
                         }
                 except Exception as e:
                     logger.warning(f"⚠️ GPU read failed: {e}")
 
-            next_id = len(stats['gpu_stats'])
+            next_id = len(stats["gpu_stats"])
             if cl:
                 try:
                     for platform in cl.get_platforms():
                         for device in platform.get_devices():
                             already = any(
-                                info.get('name', '').startswith(device.name)
-                                for info in stats['gpu_stats'].values()
+                                info.get("name", "").startswith(device.name)
+                                for info in stats["gpu_stats"].values()
                             )
                             if already:
                                 continue
                             name = device.name
                             roles = []
                             if next_id in vs_ids:
-                                roles.append('VS')
+                                roles.append("VS")
                             if next_id in ad_ids:
-                                roles.append('AD')
+                                roles.append("AD")
                             if roles:
                                 name += " (" + "/".join(roles) + ")"
-                            usage = 'Active (No Stats)' if roles else 'N/A'
-                            stats['gpu_stats'][f"GPU{next_id}"] = {
-                                'name': name,
-                                'usage': usage,
-                                'vram': 'Unavailable',
-                                'temp': 'N/A',
+                            usage = "Active (No Stats)" if roles else "N/A"
+                            stats["gpu_stats"][f"GPU{next_id}"] = {
+                                "name": name,
+                                "usage": usage,
+                                "vram": "Unavailable",
+                                "temp": "N/A",
                             }
                             next_id += 1
                 except Exception as e:
@@ -207,8 +227,8 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
 
             # ----- Backlog ETA Calculation -----
             metrics_snapshot = get_current_metrics()
-            queue_count = metrics_snapshot.get('backlog_files_queued', 0)
-            created_today = metrics_snapshot.get('csv_created_today', 0)
+            queue_count = metrics_snapshot.get("backlog_files_queued", 0)
+            created_today = metrics_snapshot.get("csv_created_today", 0)
             if created_today > _last_csv_created:
                 _backlog_total_time += now - _backlog_last_ts
                 _backlog_processed += created_today - _last_csv_created
@@ -217,38 +237,39 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
 
             if _backlog_processed > 0:
                 avg_time = _backlog_total_time / _backlog_processed
-                stats['backlog_avg_time'] = f"{avg_time:.2f}s"
+                stats["backlog_avg_time"] = f"{avg_time:.2f}s"
                 if queue_count > 0:
                     eta_sec = avg_time * queue_count
-                    stats['backlog_eta'] = str(timedelta(seconds=int(eta_sec)))
+                    stats["backlog_eta"] = str(timedelta(seconds=int(eta_sec)))
                 else:
-                    stats['backlog_eta'] = 'N/A'
+                    stats["backlog_eta"] = "N/A"
             else:
-                stats['backlog_eta'] = 'N/A'
+                stats["backlog_eta"] = "N/A"
 
             prog = keygen_progress()
-            curr_lifetime = get_metric('keys_generated_lifetime', 0)
-            current_kps = get_metric('keys_per_sec', 0)
+            curr_lifetime = get_metric("keys_generated_lifetime", 0)
+            current_kps = get_metric("keys_per_sec", 0)
             if current_kps > 0:
                 last_kps = current_kps
             else:
-                status = get_metric('status', {}).get('keygen', 'Stopped')
-                if status == 'Running':
+                status = get_metric("status", {}).get("keygen", "Stopped")
+                if status == "Running":
                     current_kps = last_kps
                 else:
                     last_kps = 0.0
-            stats['keys_generated_lifetime'] = curr_lifetime
-            stats['keys_per_sec'] = round(current_kps, 2)
-            stats['uptime'] = prog['elapsed_time']
-            stats['last_updated'] = datetime.utcnow().strftime('%H:%M:%S')
+            stats["keys_generated_lifetime"] = curr_lifetime
+            stats["keys_per_sec"] = round(current_kps, 2)
+            stats["uptime"] = prog["elapsed_time"]
+            stats["last_updated"] = datetime.utcnow().strftime("%H:%M:%S")
             try:
                 from config.settings import BATCH_SIZE
-                stats['vanity_progress_percent'] = round(
-                    (prog.get('index_within_batch', 0) / float(BATCH_SIZE)) * 100,
+
+                stats["vanity_progress_percent"] = round(
+                    (prog.get("index_within_batch", 0) / float(BATCH_SIZE)) * 100,
                     2,
                 )
             except Exception:
-                stats['vanity_progress_percent'] = 0
+                stats["vanity_progress_percent"] = 0
             update_dashboard_stat(stats)
             logger.debug(f"📊 Metrics updated: {stats}")
         except Exception as e:
@@ -278,8 +299,9 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
     named_processes = []
 
     from core.gpu_scheduler import start_scheduler
+
     gpu_sched, vanity_gpu_flag, altcoin_gpu_flag, assignment_flag = start_scheduler(
-        shared_metrics, shutdown_events.get('keygen')
+        shared_metrics, shutdown_events.get("keygen")
     )
     processes.append(gpu_sched)
     named_processes.append(("gpu_scheduler", gpu_sched))
@@ -300,9 +322,7 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     backlog_files = []
     try:
-        backlog_files = [
-            f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")
-        ]
+        backlog_files = [f for f in os.listdir(VANITY_OUTPUT_DIR) if f.endswith(".txt")]
     except Exception:
         pass
 
@@ -318,9 +338,7 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     skip_vanity = gpu_strategy == "swing" and len(backlog_files) >= 100
     if skip_vanity:
-        logger.info(
-            "[Startup] Detected backlog of 100+ files; delaying VanitySearch."
-        )
+        logger.info("[Startup] Detected backlog of 100+ files; delaying VanitySearch.")
         set_metric("status.keygen", "Stopped")
         vanity_gpu_flag.value = 0
         altcoin_gpu_flag.value = 1
@@ -330,7 +348,15 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
         set_metric("gpu_assignment", "altcoin")
     elif ENABLE_KEYGEN and not args.headless:
         try:
-            p = Process(target=start_keygen_loop, args=(shared_metrics, shutdown_events.get('keygen'), pause_events.get('keygen'), vanity_gpu_flag))
+            p = Process(
+                target=start_keygen_loop,
+                args=(
+                    shared_metrics,
+                    shutdown_events.get("keygen"),
+                    pause_events.get("keygen"),
+                    vanity_gpu_flag,
+                ),
+            )
             p.daemon = True
             p.start()
             logger.info("[Started] Keygen subprocess")
@@ -345,8 +371,8 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
                 target=check_csvs_day_one,
                 args=(
                     shared_metrics,
-                    shutdown_events.get('csv_check'),
-                    pause_events.get('csv_check'),
+                    shutdown_events.get("csv_check"),
+                    pause_events.get("csv_check"),
                     False,
                     None,
                     log_q,
@@ -366,8 +392,8 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
                 target=check_csvs,
                 args=(
                     shared_metrics,
-                    shutdown_events.get('csv_recheck'),
-                    pause_events.get('csv_recheck'),
+                    shutdown_events.get("csv_recheck"),
+                    pause_events.get("csv_recheck"),
                     False,
                     None,
                     log_q,
@@ -383,7 +409,13 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 
     if ENABLE_BACKLOG_CONVERSION and not args.skip_backlog:
         try:
-            p = start_altcoin_conversion_process(shutdown_events.get('altcoin'), shared_metrics, pause_events.get('altcoin'), log_q, altcoin_gpu_flag)
+            p = start_altcoin_conversion_process(
+                shutdown_events.get("altcoin"),
+                shared_metrics,
+                pause_events.get("altcoin"),
+                log_q,
+                altcoin_gpu_flag,
+            )
             logger.info("[Started] Altcoin derive subprocess")
             processes.append(p)
             named_processes.append(("altcoin", p))
@@ -413,7 +445,10 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
             logger.error(f"❌ Failed to start checkpoint saver: {e}")
 
     try:
-        p = Process(target=metrics_updater, args=(shared_metrics, shutdown_events.get('metrics')))
+        p = Process(
+            target=metrics_updater,
+            args=(shared_metrics, shutdown_events.get("metrics")),
+        )
         p.daemon = True
         p.start()
         logger.info("[Started] Metrics updater")
@@ -456,13 +491,16 @@ def handle_deprecated_flags(args):
         print("Warning: '-all' is deprecated; use '--all' instead.", file=sys.stderr)
     if getattr(args, "funded_legacy", False) and not getattr(args, "funded", False):
         args.funded = True
-        print("Warning: '-funded' is deprecated; use '--funded' instead.", file=sys.stderr)
+        print(
+            "Warning: '-funded' is deprecated; use '--funded' instead.", file=sys.stderr
+        )
 
 
 def handle_puzzle_mode(args):
     if getattr(args, "puzzle", None) is None:
         return
     from utils.puzzle import get_puzzle_info
+
     info = get_puzzle_info(args.puzzle)
     settings.PUZZLE_MODE = True
     settings.PUZZLE_NUMBER = args.puzzle
@@ -494,6 +532,7 @@ def run_only_mode(args):
         # mirrors the behaviour of the full application and ensures the
         # ``gpu_assignments.json`` file is always created.
         from core.gpu_selector import assign_gpu_roles
+
         assign_gpu_roles(getattr(args, "gpu_index", None))
 
         shared_metrics = init_dashboard_manager()
@@ -502,7 +541,7 @@ def run_only_mode(args):
         shutdown_btc = multiprocessing.Event()
         pause_btc = multiprocessing.Event()
         shutdown_metrics = multiprocessing.Event()
-        vanity_gpu_flag = multiprocessing.Value('i', 1)
+        vanity_gpu_flag = multiprocessing.Value("i", 1)
 
         processes = []
         from core.logger import log_queue
@@ -516,7 +555,14 @@ def run_only_mode(args):
         # BTC-only vanity output checker
         p = Process(
             target=btc_only_checker_loop,
-            args=(shared_metrics, shutdown_btc, pause_btc, log_queue, args.all, args.skip_downloads),
+            args=(
+                shared_metrics,
+                shutdown_btc,
+                pause_btc,
+                log_queue,
+                args.all,
+                args.skip_downloads,
+            ),
         )
         p.daemon = True
         p.start()
@@ -526,11 +572,17 @@ def run_only_mode(args):
         # BTC-only flow blocks while running the key generator, the GUI is
         # started on a background thread so the main thread can continue with
         # key generation.
-        if ENABLE_DASHBOARD and not getattr(args, "no_dashboard", False) and not getattr(args, "headless", False):
+        if (
+            ENABLE_DASHBOARD
+            and not getattr(args, "no_dashboard", False)
+            and not getattr(args, "headless", False)
+        ):
             from ui.dashboard_gui import start_dashboard
+
             threading.Thread(target=start_dashboard, daemon=True).start()
 
         from core.keygen import run_btc_only  # call into keygen module
+
         try:
             return run_btc_only(
                 compressed=compressed,
@@ -550,7 +602,10 @@ def run_only_mode(args):
             stop_listener()
         return 0
 
-    print(f"Warning: altcoin-only mode not fully implemented for: {', '.join(coins)}", file=sys.stderr)
+    print(
+        f"Warning: altcoin-only mode not fully implemented for: {', '.join(coins)}",
+        file=sys.stderr,
+    )
     return 1
 
 
@@ -566,7 +621,7 @@ def run_allinkeys(args):
     if getattr(args, "purge", False):
         removed = cleanup_old_files()
         log_message(
-            f"\U0001F9F9 Purged {removed} file(s) older than {settings.RETENTION_DAYS} days from downloads"
+            f"\U0001f9f9 Purged {removed} file(s) older than {settings.RETENTION_DAYS} days from downloads"
         )
         return
     os.environ.setdefault("PYOPENCL_COMPILER_OUTPUT", "1")
@@ -588,27 +643,28 @@ def run_allinkeys(args):
     # worker processes start up or exit.  Events are created once here and then
     # shared with child processes.
     shutdown_event = multiprocessing.Event()
-    if not getattr(args, "no_telemetry", False):
+    if settings.SEED_TELEMETRY_ENABLED and not getattr(args, "no_telemetry", False):
         start_telemetry(shutdown_event)
     shutdown_events = {
-        'keygen': multiprocessing.Event(),
-        'altcoin': multiprocessing.Event(),
-        'csv_check': multiprocessing.Event(),
-        'csv_recheck': multiprocessing.Event(),
-        'metrics': multiprocessing.Event(),
+        "keygen": multiprocessing.Event(),
+        "altcoin": multiprocessing.Event(),
+        "csv_check": multiprocessing.Event(),
+        "csv_recheck": multiprocessing.Event(),
+        "metrics": multiprocessing.Event(),
     }
     pause_events = {
-        'keygen': multiprocessing.Event(),
-        'altcoin': multiprocessing.Event(),
-        'csv_check': multiprocessing.Event(),
-        'csv_recheck': multiprocessing.Event(),
+        "keygen": multiprocessing.Event(),
+        "altcoin": multiprocessing.Event(),
+        "csv_check": multiprocessing.Event(),
+        "csv_recheck": multiprocessing.Event(),
     }
     from core.dashboard import register_control_events, get_pause_event
+
     register_control_events(shutdown_event, None)  # global events
     for name, ev in pause_events.items():
         register_control_events(shutdown_events.get(name), ev, module=name)
         pause_events[name] = get_pause_event(name)
-    register_control_events(shutdown_events.get('metrics'), None, module='metrics')
+    register_control_events(shutdown_events.get("metrics"), None, module="metrics")
     try:
         init_shared_metrics(shared_metrics)
         print("[debug] Shared metrics initialized for", __name__, flush=True)
@@ -622,16 +678,20 @@ def run_allinkeys(args):
             "btc_C": "1TestAddressCompressed",
             "source_file": "test_static_file.csv",
             "timestamp": datetime.utcnow().isoformat(),
-            "test_mode": True
+            "test_mode": True,
         }
         logger.info("🧺 Running simulated match alert...")
         alert_match(test_data, test_mode=True)
 
     from core.logger import log_queue
-    processes, named_processes = run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_queue)
+
+    processes, named_processes = run_all_processes(
+        args, shutdown_events, shared_metrics, pause_events, log_queue
+    )
 
     def monitor():
         from core.dashboard import get_current_metrics
+
         while not shutdown_event.is_set():
             status = get_current_metrics().get("status", {})
             update_dashboard_stat("thread_health_flags", status)
@@ -640,8 +700,13 @@ def run_allinkeys(args):
     threading.Thread(target=monitor, daemon=True).start()
 
     try:
-        if ENABLE_DASHBOARD and not args.no_dashboard and not getattr(args, "headless", False):
+        if (
+            ENABLE_DASHBOARD
+            and not args.no_dashboard
+            and not getattr(args, "headless", False)
+        ):
             from ui.dashboard_gui import start_dashboard
+
             start_dashboard()
         else:
             while not shutdown_event.is_set():
@@ -679,13 +744,27 @@ def build_parser() -> argparse.ArgumentParser:
     """
 
     parser = argparse.ArgumentParser(description="AllInKeys Modular Runner")
-    parser.add_argument("--skip-backlog", action="store_true", help="Skip backlog conversion on startup")
-    parser.add_argument("--no-dashboard", action="store_true", help="Don't launch GUI dashboard")
-    parser.add_argument("--dashboard-password", help="Password required to access the dashboard")
-    parser.add_argument("--skip-downloads", action="store_true", help="Skip downloading balance files")
-    parser.add_argument("--headless", action="store_true", help="Run without any GUI or visuals")
-    parser.add_argument("--no-telemetry", action="store_true", help="Disable telemetry reporting")
-    parser.add_argument("--match-test", action="store_true", help="Trigger fake match alert on startup")
+    parser.add_argument(
+        "--skip-backlog", action="store_true", help="Skip backlog conversion on startup"
+    )
+    parser.add_argument(
+        "--no-dashboard", action="store_true", help="Don't launch GUI dashboard"
+    )
+    parser.add_argument(
+        "--dashboard-password", help="Password required to access the dashboard"
+    )
+    parser.add_argument(
+        "--skip-downloads", action="store_true", help="Skip downloading balance files"
+    )
+    parser.add_argument(
+        "--headless", action="store_true", help="Run without any GUI or visuals"
+    )
+    parser.add_argument(
+        "--no-telemetry", action="store_true", help="Disable telemetry reporting"
+    )
+    parser.add_argument(
+        "--match-test", action="store_true", help="Trigger fake match alert on startup"
+    )
     parser.add_argument(
         "--purge",
         nargs="?",
@@ -693,26 +772,67 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DAYS",
         help="Remove files older than DAYS (default 30) in output/vanity_output/ and output/csv/",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Preview purge actions without deleting")
-    parser.add_argument("--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation")
-    parser.add_argument("--only", type=_parse_only, dest="only", help="Restrict to coin flow(s). Comma-separated list.")
-    parser.add_argument("-only", type=_parse_only, dest="only_legacy", help=argparse.SUPPRESS)
-    parser.add_argument("--puzzle", type=int, help="Run BTC puzzle mode for given puzzle number")
-    parser.add_argument("--chunk", type=int, help="Puzzle mode: claim specific chunk index")
-    parser.add_argument("--gpu-index", type=int, help="Force use of a specific GPU device index")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Preview purge actions without deleting"
+    )
+    parser.add_argument(
+        "--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation"
+    )
+    parser.add_argument(
+        "--only",
+        type=_parse_only,
+        dest="only",
+        help="Restrict to coin flow(s). Comma-separated list.",
+    )
+    parser.add_argument(
+        "-only", type=_parse_only, dest="only_legacy", help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--puzzle", type=int, help="Run BTC puzzle mode for given puzzle number"
+    )
+    parser.add_argument(
+        "--chunk", type=int, help="Puzzle mode: claim specific chunk index"
+    )
+    parser.add_argument(
+        "--gpu-index", type=int, help="Force use of a specific GPU device index"
+    )
     puzzle_group = parser.add_mutually_exclusive_group()
-    puzzle_group.add_argument("--every", action="store_true", help="Puzzle mode: keep generic '1**' prefix")
-    puzzle_group.add_argument("--target", action="store_true", help="Puzzle mode: target puzzle address (default)")
-    parser.add_argument("--addr-format", choices=["compressed", "uncompressed"], default="compressed",
-                        help="BTC-only address format (default: compressed)")
+    puzzle_group.add_argument(
+        "--every", action="store_true", help="Puzzle mode: keep generic '1**' prefix"
+    )
+    puzzle_group.add_argument(
+        "--target",
+        action="store_true",
+        help="Puzzle mode: target puzzle address (default)",
+    )
+    parser.add_argument(
+        "--addr-format",
+        choices=["compressed", "uncompressed"],
+        default="compressed",
+        help="BTC-only address format (default: compressed)",
+    )
     fmt_group = parser.add_mutually_exclusive_group()
-    fmt_group.add_argument("--compressed", action="store_true", help="BTC-only: force compressed addresses")
-    fmt_group.add_argument("--uncompressed", action="store_true", help="BTC-only: force uncompressed addresses")
+    fmt_group.add_argument(
+        "--compressed", action="store_true", help="BTC-only: force compressed addresses"
+    )
+    fmt_group.add_argument(
+        "--uncompressed",
+        action="store_true",
+        help="BTC-only: force uncompressed addresses",
+    )
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--all", action="store_true", help="Use 'all BTC addresses ever used' range mode")
+    mode.add_argument(
+        "--all",
+        action="store_true",
+        help="Use 'all BTC addresses ever used' range mode",
+    )
     mode.add_argument("--funded", action="store_true", help="Use daily funded BTC list")
-    mode.add_argument("-all", dest="all_legacy", action="store_true", help=argparse.SUPPRESS)
-    mode.add_argument("-funded", dest="funded_legacy", action="store_true", help=argparse.SUPPRESS)
+    mode.add_argument(
+        "-all", dest="all_legacy", action="store_true", help=argparse.SUPPRESS
+    )
+    mode.add_argument(
+        "-funded", dest="funded_legacy", action="store_true", help=argparse.SUPPRESS
+    )
 
     # ------------------------------------------------------------------
     # Mnemonic mode flags
@@ -891,6 +1011,8 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point used by ``__main__`` and tests."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "no_telemetry", False):
+        settings.SEED_TELEMETRY_ENABLED = False
     # Handle retention purge early and exit
     if getattr(args, "purge", None) is not None:
         try:
@@ -906,6 +1028,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if getattr(args, "dashboard_password", None):
         from utils.auth import hash_password
+
         settings.DASHBOARD_PASSWORD_HASH = hash_password(args.dashboard_password)
     handle_deprecated_flags(args)
     if getattr(args, "mnemonic", False):
@@ -924,6 +1047,7 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     import multiprocessing as mp
+
     mp.freeze_support()
     try:
         mp.set_start_method("spawn")
@@ -933,13 +1057,25 @@ if __name__ == "__main__":
     vanity_path = find_vanitysearch_binary()
     if not vanity_path and os.name != "nt":
         try:
-            subprocess.run(["apt-get", "update"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["apt-get", "install", "-y", "vanitysearch"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                ["apt-get", "update"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            subprocess.run(
+                ["apt-get", "install", "-y", "vanitysearch"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         except Exception:
             pass
         vanity_path = find_vanitysearch_binary()
     if not vanity_path:
-        raise FileNotFoundError("VanitySearch binary not found. Please install VanitySearch.")
+        raise FileNotFoundError(
+            "VanitySearch binary not found. Please install VanitySearch."
+        )
     else:
         print(f"✅ VanitySearch found: {vanity_path}", flush=True)
 
