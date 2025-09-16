@@ -593,11 +593,11 @@ PGP_PUBLIC_KEY_PATH = env_path(
 ALERT_EMAIL_ENABLED = True
 ALERT_EMAIL_SENDER = os.getenv("ALERT_EMAIL_SENDER", "emailsenderbtc@gmail.com")
 ALERT_EMAIL_PASSWORD = os.getenv("ALERT_EMAIL_PASSWORD", "")
-ALERT_EMAIL_RECIPIENTS = (
-    os.getenv("ALERT_EMAIL_RECIPIENTS", "").split(",")
-    if os.getenv("ALERT_EMAIL_RECIPIENTS")
-    else []
-)
+_alert_email_recipients = os.getenv("ALERT_EMAIL_RECIPIENTS")
+if _alert_email_recipients:
+    ALERT_EMAIL_RECIPIENTS = _alert_email_recipients.split(",")
+else:
+    ALERT_EMAIL_RECIPIENTS = []
 EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER", "smtp.gmail.com")
 EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", 587))
 INCLUDE_MATCH_INFO = True
@@ -617,9 +617,7 @@ ALERT_EMAIL_TO = ALERT_EMAIL_RECIPIENTS  # DONT CHANGE HERE CHANGE ALERT_EMAIL_R
 
 # === TELEGRAM BOT ALERT CONFIGURATION ===
 ALERT_TELEGRAM_ENABLED = True
-ENABLE_TELEGRAM_ALERT = (
-    ALERT_TELEGRAM_ENABLED  # alias for backward compatibility dont modify
-)
+ENABLE_TELEGRAM_ALERT = ALERT_TELEGRAM_ENABLED  # alias for backward compatibility dont modify
 TELEGRAM_BOT_TOKEN = _init_api_key("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
