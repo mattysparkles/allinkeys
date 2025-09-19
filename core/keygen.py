@@ -1,6 +1,7 @@
 # core/keygen.py
 
 import os
+from pathlib import Path
 import time
 import subprocess
 import threading
@@ -18,7 +19,6 @@ from config.settings import (
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
     FILES_PER_BATCH,
-    ROTATE_MAX_WAIT_SECONDS,
 )
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import (
@@ -30,13 +30,30 @@ from core.gpu_selector import (
 )  # ✅ Correct GPU selection integration
 from core.logger import get_logger
 import config.settings as settings
-from core.seed_tracker import seed_in_used_range, record_seed_range
+from core.seed_tracker import (
+    seed_in_used_range,
+    record_seed_range,
+    get_condensed_ranges,
+)
 
 # Runtime trackers / metrics window
 total_keys_generated = 0
 keygen_start_time = time.time()
 last_output_file = None
 KPS_WINDOW = deque()
+
+# Prefetch queue to reduce I/O when checking used seeds
+_SEED_QUEUE: list[int] = []
+SEED_QUEUE_SIZE = 10
+
+
+def _seed_in_ranges(seed: int, ranges) -> bool:
+    """Return True if ``seed`` falls within any condensed ``ranges``."""
+
+    for start, end in ranges:
+        if start <= seed <= end:
+            return True
+    return False
 
 # Batch progress
 KEYGEN_STATE = {
@@ -131,20 +148,17 @@ def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1_024_000)
 
 
 def generate_random_seed(min_bits=128):
-    """
-    Generate the next seed for VanitySearch while avoiding used ranges.
-    Honors PUZZLE_MODE and related settings when enabled.
-    Always returns an int.
-    """
+    """Generate the next seed for VanitySearch while avoiding used ranges."""
+
+    global _SEED_QUEUE
+
     while True:
-        # Puzzle mode: pull deterministic chunks from SQLite queue
         if getattr(settings, "PUZZLE_MODE", False):
             puzzle_num = getattr(settings, "PUZZLE_NUMBER", None)
             if puzzle_num is not None:
                 from core import puzzle_queue as pq  # depends on SQLite
 
                 chunk_idx = getattr(settings, "PUZZLE_CHUNK_INDEX", None)
-                # Portable host identifier (works on Windows too)
                 host_id = platform.node() if hasattr(platform, "node") else "unknown"
                 seed = pq.next_seed(puzzle_num, host_id, chunk_idx)
                 if seed is None:
@@ -155,7 +169,7 @@ def generate_random_seed(min_bits=128):
                     continue
                 return seed
 
-            # Fallback: bounded random between PUZZLE_START and PUZZLE_END
+            # Fallback to random within start/end if puzzle number is missing
             start = int(getattr(settings, "PUZZLE_START", "0"), 16)
             end = int(getattr(settings, "PUZZLE_END", "0"), 16)
             if end < start:
@@ -166,13 +180,18 @@ def generate_random_seed(min_bits=128):
                 continue
             return seed
 
-        # Standard random seed within [2^min_bits, SECP256K1_ORDER)
+        if _SEED_QUEUE:
+            return _SEED_QUEUE.pop(0)
+
         min_val = 1 << min_bits
         range_span = SECP256K1_ORDER - min_val
-        seed = secrets.randbelow(range_span) + min_val
-        if seed_in_used_range(seed):
+        ranges = get_condensed_ranges()
+        candidates = [
+            secrets.randbelow(range_span) + min_val for _ in range(SEED_QUEUE_SIZE)
+        ]
+        if any(_seed_in_ranges(c, ranges) for c in candidates):
             continue
-        return seed
+        _SEED_QUEUE.extend(candidates)
 
 
 # ---------------------------------------------------------------------------
@@ -321,15 +340,9 @@ def run_vanitysearch_stream(
         logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd_preview}")
 
         def monitor_process(p, path):
-            """
-            Periodically check for pause/rotation triggers while VanitySearch runs:
-            - rotate by elapsed time (ROTATE_INTERVAL_SECONDS)
-            - rotate by size (MAX_OUTPUT_FILE_SIZE)
-            - rotate by lines (MAX_OUTPUT_LINES)
-            """
+            """Monitor file size/lines and pause requests while VanitySearch runs."""
+
             start = time.time()
-            last_size = -1
-            saw_growth = False
             while p.poll() is None:
                 if pause_event and pause_event.is_set():
                     logger.info(
@@ -337,30 +350,15 @@ def run_vanitysearch_stream(
                     )
                     p.terminate()
                     break
-                now = time.time()
-                if saw_growth and now - start >= ROTATE_INTERVAL_SECONDS:
+                if time.time() - start >= ROTATE_INTERVAL_SECONDS:
                     logger.info(
                         "⏱️ Rotation interval reached. Terminating process to rotate file.",
                     )
                     p.terminate()
                     break
-                if (not saw_growth) and now - start >= ROTATE_MAX_WAIT_SECONDS:
-                    logger.warning(
-                        "⚠️ No output detected; terminating to avoid hang after %s seconds",
-                        ROTATE_MAX_WAIT_SECONDS,
-                    )
-                    p.terminate()
-                    break
                 try:
                     if os.path.exists(path):
-                        size = os.path.getsize(path)
-                        if size != last_size:
-                            if size > 0 and size > last_size:
-                                if not saw_growth:
-                                    saw_growth = True
-                                    start = now
-                            last_size = size
-                        if size >= MAX_OUTPUT_FILE_SIZE:
+                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
                             logger.info(
                                 f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). "
                                 f"Rotating file {os.path.basename(path)}"
@@ -394,6 +392,7 @@ def run_vanitysearch_stream(
         size = os.path.getsize(current_output_path)
         if size == 0:
             logger.warning(f"⚠️ Output file empty: {current_output_path}")
+            os.remove(current_output_path)
             return False
 
         try:
@@ -459,8 +458,8 @@ def start_keygen_loop(
     register_control_events(shutdown_event, pause_event, module="keygen")
 
     # Ensure output directory exists
-    if not os.path.exists(VANITY_OUTPUT_DIR):
-        os.makedirs(VANITY_OUTPUT_DIR, exist_ok=True)
+    if not Path(VANITY_OUTPUT_DIR).exists():
+        Path(VANITY_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
     # Puzzle mode queue prepare (deterministic ranges)
     if (
