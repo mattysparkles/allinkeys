@@ -301,6 +301,36 @@ Additional options mirror the specification:
 
 ---
 
+### 🌱 Seed usage database
+
+AllInKeys keeps a rolling SQLite database of every seed range that has been
+scanned so workers never repeat each other.  The file lives at
+`logs/used_seeds.db` and is managed by `core.seed_tracker`:
+
+- `record_seed_range(first, last, range_id="default")` writes every seed in the
+  inclusive range.  The keygen loop calls this automatically once a
+  VanitySearch file is parsed so your local progress is persisted.
+- `get_condensed_ranges(range_id="default")` merges the individual seeds back
+  into contiguous spans.  `core.keygen.generate_random_seed` uses this to skip
+  previously scanned space before queuing fresh candidates.
+- `seed_in_used_range(seed, range_id="default")` returns `True` when a seed has
+  already been seen.
+
+To merge ranges produced by friends or other rigs, feed them into
+`record_seed_range` under a shared `range_id`:
+
+```python
+from core.seed_tracker import record_seed_range
+
+# Merge a partner's batch and track it separately
+record_seed_range(0x1234, 0x4321, range_id="community")
+```
+
+Any ranges stored under a given `range_id` are excluded the next time new seeds
+are queued, keeping the search pointed at fresh, never‑scanned territory.
+
+---
+
 ## 🔔 Supported Alert Channels
 
 - 🔊 Audio file alert (`.wav`, `.mp3`)

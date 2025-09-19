@@ -393,7 +393,10 @@ def run_vanitysearch_stream(
         if size == 0:
             logger.warning(f"⚠️ Output file empty: {current_output_path}")
             os.remove(current_output_path)
-            return False
+            # Treat an empty file as a completed rotation so the next
+            # VanitySearch run moves on to a fresh filename instead of
+            # repeatedly reusing the same slot.
+            return True
 
         try:
             lines, first_seed, last_seed = parse_vanity_file(current_output_path)
