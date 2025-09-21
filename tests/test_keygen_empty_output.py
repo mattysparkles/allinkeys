@@ -13,10 +13,12 @@ sys.modules.setdefault("dotenv", types.SimpleNamespace(load_dotenv=lambda *a, **
 def test_empty_vanity_output_advances(monkeypatch, tmp_path):
     """Empty VanitySearch outputs should still advance rotation."""
 
+
     monkeypatch.delitem(sys.modules, "core.keygen", raising=False)
     keygen = importlib.import_module("core.keygen")
 
     # Ensure the keygen module uses the temporary output directory.
+
     fake_exe = tmp_path / "vanitysearch"
     fake_exe.write_text("")
     fake_exe.chmod(0o755)
@@ -31,12 +33,15 @@ def test_empty_vanity_output_advances(monkeypatch, tmp_path):
             self.cmd = cmd
             self.pid = 12345
             self._terminated = False
+
             self.returncode = None
+
             out_path = Path(cmd[cmd.index("-o") + 1])
             out_path.touch()
 
         def terminate(self):
             self._terminated = True
+
             if self.returncode is None:
                 self.returncode = -15
 
@@ -48,6 +53,7 @@ def test_empty_vanity_output_advances(monkeypatch, tmp_path):
         def wait(self):
             self._terminated = True
             self.returncode = 0
+
             return 0
 
     monkeypatch.setattr(keygen.subprocess, "Popen", DummyProc)
