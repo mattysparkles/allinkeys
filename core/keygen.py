@@ -292,6 +292,18 @@ def run_vanitysearch_stream(
     )
     last_output_file = current_output_path
 
+    # Ensure we start from a clean slate so previous runs do not bleed into the
+    # new VanitySearch execution. If a stale file exists we remove it first.
+    try:
+        if os.path.exists(current_output_path):
+            os.remove(current_output_path)
+    except OSError:
+        logger.warning(
+            "⚠️ Unable to remove stale VanitySearch output %s before launch",
+            current_output_path,
+            exc_info=True,
+        )
+
     # Normalize pattern and ensure it's final positional arg
     pattern = str(VANITY_PATTERN).strip()
     if (pattern.startswith('"') and pattern.endswith('"')) or (
@@ -339,6 +351,8 @@ def run_vanitysearch_stream(
         )
         logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd_preview}")
 
+        rotation_triggered = threading.Event()
+
         def monitor_process(p, path):
             """Monitor file size/lines and pause requests while VanitySearch runs."""
 
@@ -354,6 +368,7 @@ def run_vanitysearch_stream(
                     logger.info(
                         "⏱️ Rotation interval reached. Terminating process to rotate file.",
                     )
+                    rotation_triggered.set()
                     p.terminate()
                     break
                 try:
@@ -363,6 +378,7 @@ def run_vanitysearch_stream(
                                 f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). "
                                 f"Rotating file {os.path.basename(path)}"
                             )
+                            rotation_triggered.set()
                             p.terminate()
                             break
                         with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -371,6 +387,7 @@ def run_vanitysearch_stream(
                                     f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). "
                                     f"Rotating file {os.path.basename(path)}"
                                 )
+                                rotation_triggered.set()
                                 p.terminate()
                                 break
                 except FileNotFoundError:
@@ -393,7 +410,10 @@ def run_vanitysearch_stream(
         if size == 0:
             logger.warning(f"⚠️ Output file empty: {current_output_path}")
             os.remove(current_output_path)
-            return False
+            # Treat an empty file as a completed rotation so the next
+            # VanitySearch run moves on to a fresh filename instead of
+            # repeatedly reusing the same slot.
+            return True
 
         try:
             lines, first_seed, last_seed = parse_vanity_file(current_output_path)
@@ -417,7 +437,26 @@ def run_vanitysearch_stream(
             logger.warning(f"⚠️ Failed to parse {current_output_path}: {e}")
         return True
 
-    logger.error(f"❌ Output file not created: {current_output_path}")
+    return_code = getattr(proc, "returncode", None)
+    if rotation_triggered.is_set():
+        logger.info(
+            "🔁 Rotation triggered before VanitySearch produced output for %s",
+            current_output_path,
+        )
+        return True
+
+    if return_code in (0, None):
+        logger.info(
+            "ℹ️ VanitySearch exited without producing %s (no hits). Advancing.",
+            current_output_path,
+        )
+        return True
+
+    logger.error(
+        "❌ Output file not created: %s (VanitySearch return code=%s)",
+        current_output_path,
+        return_code,
+    )
     return False
 
 
