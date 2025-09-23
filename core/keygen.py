@@ -57,6 +57,15 @@ def _seed_in_ranges(seed: int, ranges) -> bool:
             return True
     return False
 
+
+def telemetry_enabled() -> bool:
+    """Return ``True`` when experimental telemetry features are active."""
+
+    return bool(
+        getattr(settings, "ENABLE_TELEMETRY", False)
+        and getattr(settings, "SEED_TELEMETRY_ENABLED", False)
+    )
+
 # Batch progress
 KEYGEN_STATE = {
     "batch_id": 0,
@@ -151,6 +160,8 @@ def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1_024_000)
 
 def _telemetry_context():
     """Return (mode, range_id) tuple for telemetry labeling."""
+    if not telemetry_enabled():
+        return "vanity", "default"
     if getattr(settings, "PUZZLE_MODE", False):
         num = getattr(settings, "PUZZLE_NUMBER", None)
         return "puzzle", (f"puzzle-{num}" if num is not None else "puzzle")
@@ -159,8 +170,12 @@ def _telemetry_context():
 
 def _central_seen(seed: int) -> bool:
     mode, range_id = _telemetry_context()
+    if not telemetry_enabled():
+        return False
     try:
-        return check_seed_seen(int(seed).to_bytes(32, "big"), mode=mode, range_id=range_id)
+        return check_seed_seen(
+            int(seed).to_bytes(32, "big"), mode=mode, range_id=range_id
+        )
     except Exception:
         return False
 
@@ -186,7 +201,7 @@ def generate_random_seed(min_bits=128):
                 if seed_in_used_range(seed):
                     continue
                 # Central check (skip if any installation reported it already)
-                if _central_seen(seed):
+                if telemetry_enabled() and _central_seen(seed):
                     try:
                         record_seed_event(
                             int(seed).to_bytes(32, "big"),
@@ -209,7 +224,7 @@ def generate_random_seed(min_bits=128):
             seed = secrets.randbelow(span) + start
             if seed_in_used_range(seed):
                 continue
-            if _central_seen(seed):
+            if telemetry_enabled() and _central_seen(seed):
                 try:
                     record_seed_event(
                         int(seed).to_bytes(32, "big"),
@@ -225,7 +240,7 @@ def generate_random_seed(min_bits=128):
 
         if _SEED_QUEUE:
             seed = _SEED_QUEUE.pop(0)
-            if _central_seen(seed):
+            if telemetry_enabled() and _central_seen(seed):
                 try:
                     record_seed_event(
                         int(seed).to_bytes(32, "big"),
@@ -642,17 +657,18 @@ def start_keygen_loop(
                 set_metric("vanity_progress_percent", progress)
 
                 # Telemetry: record that we are using this seed (post-skip phase)
-                try:
-                    mode, range_id = _telemetry_context()
-                    record_seed_event(
-                        int(seed).to_bytes(32, "big"),
-                        mode=mode,
-                        range_id=range_id,
-                        used=False,
-                        match_found=False,
-                    )
-                except Exception:
-                    pass
+                if telemetry_enabled():
+                    try:
+                        mode, range_id = _telemetry_context()
+                        record_seed_event(
+                            int(seed).to_bytes(32, "big"),
+                            mode=mode,
+                            range_id=range_id,
+                            used=False,
+                            match_found=False,
+                        )
+                    except Exception:
+                        pass
 
                 success = run_vanitysearch_stream(
                     seed, KEYGEN_STATE["batch_id"], index, pause_evt, gpu_flag
