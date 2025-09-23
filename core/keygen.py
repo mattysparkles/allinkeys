@@ -10,6 +10,7 @@ import platform
 import re
 from datetime import datetime
 from collections import deque
+from threading import Lock
 
 from config.settings import (
     VANITYSEARCH_PATH,
@@ -45,8 +46,10 @@ last_output_file = None
 KPS_WINDOW = deque()
 
 # Prefetch queue to reduce I/O when checking used seeds
-_SEED_QUEUE: list[int] = []
-SEED_QUEUE_SIZE = 10
+_SEED_QUEUE: deque[int] = deque()
+_SEED_QUEUE_LOCK = Lock()
+SEED_QUEUE_SIZE = 100
+SEED_QUEUE_MAX_ATTEMPTS = SEED_QUEUE_SIZE * 25
 
 
 def _seed_in_ranges(seed: int, ranges) -> bool:
@@ -180,10 +183,48 @@ def _central_seen(seed: int) -> bool:
         return False
 
 
+def _prefill_seed_queue(min_bits: int = 128) -> None:
+    """Populate the local seed queue up to ``SEED_QUEUE_SIZE`` entries."""
+
+    if getattr(settings, "PUZZLE_MODE", False):
+        return
+
+    with _SEED_QUEUE_LOCK:
+        if len(_SEED_QUEUE) >= SEED_QUEUE_SIZE:
+            return
+
+        min_val = 1 << min_bits
+        range_span = SECP256K1_ORDER - min_val
+        ranges = get_condensed_ranges()
+        attempts = 0
+
+        while len(_SEED_QUEUE) < SEED_QUEUE_SIZE and attempts < SEED_QUEUE_MAX_ATTEMPTS:
+            attempts += 1
+            candidate = secrets.randbelow(range_span) + min_val
+            if _seed_in_ranges(candidate, ranges):
+                continue
+
+            if telemetry_enabled():
+                seen_centrally = _central_seen(candidate)
+                if seen_centrally:
+                    try:
+                        mode, range_id = _telemetry_context()
+                        record_seed_event(
+                            int(candidate).to_bytes(32, "big"),
+                            mode=mode,
+                            range_id=range_id,
+                            used=True,
+                            match_found=False,
+                        )
+                    except Exception:
+                        pass
+                    continue
+
+            _SEED_QUEUE.append(candidate)
+
+
 def generate_random_seed(min_bits=128):
     """Generate the next seed for VanitySearch while avoiding used ranges."""
-
-    global _SEED_QUEUE
 
     while True:
         if getattr(settings, "PUZZLE_MODE", False):
@@ -200,7 +241,6 @@ def generate_random_seed(min_bits=128):
                     )
                 if seed_in_used_range(seed):
                     continue
-                # Central check (skip if any installation reported it already)
                 if telemetry_enabled() and _central_seen(seed):
                     try:
                         record_seed_event(
@@ -215,7 +255,6 @@ def generate_random_seed(min_bits=128):
                     continue
                 return seed
 
-            # Fallback to random within start/end if puzzle number is missing
             start = int(getattr(settings, "PUZZLE_START", "0"), 16)
             end = int(getattr(settings, "PUZZLE_END", "0"), 16)
             if end < start:
@@ -238,31 +277,26 @@ def generate_random_seed(min_bits=128):
                 continue
             return seed
 
-        if _SEED_QUEUE:
-            seed = _SEED_QUEUE.pop(0)
-            if telemetry_enabled() and _central_seen(seed):
-                try:
-                    record_seed_event(
-                        int(seed).to_bytes(32, "big"),
-                        mode=_telemetry_context()[0],
-                        range_id=_telemetry_context()[1],
-                        used=True,
-                        match_found=False,
-                    )
-                except Exception:
-                    pass
+        if not _SEED_QUEUE:
+            _prefill_seed_queue(min_bits=min_bits)
+            if not _SEED_QUEUE:
+                time.sleep(0.05)
                 continue
-            return seed
 
-        min_val = 1 << min_bits
-        range_span = SECP256K1_ORDER - min_val
-        ranges = get_condensed_ranges()
-        candidates = [
-            secrets.randbelow(range_span) + min_val for _ in range(SEED_QUEUE_SIZE)
-        ]
-        if any(_seed_in_ranges(c, ranges) for c in candidates):
+        with _SEED_QUEUE_LOCK:
+            try:
+                seed = _SEED_QUEUE.popleft()
+            except IndexError:
+                seed = None
+
+        if seed is None:
+            time.sleep(0.05)
             continue
-        _SEED_QUEUE.extend(candidates)
+
+        if seed_in_used_range(seed):
+            continue
+
+        return seed
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +395,7 @@ def run_vanitysearch_stream(
         VANITY_OUTPUT_DIR,
         f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}.txt",
     )
+    temp_output_path = current_output_path + ".part"
     last_output_file = current_output_path
 
     # Ensure we start from a clean slate so previous runs do not bleed into the
@@ -368,6 +403,8 @@ def run_vanitysearch_stream(
     try:
         if os.path.exists(current_output_path):
             os.remove(current_output_path)
+        if os.path.exists(temp_output_path):
+            os.remove(temp_output_path)
     except OSError:
         logger.warning(
             "⚠️ Unable to remove stale VanitySearch output %s before launch",
@@ -390,7 +427,7 @@ def run_vanitysearch_stream(
         logger.error("VanitySearch binary not found: %s", exe_path)
         raise FileNotFoundError("VanitySearch binary not found.")
 
-    cmd = [exe_path, "-s", str(hex_seed_full), "-o", str(current_output_path)]
+    cmd = [exe_path, "-s", str(hex_seed_full), "-o", str(temp_output_path)]
     if use_gpu:
         cmd.append("-gpu")  # CUDA acceleration
     if not BTC_COMPRESSED:
@@ -474,7 +511,7 @@ def run_vanitysearch_stream(
                 time.sleep(1)
 
         timer_thread = threading.Thread(
-            target=monitor_process, args=(proc, current_output_path)
+            target=monitor_process, args=(proc, temp_output_path)
         )
         timer_thread.start()
         proc.wait()
@@ -484,12 +521,22 @@ def run_vanitysearch_stream(
         return False
 
     # Post-process output file: use parser; do not delete zero-byte files
+    if os.path.exists(temp_output_path):
+        try:
+            Path(temp_output_path).replace(current_output_path)
+        except Exception:
+            logger.warning(
+                "⚠️ Failed to finalize VanitySearch output %s", temp_output_path,
+                exc_info=True,
+            )
+            return False
+
     if os.path.exists(current_output_path):
         size = os.path.getsize(current_output_path)
         if size == 0:
             logger.warning(f"⚠️ Output file empty: {current_output_path}")
             os.remove(current_output_path)
-            return False
+            return True
 
         try:
             lines, first_seed, last_seed = parse_vanity_file(current_output_path)
@@ -508,6 +555,19 @@ def run_vanitysearch_stream(
             if first_seed is not None and last_seed is not None:
                 record_seed_range(first_seed, last_seed)
 
+            if telemetry_enabled():
+                try:
+                    mode, range_id = _telemetry_context()
+                    record_seed_event(
+                        int(initial_seed_int).to_bytes(32, "big"),
+                        mode=mode,
+                        range_id=range_id,
+                        used=True,
+                        match_found=False,
+                    )
+                except Exception:
+                    pass
+
             logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
             try:
                 set_metric("last_rotation", time.time())
@@ -518,7 +578,7 @@ def run_vanitysearch_stream(
         return True
 
     logger.error(f"❌ Output file not created: {current_output_path}")
-    return False
+    return True
 
 
 # Dashboard metric helpers (imported here to keep module import order)
@@ -560,6 +620,9 @@ def start_keygen_loop(
     # Ensure output directory exists
     if not Path(VANITY_OUTPUT_DIR).exists():
         Path(VANITY_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+
+    # Warm the seed queue so the first rotation does not block on telemetry
+    _prefill_seed_queue()
 
     # Puzzle mode queue prepare (deterministic ranges)
     if (
