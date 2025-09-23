@@ -20,6 +20,12 @@ SEED_TELEMETRY_ENABLED = os.getenv("SEED_TELEMETRY_ENABLED", "1") not in {
     "false",
     "False",
 }
+# Flag allowing modules to opt-in to experimental telemetry features.
+ENABLE_TELEMETRY = os.getenv("ENABLE_TELEMETRY", "0") not in {
+    "0",
+    "false",
+    "False",
+}
 TELEMETRY_ENDPOINT = os.getenv(
     "TELEMETRY_ENDPOINT", "https://telemetry.sparkleserver.site/v1/seed"
 )
