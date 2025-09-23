@@ -18,6 +18,7 @@ from config.settings import (
     MAX_OUTPUT_FILE_SIZE,
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
+    ROTATE_MAX_WAIT_SECONDS,
     FILES_PER_BATCH,
 )
 from config.constants import SECP256K1_ORDER
@@ -484,6 +485,10 @@ def run_vanitysearch_stream(
             # Treat an empty file as a completed rotation so the next
             # VanitySearch run moves on to a fresh filename instead of
             # repeatedly reusing the same slot.
+            try:
+                set_metric("last_rotation", time.time())
+            except Exception:
+                pass
             return True
 
         try:
@@ -504,6 +509,10 @@ def run_vanitysearch_stream(
                 record_seed_range(first_seed, last_seed)
 
             logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
+            try:
+                set_metric("last_rotation", time.time())
+            except Exception:
+                pass
         except Exception as e:
             logger.warning(f"⚠️ Failed to parse {current_output_path}: {e}")
         return True
@@ -514,6 +523,10 @@ def run_vanitysearch_stream(
             "🔁 Rotation triggered before VanitySearch produced output for %s",
             current_output_path,
         )
+        try:
+            set_metric("last_rotation", time.time())
+        except Exception:
+            pass
         return True
 
     if return_code in (0, None):
@@ -521,6 +534,10 @@ def run_vanitysearch_stream(
             "ℹ️ VanitySearch exited without producing %s (no hits). Advancing.",
             current_output_path,
         )
+        try:
+            set_metric("last_rotation", time.time())
+        except Exception:
+            pass
         return True
 
     logger.error(
@@ -687,6 +704,12 @@ def start_keygen_loop(
                     continue
 
                 # Save after each file so progress can resume mid-batch
+                try:
+                    logger.info(
+                        f"[Rotation] Completed part {index} of batch {KEYGEN_STATE['batch_id']}; starting next file"
+                    )
+                except Exception:
+                    pass
                 save_checkpoint(
                     {
                         "batch_id": KEYGEN_STATE["batch_id"],

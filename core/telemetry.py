@@ -35,6 +35,9 @@ import requests
 import multiprocessing
 
 from config import settings
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 
 QUEUE_DB = Path(settings.LOG_DIR) / "telemetry_queue.db"
 INSTANCE_ID_PATH = Path(settings.LOG_DIR) / "app_instance_id"
@@ -76,6 +79,13 @@ class TelemetryClient:
         self._backoff = flush_seconds
         if self.enabled:
             self._init_db()
+            try:
+                logger.info(
+                    f"[Telemetry] Client initialized | endpoint={self.endpoint} | "
+                    f"flush={self.flush_seconds}s | batch={self.batch_size} | db={self.db_path}"
+                )
+            except Exception:
+                pass
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -130,6 +140,12 @@ class TelemetryClient:
                 )
         finally:
             conn.close()
+        try:
+            logger.debug(
+                f"[Telemetry] Queued event | mode={mode} | range={range_id} | used={used} | match={match_found}"
+            )
+        except Exception:
+            pass
 
     # ------------------------------- Flushing ------------------------------
     def _fetch_batch(self, conn: sqlite3.Connection) -> Iterable[tuple[int, str]]:
@@ -160,9 +176,16 @@ class TelemetryClient:
                 return True
             ids, payloads = zip(*batch)
             try:
+                logger.info(f"[Telemetry] Flushing {len(ids)} event(s) to {self.endpoint}")
                 self._send_batch([json.loads(p) for p in payloads])
             except Exception:
                 self._backoff = min(self._backoff * 2, self.max_backoff)
+                try:
+                    logger.warning(
+                        f"[Telemetry] Flush failed; backing off to {self._backoff}s"
+                    )
+                except Exception:
+                    pass
                 return False
             with conn:
                 conn.execute(
@@ -170,6 +193,10 @@ class TelemetryClient:
                     ids,
                 )
             self._backoff = self.flush_seconds
+            try:
+                logger.info(f"[Telemetry] Flush succeeded | sent={len(ids)}")
+            except Exception:
+                pass
             return True
         finally:
             conn.close()
@@ -202,6 +229,10 @@ def start_telemetry(shutdown_event: threading.Event) -> None:
     global _CLIENT
     _CLIENT = TelemetryClient()
     _CLIENT.start(shutdown_event)
+    try:
+        logger.info("[Telemetry] Background flusher thread started")
+    except Exception:
+        pass
 
 
 def _run_uvicorn(host: str, port: int) -> None:  # pragma: no cover - runtime integration
