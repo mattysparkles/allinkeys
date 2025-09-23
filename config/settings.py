@@ -32,6 +32,12 @@ TELEMETRY_FLUSH_SECONDS = int(os.getenv("TELEMETRY_FLUSH_SECONDS", "10"))
 TELEMETRY_MAX_BACKOFF = int(os.getenv("TELEMETRY_MAX_BACKOFF", "300"))
 TELEMETRY_CHECK_TIMEOUT = float(os.getenv("TELEMETRY_CHECK_TIMEOUT", "1.5"))
 
+# Auto-run embedded telemetry service (central DB) on this node
+CENTRAL_TELEMETRY_NODE = os.getenv("CENTRAL_TELEMETRY_NODE", "0") not in {"0", "false", "False"}
+AUTO_START_TELEMETRY_SERVICE = os.getenv("AUTO_START_TELEMETRY_SERVICE", "0") not in {"0", "false", "False"} or CENTRAL_TELEMETRY_NODE
+TELEMETRY_SERVICE_HOST = os.getenv("TELEMETRY_SERVICE_HOST", "0.0.0.0")
+TELEMETRY_SERVICE_PORT = int(os.getenv("TELEMETRY_SERVICE_PORT", "8000"))
+
 # ---------------------------------------------------------------------------
 # Environment helpers
 # ---------------------------------------------------------------------------

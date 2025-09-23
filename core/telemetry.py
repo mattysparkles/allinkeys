@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 import requests
+import multiprocessing
 
 from config import settings
 
@@ -201,6 +202,42 @@ def start_telemetry(shutdown_event: threading.Event) -> None:
     global _CLIENT
     _CLIENT = TelemetryClient()
     _CLIENT.start(shutdown_event)
+
+
+def _run_uvicorn(host: str, port: int) -> None:  # pragma: no cover - runtime integration
+    try:
+        from telemetry_service.__main__ import main as svc_main
+        # svc_main calls uvicorn.run(app,...)
+        import os
+        os.environ.setdefault("UVICORN_WORKERS", "1")
+        os.environ["TELEMETRY_SERVICE_HOST"] = str(host)
+        os.environ["TELEMETRY_SERVICE_PORT"] = str(port)
+        svc_main()
+    except Exception:
+        # If service is missing dependencies, do not crash the app
+        pass
+
+
+def start_embedded_telemetry_service() -> Optional[multiprocessing.Process]:
+    """Start the embedded FastAPI telemetry service in a child process if enabled.
+
+    Returns the process object, or None if not started.
+    """
+    if not settings.SEED_TELEMETRY_ENABLED:
+        return None
+    if not getattr(settings, "AUTO_START_TELEMETRY_SERVICE", False):
+        return None
+    try:
+        host = getattr(settings, "TELEMETRY_SERVICE_HOST", "0.0.0.0")
+        port = int(getattr(settings, "TELEMETRY_SERVICE_PORT", 8000))
+    except Exception:
+        host, port = "0.0.0.0", 8000
+    try:
+        p = multiprocessing.Process(target=_run_uvicorn, args=(host, port), daemon=True)
+        p.start()
+        return p
+    except Exception:
+        return None
 
 
 # ---------------------------- Central status check ----------------------------

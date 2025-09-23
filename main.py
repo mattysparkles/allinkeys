@@ -74,7 +74,7 @@ from core.dashboard import (
 )
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
-from core.telemetry import start_telemetry
+from core.telemetry import start_telemetry, start_embedded_telemetry_service
 from utils.file_utils import start_daily_cleanup, cleanup_old_files
 
 
@@ -644,7 +644,15 @@ def run_allinkeys(args):
     # shared with child processes.
     shutdown_event = multiprocessing.Event()
     if settings.SEED_TELEMETRY_ENABLED and not getattr(args, "no_telemetry", False):
+        # Start background client flusher
         start_telemetry(shutdown_event)
+        # Optionally run the embedded central service on this node
+        try:
+            svc_proc = start_embedded_telemetry_service()
+            if svc_proc is not None:
+                logger.info("[Started] Embedded telemetry service")
+        except Exception as e:
+            logger.warning(f"Failed to start embedded telemetry service: {e}")
     shutdown_events = {
         "keygen": multiprocessing.Event(),
         "altcoin": multiprocessing.Event(),
@@ -688,6 +696,13 @@ def run_allinkeys(args):
     processes, named_processes = run_all_processes(
         args, shutdown_events, shared_metrics, pause_events, log_queue
     )
+    # If embedded telemetry service was started, add it for graceful shutdown
+    try:
+        if 'svc_proc' in locals() and svc_proc is not None:
+            processes.append(svc_proc)
+            named_processes.append(("telemetry_service", svc_proc))
+    except Exception:
+        pass
 
     def monitor():
         from core.dashboard import get_current_metrics
