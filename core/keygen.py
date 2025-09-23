@@ -453,7 +453,23 @@ def run_vanitysearch_stream(
             target=monitor_process, args=(proc, current_output_path)
         )
         timer_thread.start()
-        proc.wait()
+        # Wait with timeout; escalate to kill if process does not exit
+        try:
+            proc.wait(timeout=ROTATE_MAX_WAIT_SECONDS)
+        except Exception:
+            try:
+                logger.warning(
+                    "⏱️ VanitySearch did not exit within %ss. Forcing kill...",
+                    ROTATE_MAX_WAIT_SECONDS,
+                )
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            except Exception:
+                logger.warning("Force-kill sequence failed", exc_info=True)
         timer_thread.join()
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
