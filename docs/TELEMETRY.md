@@ -31,10 +31,25 @@ python main.py --no-telemetry
 
 When disabled, no events are recorded and the queue remains empty.
 
+## Central "Seen" Check
+
+Before a seed is used, AllInKeys performs a quick, privacy‑preserving check
+against the central telemetry service to avoid re‑using seeds that have already
+been searched by any installation.
+
+- Endpoint: `TELEMETRY_CHECK_ENDPOINT` (defaults to `${TELEMETRY_ENDPOINT}/check`)
+- Request: `{ seed_fingerprint, mode, range_id }`
+- Response: `{ "used": true|false }`
+- Timeout: `TELEMETRY_CHECK_TIMEOUT` (default 1.5s). Network errors are treated
+  as "unknown/not seen", so local work proceeds without blocking.
+
+When a seed is skipped due to the central check, an event is queued with
+`used=true` so the central service can account for the attempted reuse without
+revealing the raw seed.
+
 ## Offline Behaviour
 
 Events are written to a durable SQLite queue located under `logs/`.  If the
 machine is offline, events accumulate and are uploaded the next time a network
 connection is available.  The queue is capped at 100k entries and older records
 are discarded in a ring‑buffer fashion.
-

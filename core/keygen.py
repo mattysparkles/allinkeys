@@ -35,6 +35,7 @@ from core.seed_tracker import (
     record_seed_range,
     get_condensed_ranges,
 )
+from core.telemetry import check_seed_seen, record_seed_event
 
 # Runtime trackers / metrics window
 total_keys_generated = 0
@@ -147,6 +148,22 @@ def generate_seed_from_batch(batch_id, index_within_batch, batch_size=1_024_000)
     return seed
 
 
+def _telemetry_context():
+    """Return (mode, range_id) tuple for telemetry labeling."""
+    if getattr(settings, "PUZZLE_MODE", False):
+        num = getattr(settings, "PUZZLE_NUMBER", None)
+        return "puzzle", (f"puzzle-{num}" if num is not None else "puzzle")
+    return "vanity", "default"
+
+
+def _central_seen(seed: int) -> bool:
+    mode, range_id = _telemetry_context()
+    try:
+        return check_seed_seen(int(seed).to_bytes(32, "big"), mode=mode, range_id=range_id)
+    except Exception:
+        return False
+
+
 def generate_random_seed(min_bits=128):
     """Generate the next seed for VanitySearch while avoiding used ranges."""
 
@@ -167,6 +184,19 @@ def generate_random_seed(min_bits=128):
                     )
                 if seed_in_used_range(seed):
                     continue
+                # Central check (skip if any installation reported it already)
+                if _central_seen(seed):
+                    try:
+                        record_seed_event(
+                            int(seed).to_bytes(32, "big"),
+                            mode=_telemetry_context()[0],
+                            range_id=_telemetry_context()[1],
+                            used=True,
+                            match_found=False,
+                        )
+                    except Exception:
+                        pass
+                    continue
                 return seed
 
             # Fallback to random within start/end if puzzle number is missing
@@ -178,10 +208,35 @@ def generate_random_seed(min_bits=128):
             seed = secrets.randbelow(span) + start
             if seed_in_used_range(seed):
                 continue
+            if _central_seen(seed):
+                try:
+                    record_seed_event(
+                        int(seed).to_bytes(32, "big"),
+                        mode=_telemetry_context()[0],
+                        range_id=_telemetry_context()[1],
+                        used=True,
+                        match_found=False,
+                    )
+                except Exception:
+                    pass
+                continue
             return seed
 
         if _SEED_QUEUE:
-            return _SEED_QUEUE.pop(0)
+            seed = _SEED_QUEUE.pop(0)
+            if _central_seen(seed):
+                try:
+                    record_seed_event(
+                        int(seed).to_bytes(32, "big"),
+                        mode=_telemetry_context()[0],
+                        range_id=_telemetry_context()[1],
+                        used=True,
+                        match_found=False,
+                    )
+                except Exception:
+                    pass
+                continue
+            return seed
 
         min_val = 1 << min_bits
         range_span = SECP256K1_ORDER - min_val
@@ -594,6 +649,19 @@ def start_keygen_loop(
                 set_metric("current_seed_index", index)
                 progress = round((index / float(FILES_PER_BATCH)) * 100, 2)
                 set_metric("vanity_progress_percent", progress)
+
+                # Telemetry: record that we are using this seed (post-skip phase)
+                try:
+                    mode, range_id = _telemetry_context()
+                    record_seed_event(
+                        int(seed).to_bytes(32, "big"),
+                        mode=mode,
+                        range_id=range_id,
+                        used=False,
+                        match_found=False,
+                    )
+                except Exception:
+                    pass
 
                 success = run_vanitysearch_stream(
                     seed, KEYGEN_STATE["batch_id"], index, pause_evt, gpu_flag

@@ -203,6 +203,45 @@ def start_telemetry(shutdown_event: threading.Event) -> None:
     _CLIENT.start(shutdown_event)
 
 
+# ---------------------------- Central status check ----------------------------
+def check_seed_seen(seed_bytes: bytes, *, mode: str, range_id: Optional[str] = None) -> bool:
+    """Return True if the central telemetry database marks this seed as seen.
+
+    Network failures are treated as "unknown/not seen" and return False. The
+    server is expected to accept either POST or GET to the
+    ``settings.TELEMETRY_CHECK_ENDPOINT`` with a JSON body or query string:
+
+    { "seed_fingerprint": SHA256(seed||app_id), "mode": mode, "range_id": str|None }
+
+    The response should be JSON like {"used": true|false}.
+    """
+
+    try:
+        app_id = _CLIENT.app_id if _CLIENT else _get_app_id()
+        fp = hashlib.sha256(seed_bytes + app_id.encode()).hexdigest()
+        url = getattr(settings, "TELEMETRY_CHECK_ENDPOINT", settings.TELEMETRY_ENDPOINT)
+        timeout = getattr(settings, "TELEMETRY_CHECK_TIMEOUT", 1.5) or 1.5
+        payload = {"seed_fingerprint": fp, "mode": mode, "range_id": range_id}
+        try:
+            r = requests.post(url, json=payload, timeout=timeout)
+        except Exception:
+            # Fallback to GET with query params if POST fails in some setups
+            try:
+                r = requests.get(url, params=payload, timeout=timeout)
+            except Exception:
+                return False
+        if r is None or getattr(r, "status_code", 599) >= 400:
+            return False
+        try:
+            data = r.json()
+        except Exception:
+            return False
+        return bool(data.get("used", False))
+    except Exception:
+        # Never block callers; on any error default to not seen so local work continues
+        return False
+
+
 def record_seed_event(
     seed_bytes: bytes,
     *,
