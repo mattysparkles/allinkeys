@@ -413,6 +413,7 @@ def run_vanitysearch_stream(
             """Monitor file size/lines and pause requests while VanitySearch runs."""
 
             start = time.time()
+            initiated_rotation = False
             while p.poll() is None:
                 if pause_event and pause_event.is_set():
                     logger.info(
@@ -422,32 +423,41 @@ def run_vanitysearch_stream(
                     break
                 if time.time() - start >= ROTATE_INTERVAL_SECONDS:
                     logger.info(
-                        "⏱️ Rotation interval reached. Terminating process to rotate file.",
+                        f"⏱️ Rotation interval reached ({ROTATE_INTERVAL_SECONDS}s). Terminating for rotation.",
                     )
                     rotation_triggered.set()
+                    initiated_rotation = True
                     p.terminate()
                     break
                 try:
                     if os.path.exists(path):
-                        if os.path.getsize(path) >= MAX_OUTPUT_FILE_SIZE:
+                        size_now = os.path.getsize(path)
+                        if size_now >= MAX_OUTPUT_FILE_SIZE:
                             logger.info(
-                                f"📏 Max file size reached ({MAX_OUTPUT_FILE_SIZE} bytes). "
-                                f"Rotating file {os.path.basename(path)}"
+                                f"📏 Size threshold {size_now}/{MAX_OUTPUT_FILE_SIZE} bytes reached. Rotating {os.path.basename(path)}"
                             )
                             rotation_triggered.set()
+                            initiated_rotation = True
                             p.terminate()
                             break
-                        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                            if sum(1 for _ in f) >= MAX_OUTPUT_LINES:
+                        # Line-based rotation is expensive; guard errors from Windows file locks
+                        try:
+                            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                                # Use a lightweight line count pass. If it takes too long it will pick up next tick.
+                                line_count = sum(1 for _ in f)
+                            if line_count >= MAX_OUTPUT_LINES:
                                 logger.info(
-                                    f"📏 Max line count reached ({MAX_OUTPUT_LINES} lines). "
-                                    f"Rotating file {os.path.basename(path)}"
+                                    f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached. Rotating {os.path.basename(path)}"
                                 )
                                 rotation_triggered.set()
+                                initiated_rotation = True
                                 p.terminate()
                                 break
-                except FileNotFoundError:
-                    logger.debug("Output file not yet created during monitoring")
+                        except (FileNotFoundError, PermissionError, OSError):
+                            # File may be locked by writer on Windows; try again next tick
+                            pass
+                except (FileNotFoundError, PermissionError, OSError):
+                    logger.debug("Output not ready or locked during monitoring; retrying")
                 time.sleep(1)
 
         timer_thread = threading.Thread(
