@@ -545,6 +545,21 @@ def run_only_mode(args):
 
         processes = []
         from core.logger import log_queue
+        # Ensure telemetry also runs in BTC-only mode
+        try:
+            if settings.SEED_TELEMETRY_ENABLED and not getattr(args, "no_telemetry", False):
+                from core.telemetry import start_telemetry, start_embedded_telemetry_service
+
+                start_telemetry(shutdown_keygen)
+                try:
+                    svc_proc = start_embedded_telemetry_service()
+                    if svc_proc is not None:
+                        logger.info("[Started] Embedded telemetry service")
+                        processes.append(svc_proc)
+                except Exception as e:
+                    logger.warning(f"Failed to start embedded telemetry service: {e}")
+        except Exception:
+            logger.warning("Telemetry initialization failed in BTC-only mode", exc_info=True)
 
         # Background metrics collector so the GUI has real-time stats
         p = Process(target=metrics_updater, args=(shared_metrics, shutdown_metrics))

@@ -411,6 +411,8 @@ def run_vanitysearch_stream(
             """Monitor file size/lines and pause requests while VanitySearch runs."""
 
             start = time.time()
+            logger.info("[Rotation] Monitor started for %s", os.path.basename(path))
+            last_tick = 0
             while p.poll() is None:
                 if pause_event and pause_event.is_set():
                     logger.info(
@@ -418,6 +420,11 @@ def run_vanitysearch_stream(
                     )
                     p.terminate()
                     break
+                # Heartbeat every 5s so we can see rotation timer progress
+                elapsed = int(time.time() - start)
+                if elapsed // 5 > last_tick // 5:
+                    logger.info("[Rotation] Elapsed=%ss / Interval=%ss", elapsed, ROTATE_INTERVAL_SECONDS)
+                    last_tick = elapsed
                 if time.time() - start >= ROTATE_INTERVAL_SECONDS:
                     logger.info(
                         f"⏱️ Rotation interval reached ({ROTATE_INTERVAL_SECONDS}s). Terminating for rotation.",
