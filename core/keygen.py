@@ -407,13 +407,10 @@ def run_vanitysearch_stream(
         )
         logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd_preview}")
 
-        rotation_triggered = threading.Event()
-
         def monitor_process(p, path):
             """Monitor file size/lines and pause requests while VanitySearch runs."""
 
             start = time.time()
-            initiated_rotation = False
             while p.poll() is None:
                 if pause_event and pause_event.is_set():
                     logger.info(
@@ -425,8 +422,6 @@ def run_vanitysearch_stream(
                     logger.info(
                         f"⏱️ Rotation interval reached ({ROTATE_INTERVAL_SECONDS}s). Terminating for rotation.",
                     )
-                    rotation_triggered.set()
-                    initiated_rotation = True
                     p.terminate()
                     break
                 try:
@@ -436,8 +431,6 @@ def run_vanitysearch_stream(
                             logger.info(
                                 f"📏 Size threshold {size_now}/{MAX_OUTPUT_FILE_SIZE} bytes reached. Rotating {os.path.basename(path)}"
                             )
-                            rotation_triggered.set()
-                            initiated_rotation = True
                             p.terminate()
                             break
                         # Line-based rotation is expensive; guard errors from Windows file locks
@@ -449,8 +442,6 @@ def run_vanitysearch_stream(
                                 logger.info(
                                     f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached. Rotating {os.path.basename(path)}"
                                 )
-                                rotation_triggered.set()
-                                initiated_rotation = True
                                 p.terminate()
                                 break
                         except (FileNotFoundError, PermissionError, OSError):
@@ -464,23 +455,7 @@ def run_vanitysearch_stream(
             target=monitor_process, args=(proc, current_output_path)
         )
         timer_thread.start()
-        # Wait with timeout; escalate to kill if process does not exit
-        try:
-            proc.wait(timeout=ROTATE_MAX_WAIT_SECONDS)
-        except Exception:
-            try:
-                logger.warning(
-                    "⏱️ VanitySearch did not exit within %ss. Forcing kill...",
-                    ROTATE_MAX_WAIT_SECONDS,
-                )
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except Exception:
-                    proc.kill()
-                    proc.wait(timeout=5)
-            except Exception:
-                logger.warning("Force-kill sequence failed", exc_info=True)
+        proc.wait()
         timer_thread.join()
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
@@ -492,14 +467,7 @@ def run_vanitysearch_stream(
         if size == 0:
             logger.warning(f"⚠️ Output file empty: {current_output_path}")
             os.remove(current_output_path)
-            # Treat an empty file as a completed rotation so the next
-            # VanitySearch run moves on to a fresh filename instead of
-            # repeatedly reusing the same slot.
-            try:
-                set_metric("last_rotation", time.time())
-            except Exception:
-                pass
-            return True
+            return False
 
         try:
             lines, first_seed, last_seed = parse_vanity_file(current_output_path)
@@ -527,34 +495,7 @@ def run_vanitysearch_stream(
             logger.warning(f"⚠️ Failed to parse {current_output_path}: {e}")
         return True
 
-    return_code = getattr(proc, "returncode", None)
-    if rotation_triggered.is_set():
-        logger.info(
-            "🔁 Rotation triggered before VanitySearch produced output for %s",
-            current_output_path,
-        )
-        try:
-            set_metric("last_rotation", time.time())
-        except Exception:
-            pass
-        return True
-
-    if return_code in (0, None):
-        logger.info(
-            "ℹ️ VanitySearch exited without producing %s (no hits). Advancing.",
-            current_output_path,
-        )
-        try:
-            set_metric("last_rotation", time.time())
-        except Exception:
-            pass
-        return True
-
-    logger.error(
-        "❌ Output file not created: %s (VanitySearch return code=%s)",
-        current_output_path,
-        return_code,
-    )
+    logger.error(f"❌ Output file not created: {current_output_path}")
     return False
 
 
