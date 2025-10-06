@@ -51,12 +51,9 @@ from config.settings import (
     ENABLE_KEYGEN,
     ENABLE_ALERTS,
     ENABLE_BACKLOG_CONVERSION,
-    LOG_DIR,
-    CSV_DIR,
-    DOWNLOAD_DIR,
-    VANITY_OUTPUT_DIR,
     find_vanitysearch_binary,
 )
+from config.directories import LOG_DIR, CSV_DIR, DOWNLOAD_DIR, VANITY_OUTPUT_DIR
 
 from core.logger import log_message, start_listener, stop_listener
 from core.checkpoint import load_keygen_checkpoint, save_keygen_checkpoint

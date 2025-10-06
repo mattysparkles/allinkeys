@@ -9,12 +9,11 @@ from typing import Tuple, List, Optional
 from pathlib import Path
 
 from config.settings import (
-    VANITY_OUTPUT_DIR,
-    ALL_BTC_ADDRESSES_DIR,
     ALL_BTC_RANGES_COUNT,
     BTC_RANGE_FILE_PATTERN,
     BTC_MIN_FILE_AGE_SEC,
 )
+from config.directories import VANITY_OUTPUT_DIR, ALL_BTC_ADDRESSES_DIR
 from core.dashboard import set_metric, increment_metric
 from utils.file_utils import find_latest_funded_file
 from core.btc_ranges import (

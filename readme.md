@@ -349,28 +349,6 @@ Each alert channel can enforce its own cooldown. Set `DEFAULT_ALERT_RATE_LIMIT`
 channel with `<CHANNEL>_ALERT_RATE_LIMIT` — for example,
 `EMAIL_ALERT_RATE_LIMIT=120` limits email alerts to once every two minutes.
 
-### API key rotation
-
-Some services allow multiple API keys. Provide comma‑separated lists in the
-`.env` using the plural form of the variable name:
-
-```env
-TELEGRAM_BOT_TOKENS=key1,key2
-TWILIO_SIDS=sid1,sid2
-TWILIO_AUTH_TOKENS=token1,token2
-```
-
-At runtime you can rotate to the next key without restarting:
-
-```python
-from config import settings
-settings.rotate_api_keys()
-```
-
-Future alerts will use the new credentials automatically.
-
----
-
 ## 🔐 Example: Add Your PGP Key
 
 ```bash

@@ -6,25 +6,32 @@ When importing your own copy of the **all BTC addresses** list for `--all` mode,
 place the file at `all_btc_addresses/all_Bitcoin_addresses_ever_used_sorted.txt.gz`
 so it matches the naming convention expected by the application.
 
-- **Line 73 – BASE_DIR**: `env_path("ALLINKEYS_BASE_DIR", Path(__file__).resolve().parents[1])`
-- **Line 75 – LOG_DIR**: `env_path("ALLINKEYS_LOG_DIR", BASE_DIR / "logs")`
-- **Line 77 – CSV_DIR**: `env_path("ALLINKEYS_CSV_DIR", BASE_DIR / "output" / "csv")`
-- **Line 79 – CSV_OUTPUT_DIR**: `env_path("ALLINKEYS_CSV_OUTPUT_DIR", CSV_DIR)`
-- **Line 81 – DOWNLOADS_DIR**: `env_path("ALLINKEYS_DOWNLOADS_DIR", BASE_DIR / "Downloads")`
-- **Line 82 – FULL_DIR**: `env_path("ALLINKEYS_FULL_DIR", DOWNLOADS_DIR / "full")`
-- **Line 83 – UNIQUE_DIR**: `env_path("ALLINKEYS_UNIQUE_DIR", DOWNLOADS_DIR / "unique")`
-- **Line 85 – MATCHES_DIR**: `env_path("ALLINKEYS_MATCHES_DIR", BASE_DIR / "matches")`
-- **Line 92 – _VANITY_DIR_DEFAULT**: `BASE_DIR / "output" / "vanity_output"`
-- **Line 93 – VANITY_OUTPUT_DIR**: `env_path("ALLINKEYS_VANITY_OUTPUT_DIR", env_path("ALLINKEYS_VANITY_TXT_DIR", _VANITY_DIR_DEFAULT))`
-- **Line 97 – MNEMONIC_TXT_DIR**: `env_path(`
-- **Line 101 – SOUND_CLIPS_DIR**: `env_path("ALLINKEYS_SOUND_CLIPS_DIR", BASE_DIR / "alerts" / "sounds")`
-- **Line 102 – CHECKPOINT_PATH**: `env_path("ALLINKEYS_CHECKPOINT_PATH", LOG_DIR / "restore_checkpoint.json")`
-- **Line 104 – CHECKED_CSV_LOG**: `env_path("ALLINKEYS_CHECKED_CSV_LOG", LOG_DIR / "checked_csvs.txt")`
-- **Line 105 – RECHECKED_CSV_LOG**: `env_path("ALLINKEYS_RECHECKED_CSV_LOG", LOG_DIR / "rechecked_csvs.txt")`
-- **Line 107 – CSV_CHECKPOINT_STATE**: `env_path("ALLINKEYS_CSV_CHECKPOINT_STATE", LOG_DIR / "csv_checker_state.json")`
-- **Line 109 – DOWNLOAD_DIR**: `DOWNLOADS_DIR`
-- **Line 110 – CHECKPOINT_FILE**: `env_path("ALLINKEYS_CHECKPOINT_FILE", BASE_DIR / "checkpoint.json")`
-- **Line 113 – RETENTION_DAYS**: `int(os.getenv("RETENTION_DAYS", "30"))`
+- **Directory overrides (`config/directories.py`)**
+  - `BASE_DIR`: root of the repository (`ALLINKEYS_BASE_DIR`)
+  - `LOG_DIR`: log storage (`ALLINKEYS_LOG_DIR`)
+  - `CSV_DIR`: CSV output (`ALLINKEYS_CSV_DIR`)
+  - `CSV_OUTPUT_DIR`: legacy alias for `CSV_DIR`
+  - `DOWNLOADS_DIR`: funded list downloads (`ALLINKEYS_DOWNLOADS_DIR`)
+  - `FULL_DIR`/`UNIQUE_DIR`: legacy directories under `DOWNLOADS_DIR`
+  - `MATCHES_DIR`: archive for matches (`ALLINKEYS_MATCHES_DIR`)
+  - `VANITY_OUTPUT_DIR`: vanity search text output (`ALLINKEYS_VANITY_OUTPUT_DIR`)
+  - `MNEMONIC_TXT_DIR`: mnemonic mode output (`ALLINKEYS_MNEMONIC_TXT_DIR`)
+  - `SOUND_CLIPS_DIR`: alert audio (`ALLINKEYS_SOUND_CLIPS_DIR`)
+  - `CHECKPOINT_PATH`: crash recovery state (`ALLINKEYS_CHECKPOINT_PATH`)
+  - `CHECKED_CSV_LOG`/`RECHECKED_CSV_LOG`: processed CSV trackers
+  - `CSV_CHECKPOINT_STATE`: day-one CSV resume point
+  - `CHECKPOINT_FILE`: legacy checkpoint JSON (`ALLINKEYS_CHECKPOINT_FILE`)
+- **Telemetry (`config/telemetry.py`)**
+  - `CLIENT_VERSION`: `ALLINKEYS_VERSION` or `dev`
+  - `SEED_TELEMETRY_ENABLED`: opt-in flag (`SEED_TELEMETRY_ENABLED`)
+  - `TELEMETRY_ENDPOINT`: `TELEMETRY_ENDPOINT`
+  - `TELEMETRY_CHECK_ENDPOINT`: override with `TELEMETRY_CHECK_ENDPOINT`
+  - `TELEMETRY_BATCH_SIZE`: queue flush batch size (`TELEMETRY_BATCH_SIZE`)
+  - `TELEMETRY_FLUSH_SECONDS`: flush cadence (`TELEMETRY_FLUSH_SECONDS`)
+  - `TELEMETRY_MAX_BACKOFF`: retry backoff ceiling (`TELEMETRY_MAX_BACKOFF`)
+  - `TELEMETRY_CHECK_TIMEOUT`: remote check timeout (`TELEMETRY_CHECK_TIMEOUT`)
+  - `AUTO_START_TELEMETRY_SERVICE`: launch embedded FastAPI service
+  - `TELEMETRY_SERVICE_HOST`/`PORT`: bind address for embedded service
 - **Line 116 – ALL_BTC_ADDRESSES_URL**: `"https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"` – Source list of all BTC addresses
 - **Line 117 – ALL_BTC_ADDRESSES_DIR**: `BASE_DIR / "all_btc_addresses"` – Where the downloaded list is stored
 - **Line 118 – ALL_BTC_RANGES_COUNT**: `20` – Number of range files to split the list into
@@ -47,7 +54,7 @@ so it matches the naming convention expected by the application.
 - **Line 239 – KEYCONV_PATH**: `env_path("ALLINKEYS_KEYCONV_PATH", BASE_DIR / "bin" / "keyconv.exe")`
 - **Line 240 – MAX_KEYS_PER_FILE**: `100_000` – Deprecated
 - **Line 242 – VANITY_ROTATE_LINES**: `200_000`
-- **Line 243 – VANITY_MAX_BYTES**: `500 * 1024 * 1024`
+- **Line 243 – VANITY_MAX_BYTES**: `50_000 * 1024`
 - **Line 244 – VANITY_ROTATE_SECONDS**: `60` – time-based rotation for streaming outputs (set 0/None to disable)
 - **Line 244 – MAX_OUTPUT_LINES**: `VANITY_ROTATE_LINES` – legacy alias
 - **Line 245 – MAX_OUTPUT_FILE_SIZE**: `VANITY_MAX_BYTES` – legacy alias

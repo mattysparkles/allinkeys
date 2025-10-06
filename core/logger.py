@@ -8,13 +8,13 @@ import multiprocessing
 from multiprocessing import queues as mp_queues
 from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
 from config.settings import (
-    LOG_DIR,
     LOG_LEVEL,
     LOG_TO_CONSOLE,
     LOG_TO_FILE,
     LOG_MAX_BYTES,
     LOG_BACKUP_COUNT,
 )
+from config.directories import LOG_DIR
 
 
 console_handler = logging.StreamHandler(sys.stdout)

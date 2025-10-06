@@ -14,7 +14,6 @@ from threading import Lock
 
 from config.settings import (
     VANITYSEARCH_PATH,
-    VANITY_OUTPUT_DIR,
     VANITY_PATTERN,
     MAX_OUTPUT_FILE_SIZE,
     MAX_OUTPUT_LINES,
@@ -22,6 +21,7 @@ from config.settings import (
     ROTATE_MAX_WAIT_SECONDS,
     FILES_PER_BATCH,
 )
+from config.directories import VANITY_OUTPUT_DIR
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import (
     load_keygen_checkpoint as load_checkpoint,

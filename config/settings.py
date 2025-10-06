@@ -6,161 +6,56 @@ Auto-merged to restore full functionality.
 import os
 import shutil
 import warnings
-from pathlib import Path
 from datetime import datetime
-from dotenv import load_dotenv
-from typing import Dict
+from pathlib import Path
 
-load_dotenv()
-
-# --- Telemetry configuration ---
-CLIENT_VERSION = os.getenv("ALLINKEYS_VERSION", "dev")
-SEED_TELEMETRY_ENABLED = os.getenv("SEED_TELEMETRY_ENABLED", "1") not in {
-    "0",
-    "false",
-    "False",
-}
-# Flag allowing modules to opt-in to experimental telemetry features.
-ENABLE_TELEMETRY = os.getenv("ENABLE_TELEMETRY", "0") not in {
-    "0",
-    "false",
-    "False",
-}
-TELEMETRY_ENDPOINT = os.getenv(
-    "TELEMETRY_ENDPOINT", "https://telemetry.sparkleserver.site/v1/seed"
+from config.environment import env_int
+from config.directories import (
+    ALERT_SOUND_FILE,
+    ALL_BTC_ADDRESSES_DIR,
+    ALL_BTC_GZ_LOCAL,
+    BASE_DIR,
+    CHECKED_CSV_LOG,
+    CHECKPOINT_FILE,
+    CHECKPOINT_PATH,
+    CSV_CHECKPOINT_STATE,
+    CSV_DIR,
+    CSV_OUTPUT_DIR,
+    DOWNLOADS_DIR,
+    DOWNLOAD_DIR,
+    FULL_DIR,
+    KEYCONV_PATH,
+    LOG_DIR,
+    MATCHES_DIR,
+    MNEMONIC_TXT_DIR,
+    PGP_PUBLIC_KEY_PATH,
+    RECHECKED_CSV_LOG,
+    SOUND_CLIPS_DIR,
+    UNIQUE_DIR,
+    VANITY_OUTPUT_DIR,
 )
-# Optional separate endpoint for seed status checks (skip if seen)
-TELEMETRY_CHECK_ENDPOINT = os.getenv(
-    "TELEMETRY_CHECK_ENDPOINT", f"{TELEMETRY_ENDPOINT.rstrip('/')}/check"
+from config.telemetry import (
+    AUTO_START_TELEMETRY_SERVICE,
+    CENTRAL_TELEMETRY_NODE,
+    CLIENT_VERSION,
+    ENABLE_TELEMETRY,
+    SEED_TELEMETRY_ENABLED,
+    TELEMETRY_BATCH_SIZE,
+    TELEMETRY_CHECK_ENDPOINT,
+    TELEMETRY_CHECK_TIMEOUT,
+    TELEMETRY_ENDPOINT,
+    TELEMETRY_FLUSH_SECONDS,
+    TELEMETRY_MAX_BACKOFF,
+    TELEMETRY_SERVICE_HOST,
+    TELEMETRY_SERVICE_PORT,
 )
-TELEMETRY_BATCH_SIZE = int(os.getenv("TELEMETRY_BATCH_SIZE", "100"))
-TELEMETRY_FLUSH_SECONDS = int(os.getenv("TELEMETRY_FLUSH_SECONDS", "10"))
-TELEMETRY_MAX_BACKOFF = int(os.getenv("TELEMETRY_MAX_BACKOFF", "300"))
-TELEMETRY_CHECK_TIMEOUT = float(os.getenv("TELEMETRY_CHECK_TIMEOUT", "1.5"))
-
-# Auto-run embedded telemetry service (central DB) on this node
-CENTRAL_TELEMETRY_NODE = os.getenv("CENTRAL_TELEMETRY_NODE", "0") not in {"0", "false", "False"}
-AUTO_START_TELEMETRY_SERVICE = os.getenv("AUTO_START_TELEMETRY_SERVICE", "0") not in {"0", "false", "False"} or CENTRAL_TELEMETRY_NODE
-TELEMETRY_SERVICE_HOST = os.getenv("TELEMETRY_SERVICE_HOST", "0.0.0.0")
-TELEMETRY_SERVICE_PORT = int(os.getenv("TELEMETRY_SERVICE_PORT", "8000"))
-
-# ---------------------------------------------------------------------------
-# Environment helpers
-# ---------------------------------------------------------------------------
-
-
-def env_path(var: str, default: Path | str) -> Path:
-    """Return a :class:`~pathlib.Path` from ``var`` or ``default``."""
-
-    value = os.getenv(var)
-    return Path(value) if value else Path(default)
-
-
-def env_int(var: str, default: int | None) -> int | None:
-    """Return integer from environment variable, falling back to ``default``."""
-
-    raw = os.getenv(var)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
-# --------------------- API KEY ROTATION ---------------------
-_API_KEY_STATES: Dict[str, Dict[str, object]] = {}
-
-
-def _init_api_key(name: str) -> str:
-    """Load API key(s) for ``name`` supporting comma-separated pools.
-
-    The plural environment variable (``<NAME>S``) takes precedence and may
-    contain a comma-separated list of keys.  If absent, the singular
-    ``<NAME>`` is used.  The first key becomes the active value.
-    """
-    list_var = f"{name}S"
-    keys = [k.strip() for k in os.getenv(list_var, "").split(",") if k.strip()]
-    if not keys:
-        single = os.getenv(name, "")
-        keys = [single] if single else [""]
-    _API_KEY_STATES[name] = {"keys": keys, "index": 0}
-    os.environ[name] = keys[0]
-    return keys[0]
-
-
-def rotate_api_keys():
-    """Advance to the next API key for all services."""
-    for env_name, state in _API_KEY_STATES.items():
-        state["index"] = (state["index"] + 1) % len(state["keys"])
-        new_val = state["keys"][state["index"]]
-        globals()[env_name] = new_val
-        os.environ[env_name] = new_val
-        if env_name == "TWILIO_AUTH_TOKEN":
-            globals()["TWILIO_TOKEN"] = new_val
-            os.environ["TWILIO_TOKEN"] = new_val
-
-
-# ===================== 🔌 SYSTEM PATHS ==========================
-# Root of the repository
-BASE_DIR = env_path("ALLINKEYS_BASE_DIR", Path(__file__).resolve().parents[1])
-# Directory for all log files
-LOG_DIR = env_path("ALLINKEYS_LOG_DIR", BASE_DIR / "logs")
-# Location where generated CSVs are stored
-CSV_DIR = env_path("ALLINKEYS_CSV_DIR", BASE_DIR / "output" / "csv")
-# Duplicate to keep legacy modules working
-CSV_OUTPUT_DIR = env_path("ALLINKEYS_CSV_OUTPUT_DIR", CSV_DIR)
-# Location for downloaded funded address lists
-DOWNLOADS_DIR = env_path("ALLINKEYS_DOWNLOADS_DIR", BASE_DIR / "Downloads")
-FULL_DIR = env_path("ALLINKEYS_FULL_DIR", DOWNLOADS_DIR / "full")
-UNIQUE_DIR = env_path("ALLINKEYS_UNIQUE_DIR", DOWNLOADS_DIR / "unique")
-# Where matches and encrypted alerts are archived
-MATCHES_DIR = env_path("ALLINKEYS_MATCHES_DIR", BASE_DIR / "matches")
-# VanitySearch text outputs
-# Results now live under ``output/vanity_output``. Older configurations used
-# ``ALLINKEYS_VANITY_TXT_DIR`` so we still honor it but emit a deprecation
-# warning when accessed via the old ``VANITY_TXT_DIR`` attribute.  The new
-# canonical name is ``VANITY_OUTPUT_DIR`` and all code should reference it.
-_VANITY_DIR_DEFAULT = BASE_DIR / "output" / "vanity_output"
-VANITY_OUTPUT_DIR = env_path(
-    "ALLINKEYS_VANITY_OUTPUT_DIR",
-    env_path("ALLINKEYS_VANITY_TXT_DIR", _VANITY_DIR_DEFAULT),
-)
-# Mnemonic mode text outputs
-MNEMONIC_TXT_DIR = env_path(
-    "ALLINKEYS_MNEMONIC_TXT_DIR", BASE_DIR / "output" / "mnemonic_output"
-)
-# Local audio clips for alerts
-SOUND_CLIPS_DIR = env_path("ALLINKEYS_SOUND_CLIPS_DIR", BASE_DIR / "alerts" / "sounds")
-CHECKPOINT_PATH = env_path(
-    "ALLINKEYS_CHECKPOINT_PATH", LOG_DIR / "restore_checkpoint.json"
-)
-# Track which CSVs have been processed
-CHECKED_CSV_LOG = env_path("ALLINKEYS_CHECKED_CSV_LOG", LOG_DIR / "checked_csvs.txt")
-RECHECKED_CSV_LOG = env_path(
-    "ALLINKEYS_RECHECKED_CSV_LOG", LOG_DIR / "rechecked_csvs.txt"
-)
-# Track per-file progress for the CSV checker
-CSV_CHECKPOINT_STATE = env_path(
-    "ALLINKEYS_CSV_CHECKPOINT_STATE", LOG_DIR / "csv_checker_state.json"
-)
-# Alias for backward compatibility
-DOWNLOAD_DIR = DOWNLOADS_DIR
-CHECKPOINT_FILE = env_path("ALLINKEYS_CHECKPOINT_FILE", BASE_DIR / "checkpoint.json")
 
 # Number of days to keep downloaded files before purging
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
 
 # === BTC-only mode settings ===
 ALL_BTC_ADDRESSES_URL = "https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"  # Source list of all BTC addresses
-ALL_BTC_ADDRESSES_DIR = (
-    BASE_DIR / "all_btc_addresses"
-)  # Where the downloaded list is stored
 ALL_BTC_RANGES_COUNT = 20  # Number of range files to split the list into
-ALL_BTC_GZ_LOCAL = env_path(
-    "ALLINKEYS_ALL_BTC_GZ_LOCAL",
-    ALL_BTC_ADDRESSES_DIR / "all_Bitcoin_addresses_ever_used_sorted.txt.gz",
-)  # Local filename expected when importing your own list
 BTC_RANGE_FILE_PATTERN = "btc_range_{:02d}.txt"  # Range file naming pattern 00..19
 
 # Backlog pause control (creation vs. consumption)
@@ -281,11 +176,10 @@ _oclvanitygen = find_oclvanity_binary("oclvanitygen")
 OCLVANITYGEN_PATH = Path(_oclvanitygen) if _oclvanitygen else None
 _oclvanityminer = find_oclvanity_binary("oclvanityminer")
 OCLVANITYMINER_PATH = Path(_oclvanityminer) if _oclvanityminer else None
-KEYCONV_PATH = env_path("ALLINKEYS_KEYCONV_PATH", BASE_DIR / "bin" / "keyconv.exe")
 MAX_KEYS_PER_FILE = 100_000  # Deprecated
 # Output file rotation config (for VanitySearch stream)
 VANITY_ROTATE_LINES = 200_000
-VANITY_MAX_BYTES = 500 * 1024 * 1024
+VANITY_MAX_BYTES = 50_000 * 1024  # 50,000 KB (~48.8 MB)
 _vanity_rotate_seconds = env_int("ALLINKEYS_VANITY_ROTATE_SECONDS", 60)
 VANITY_ROTATE_SECONDS = (
     _vanity_rotate_seconds if _vanity_rotate_seconds and _vanity_rotate_seconds > 0 else None
@@ -348,16 +242,10 @@ LOGO_ASCII = LOGO_ART
 
 
 # ===================== 🔐 PGP SETTINGS ==========================
-PGP_PUBLIC_KEY_PATH = env_path(
-    "ALLINKEYS_PGP_PUBLIC_KEY_PATH", BASE_DIR / "sparkles_public_key.asc"
-)
 
 # ===================== 🎧 ALERT SETTINGS ==========================
 ALERT_PHRASE = "The Beacons Have Been Lit, Gondor Calls for Aid!"
 ENABLE_AUDIO_ALERT_LOCAL = True
-ALERT_SOUND_FILE = env_path(
-    "ALLINKEYS_ALERT_SOUND_FILE", SOUND_CLIPS_DIR / "gondor-calls-for-aid.mp3"
-)
 ENABLE_DESKTOP_WINDOW_ALERT = True
 ALERT_POPUP_COLOR_1 = "#FF0000"
 ALERT_POPUP_COLOR_2 = "#000000"
@@ -591,10 +479,7 @@ ENABLE_ALERTS = True  # Master toggle
 REDACT_SENSITIVE_DATA_IN_ALERTS = True
 
 # === LOCAL AUDIO ALERT ===
-ENABLE_AUDIO_ALERT_LOCAL = True
-ALERT_SOUND_FILE = env_path(
-    "ALLINKEYS_ALERT_SOUND_FILE", SOUND_CLIPS_DIR / "gondor-calls-for-aid.mp3"
-)  # Must exist or alert will be skipped
+ENABLE_AUDIO_ALERT_LOCAL = True  # Sound path configured via config.directories
 
 # === DESKTOP POP-UP WINDOW ALERT ===
 ENABLE_DESKTOP_WINDOW_ALERT = True
@@ -605,11 +490,7 @@ ALERT_PHRASE = (
 )
 
 # === PGP ENCRYPTED MATCH ALERT OUTPUT ===
-ENABLE_PGP = False
-PGP_PUBLIC_KEY_PATH = env_path(
-    "ALLINKEYS_PGP_PUBLIC_KEY_PATH",
-    BASE_DIR / "Sparkles-allinkeys_0x3A94D30E_public.asc",
-)  # Must be a valid ASCII armored key file
+ENABLE_PGP = False  # Key path configured via config.directories
 
 # === EMAIL ALERT CONFIGURATION ===
 ALERT_EMAIL_ENABLED = True
