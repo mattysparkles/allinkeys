@@ -48,6 +48,7 @@ so it matches the naming convention expected by the application.
 - **Line 240 – MAX_KEYS_PER_FILE**: `100_000` – Deprecated
 - **Line 242 – VANITY_ROTATE_LINES**: `200_000`
 - **Line 243 – VANITY_MAX_BYTES**: `500 * 1024 * 1024`
+- **Line 244 – VANITY_ROTATE_SECONDS**: `60` – time-based rotation for streaming outputs (set 0/None to disable)
 - **Line 244 – MAX_OUTPUT_LINES**: `VANITY_ROTATE_LINES` – legacy alias
 - **Line 245 – MAX_OUTPUT_FILE_SIZE**: `VANITY_MAX_BYTES` – legacy alias
 - **Line 246 – USE_GPU**: `True`

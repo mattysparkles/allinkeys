@@ -23,6 +23,7 @@ from config.settings import (
     VANITY_OUTPUT_DIR,
     VANITY_ROTATE_LINES,
     VANITY_MAX_BYTES,
+    VANITY_ROTATE_SECONDS,
     ENABLE_BC1_DEFAULT,
     VANITY_MODE,
     OCLVANITYGEN_PATH,
@@ -463,6 +464,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                     rotate_lines=VANITY_ROTATE_LINES,
                     max_bytes=VANITY_MAX_BYTES,
                     prefix="vanity",
+                    rotate_seconds=VANITY_ROTATE_SECONDS,
                 )
                 total_lines = 0
                 try:

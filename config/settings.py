@@ -50,21 +50,22 @@ TELEMETRY_SERVICE_PORT = int(os.getenv("TELEMETRY_SERVICE_PORT", "8000"))
 
 
 def env_path(var: str, default: Path | str) -> Path:
-    """Return a :class:`~pathlib.Path` from ``var`` or ``default``.
-
-    Parameters
-    ----------
-    var:
-        Name of the environment variable to read.
-    default:
-        Fallback path used when the environment variable is not set.
-
-    The returned value is always converted to :class:`~pathlib.Path` and no
-    filesystem interaction (such as directory creation) is performed here.
-    """
+    """Return a :class:`~pathlib.Path` from ``var`` or ``default``."""
 
     value = os.getenv(var)
     return Path(value) if value else Path(default)
+
+
+def env_int(var: str, default: int | None) -> int | None:
+    """Return integer from environment variable, falling back to ``default``."""
+
+    raw = os.getenv(var)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 # --------------------- API KEY ROTATION ---------------------
@@ -285,6 +286,10 @@ MAX_KEYS_PER_FILE = 100_000  # Deprecated
 # Output file rotation config (for VanitySearch stream)
 VANITY_ROTATE_LINES = 200_000
 VANITY_MAX_BYTES = 500 * 1024 * 1024
+_vanity_rotate_seconds = env_int("ALLINKEYS_VANITY_ROTATE_SECONDS", 60)
+VANITY_ROTATE_SECONDS = (
+    _vanity_rotate_seconds if _vanity_rotate_seconds and _vanity_rotate_seconds > 0 else None
+)
 MAX_OUTPUT_LINES = VANITY_ROTATE_LINES  # legacy alias
 MAX_OUTPUT_FILE_SIZE = VANITY_MAX_BYTES  # legacy alias
 USE_GPU = True
