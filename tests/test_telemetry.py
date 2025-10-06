@@ -2,6 +2,10 @@ import importlib
 import sqlite3
 import sys
 
+import types
+
+import requests
+
 sys.modules.pop("core.telemetry", None)
 TelemetryClient = importlib.import_module("core.telemetry").TelemetryClient
 
@@ -15,7 +19,11 @@ def test_batch_and_backoff(tmp_path, monkeypatch):
         if fail["first"]:
             fail["first"] = False
             raise Exception("offline")
-        return type("R", (), {"status_code": 200})()
+
+        def _raise_ok():
+            return None
+
+        return types.SimpleNamespace(status_code=200, raise_for_status=_raise_ok)
 
     monkeypatch.setattr("core.telemetry.requests.post", fake_post)
 
@@ -79,3 +87,47 @@ def test_disabled_mode(tmp_path, monkeypatch):
 
     assert calls == []
     assert not db_path.exists()
+
+
+def test_flush_retries_on_http_error(tmp_path, monkeypatch):
+    # Force HTTP 503 so the batch stays queued.
+    def fake_error(url, json, timeout):
+        def _raise_err():
+            raise requests.HTTPError("503", response=types.SimpleNamespace(status_code=503))
+
+        return types.SimpleNamespace(status_code=503, raise_for_status=_raise_err)
+
+    monkeypatch.setattr("core.telemetry.requests.post", fake_error)
+
+    db_path = tmp_path / "queue.db"
+    client = TelemetryClient(
+        endpoint="http://example",
+        batch_size=10,
+        flush_seconds=1,
+        max_backoff=4,
+        db_path=db_path,
+        instance_id_path=tmp_path / "id.txt",
+    )
+    client.record_event(
+        b"seed", mode="mnemonic", range_id=None, used=False, match_found=False
+    )
+
+    assert client.flush_once() is False
+    assert client._backoff == 2
+
+    conn = sqlite3.connect(db_path)
+    remaining = conn.execute("SELECT COUNT(*) FROM telemetry").fetchone()[0]
+    conn.close()
+    assert remaining == 1
+
+    # Next flush succeeds so the entry is removed.
+    def fake_ok(url, json, timeout):
+        return types.SimpleNamespace(status_code=200, raise_for_status=lambda: None)
+
+    monkeypatch.setattr("core.telemetry.requests.post", fake_ok)
+    assert client.flush_once() is True
+
+    conn = sqlite3.connect(db_path)
+    remaining = conn.execute("SELECT COUNT(*) FROM telemetry").fetchone()[0]
+    conn.close()
+    assert remaining == 0

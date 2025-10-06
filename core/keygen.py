@@ -514,8 +514,24 @@ def run_vanitysearch_stream(
             target=monitor_process, args=(proc, temp_output_path)
         )
         timer_thread.start()
-        proc.wait()
-        timer_thread.join()
+        wait_timeout = (
+            ROTATE_MAX_WAIT_SECONDS
+            if ROTATE_MAX_WAIT_SECONDS and ROTATE_MAX_WAIT_SECONDS > 0
+            else None
+        )
+        try:
+            proc.wait(timeout=wait_timeout)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "⚠️ VanitySearch did not exit within %ss after terminate; killing.",
+                ROTATE_MAX_WAIT_SECONDS,
+            )
+            try:
+                proc.kill()
+            finally:
+                proc.wait()
+        finally:
+            timer_thread.join()
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
