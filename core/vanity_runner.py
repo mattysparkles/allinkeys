@@ -21,9 +21,6 @@ from config.settings import (
     DEFAULT_BTC_PATTERNS_BECH32,
     DEFAULT_BTC_PATTERNS_BECH32M,
     VANITY_OUTPUT_DIR,
-    VANITY_ROTATE_LINES,
-    VANITY_MAX_BYTES,
-    VANITY_ROTATE_SECONDS,
     ENABLE_BC1_DEFAULT,
     VANITY_MODE,
     OCLVANITYGEN_PATH,
@@ -32,7 +29,7 @@ from config.settings import (
 from core.logger import get_logger
 from core.dashboard import update_dashboard_stat
 from core.utils.io_safety import atomic_open, atomic_commit
-from core.vanity_io import RollingAtomicWriter, ensure_dir
+from core.vanity_io import ensure_dir
 from core.oclvanity_runner import run_oclvanitygen
 
 logger = get_logger(__name__)
@@ -396,13 +393,71 @@ def _warn_zero_matches(
     )
 
 
+def _next_vanity_paths(directory: str, counter: int, prefix: str = "vanity") -> Tuple[Path, Path]:
+    """Return final and temporary paths for VanitySearch output."""
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    final_name = f"{prefix}_{ts}_{counter:03d}.txt"
+    final_path = Path(directory) / final_name
+    return final_path, final_path.with_suffix(final_path.suffix + ".part")
+
+
+def _count_matching_lines(path: Path, addr_re: re.Pattern[str]) -> int:
+    """Count address-like lines in ``path``."""
+
+    count = 0
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+            for raw in fh:
+                if addr_re.search(raw.strip()):
+                    count += 1
+    except FileNotFoundError:
+        return 0
+    return count
+
+
+def _has_vanity_output(path: Path, addr_re: re.Pattern[str]) -> bool:
+    """Check if the VanitySearch temp file already contains a vanity line."""
+
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+            for raw in fh:
+                if addr_re.search(raw.strip()):
+                    return True
+    except FileNotFoundError:
+        return False
+    return False
+
+
+def _finalize_vanity_file(temp_path: Path, final_path: Path, addr_re: re.Pattern[str]) -> int:
+    """Rename the VanitySearch temp file when it contains valid lines."""
+
+    if not temp_path.exists():
+        return 0
+
+    matches = _count_matching_lines(temp_path, addr_re)
+    if matches:
+        try:
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.replace(final_path)
+        except Exception:
+            logger.exception("Failed to finalise VanitySearch output file")
+            return 0
+    else:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            logger.debug("Unable to remove empty VanitySearch temp file", exc_info=True)
+    return matches
+
+
 def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) -> int:
     """
     Runs VanitySearch with correct CLI layout:
       - -b/-u are flags (no value)
       - Single prefix -> final positional arg
       - Multiple prefixes -> write to temp file and pass -i <file>
-    Streams stdout into RollingAtomicWriter with atomic rotation.
+    Uses VanitySearch's built-in ``-o`` output mechanism for file creation.
     """
     out_dir = ensure_dir(VANITY_OUTPUT_DIR)
     # ``ensure_dir`` now returns a string path. Wrap with ``Path`` so ``resolve``
@@ -431,6 +486,8 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
         ("CPU", ["-cpu"]),
     ]
 
+    file_counter = 0
+
     # Build single- or multi-pattern invocation:
     tmpfile = None
     try:
@@ -455,18 +512,21 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
         )
 
         for mode_name, mode_flag in modes:
-            args = base + mode_flag + multi_suffix + single_suffix
-            attempt_fallback = bool(multi_suffix)
+            args_base = base + mode_flag
+            current_multi_suffix = list(multi_suffix)
+            current_single_suffix = list(single_suffix)
+            attempt_fallback = bool(current_multi_suffix)
 
             while True:
-                writer = RollingAtomicWriter(
-                    out_dir,
-                    rotate_lines=VANITY_ROTATE_LINES,
-                    max_bytes=VANITY_MAX_BYTES,
-                    prefix="vanity",
-                    rotate_seconds=VANITY_ROTATE_SECONDS,
+                file_counter += 1
+                final_path, temp_path = _next_vanity_paths(out_dir, file_counter)
+                args = (
+                    args_base
+                    + current_multi_suffix
+                    + ["-o", str(temp_path)]
+                    + current_single_suffix
                 )
-                total_lines = 0
+                fallback_triggered = False
                 try:
                     logger.info(
                         f"🧪 VanitySearch ({mode_name}) command: {' '.join(args)}"
@@ -474,7 +534,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                     logger.info(f"Popen args ({mode_name}): {args}")
                     proc = _popen_stream(args)
                     last_line_ts = mode_start = time.time()
-                    fallback_triggered = False
+                    has_output = False
 
                     while True:
                         if stop_event and stop_event.is_set():
@@ -490,18 +550,17 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                                     "⏳ VanitySearch running (no output yet)..."
                                 )
                                 last_line_ts = time.time()
+                            if not has_output:
+                                has_output = _has_vanity_output(temp_path, addr_re)
                             if (
                                 attempt_fallback
-                                and total_lines == 0
+                                and not has_output
                                 and time.time() - mode_start > 10
                             ):
                                 proc.terminate()
-                                writer.abort()
                                 logger.warning(
                                     "⚠️ No output for 10s; sanity-checking with 1**"
                                 )
-                                args = base + mode_flag + ["1**"]
-                                attempt_fallback = False
                                 fallback_triggered = True
                                 break
                             time.sleep(0.05)
@@ -510,26 +569,50 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                         last_line_ts = time.time()
                         striped = line.rstrip("\n")
                         if striped:
-                            writer.write_line(striped)
                             clean = striped.strip()
-                            if addr_re.search(clean):
-                                total_lines += 1
+                            m = re.search(
+                                r"([0-9.]+)\s*([MK])?Key/s", clean, re.IGNORECASE
+                            )
+                            if m:
+                                speed = float(m.group(1))
+                                if m.group(2) and m.group(2).upper() == "K":
+                                    speed /= 1000.0
+                                update_dashboard_stat(
+                                    "vanitysearch_current_mkeys", round(speed, 2)
+                                )
+                                if (
+                                    get_selected_backend() != "cpu"
+                                    and speed < MIN_EXPECTED_GPU_MKEYS
+                                ):
+                                    _warn_once(
+                                        "low_speed",
+                                        "Speed suggests CPU; check GPU selection",
+                                    )
 
                     rc = proc.wait(timeout=10)
                 except Exception as e:
                     logger.warning(f"⚠️ VanitySearch {mode_name} failed: {e}")
-                    writer.abort()
+                    try:
+                        temp_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
                     break
 
                 if fallback_triggered:
-                    # retry with fallback args
+                    try:
+                        temp_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    current_multi_suffix = []
+                    current_single_suffix = ["1**"]
+                    attempt_fallback = False
                     continue
 
+                total_lines = _finalize_vanity_file(temp_path, final_path, addr_re)
                 if total_lines > 0:
                     logger.info(
                         f"✅ VanitySearch finished ({mode_name}) with {total_lines} matches."
                     )
-                    writer.close()
                     return total_lines
                 else:
                     if rc == 0:
@@ -540,7 +623,6 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                         logger.warning(
                             f"⚠️ VanitySearch exited rc={rc}, matches={total_lines}. Trying next mode..."
                         )
-                    writer.abort()
                     break
 
         logger.error("❌ VanitySearch produced no output in any mode.")
