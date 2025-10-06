@@ -155,8 +155,13 @@ class TelemetryClient:
         )
         return cur.fetchall()
 
-    def _send_batch(self, batch: Iterable[Dict[str, Any]]) -> None:
-        requests.post(self.endpoint, json=list(batch), timeout=10)
+    def _send_batch(self, batch: Iterable[Dict[str, Any]]) -> requests.Response:
+        response = requests.post(self.endpoint, json=list(batch), timeout=10)
+        # Treat HTTP errors as failures so queued events are retried instead of
+        # being dropped silently. ``raise_for_status`` preserves the response on
+        # the exception for logging/backoff handling.
+        response.raise_for_status()
+        return response
 
     def flush_once(self) -> bool:
         """Flush a single batch from the queue.
@@ -177,12 +182,14 @@ class TelemetryClient:
             ids, payloads = zip(*batch)
             try:
                 logger.info(f"[Telemetry] Flushing {len(ids)} event(s) to {self.endpoint}")
-                self._send_batch([json.loads(p) for p in payloads])
-            except Exception:
+                response = self._send_batch([json.loads(p) for p in payloads])
+            except Exception as exc:
                 self._backoff = min(self._backoff * 2, self.max_backoff)
                 try:
                     logger.warning(
-                        f"[Telemetry] Flush failed; backing off to {self._backoff}s"
+                        "[Telemetry] Flush failed; backing off to %ss | reason=%s",
+                        self._backoff,
+                        getattr(getattr(exc, "response", None), "status_code", exc),
                     )
                 except Exception:
                     pass
@@ -194,7 +201,10 @@ class TelemetryClient:
                 )
             self._backoff = self.flush_seconds
             try:
-                logger.info(f"[Telemetry] Flush succeeded | sent={len(ids)}")
+                status = getattr(response, "status_code", "?")
+                logger.info(
+                    f"[Telemetry] Flush succeeded | sent={len(ids)} | status={status}"
+                )
             except Exception:
                 pass
             return True
