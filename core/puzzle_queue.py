@@ -9,7 +9,6 @@ import time
 from typing import Optional, Tuple
 from pathlib import Path
 
-from config.settings import LOG_DIR
 from core.paths import LOG_DIR as LOG_DIR_P
 from core.logger import get_logger
 from utils.puzzle import get_puzzle_info

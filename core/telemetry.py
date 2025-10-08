@@ -34,13 +34,26 @@ from typing import Any, Dict, Iterable, Optional
 import requests
 import multiprocessing
 
-from config import settings
+from config.directories import LOG_DIR
+from config.telemetry import (
+    AUTO_START_TELEMETRY_SERVICE,
+    CLIENT_VERSION,
+    SEED_TELEMETRY_ENABLED,
+    TELEMETRY_BATCH_SIZE,
+    TELEMETRY_CHECK_ENDPOINT,
+    TELEMETRY_CHECK_TIMEOUT,
+    TELEMETRY_ENDPOINT,
+    TELEMETRY_FLUSH_SECONDS,
+    TELEMETRY_MAX_BACKOFF,
+    TELEMETRY_SERVICE_HOST,
+    TELEMETRY_SERVICE_PORT,
+)
 from core.logger import get_logger
 
 logger = get_logger(__name__)
 
-QUEUE_DB = Path(settings.LOG_DIR) / "telemetry_queue.db"
-INSTANCE_ID_PATH = Path(settings.LOG_DIR) / "app_instance_id"
+QUEUE_DB = Path(LOG_DIR) / "telemetry_queue.db"
+INSTANCE_ID_PATH = Path(LOG_DIR) / "app_instance_id"
 
 
 def _get_app_id(path: Path = INSTANCE_ID_PATH) -> str:
@@ -62,10 +75,10 @@ class TelemetryClient:
         self,
         *,
         enabled: bool = True,
-        endpoint: str = settings.TELEMETRY_ENDPOINT,
-        batch_size: int = settings.TELEMETRY_BATCH_SIZE,
-        flush_seconds: int = settings.TELEMETRY_FLUSH_SECONDS,
-        max_backoff: int = settings.TELEMETRY_MAX_BACKOFF,
+        endpoint: str = TELEMETRY_ENDPOINT,
+        batch_size: int = TELEMETRY_BATCH_SIZE,
+        flush_seconds: int = TELEMETRY_FLUSH_SECONDS,
+        max_backoff: int = TELEMETRY_MAX_BACKOFF,
         db_path: Path = QUEUE_DB,
         instance_id_path: Path = INSTANCE_ID_PATH,
     ) -> None:
@@ -121,7 +134,7 @@ class TelemetryClient:
         fingerprint = hashlib.sha256(seed_bytes + self.app_id.encode()).hexdigest()
         payload = {
             "app_instance_id": self.app_id,
-            "client_version": settings.CLIENT_VERSION,
+            "client_version": CLIENT_VERSION,
             "mode": mode,
             "range_id": range_id,
             "seed_fingerprint": fingerprint,
@@ -233,7 +246,7 @@ _CLIENT: Optional[TelemetryClient] = None
 def start_telemetry(shutdown_event: threading.Event) -> None:
     """Initialize and start the global telemetry client."""
 
-    if not settings.SEED_TELEMETRY_ENABLED:
+    if not SEED_TELEMETRY_ENABLED:
         return
 
     global _CLIENT
@@ -264,13 +277,13 @@ def start_embedded_telemetry_service() -> Optional[multiprocessing.Process]:
 
     Returns the process object, or None if not started.
     """
-    if not settings.SEED_TELEMETRY_ENABLED:
+    if not SEED_TELEMETRY_ENABLED:
         return None
-    if not getattr(settings, "AUTO_START_TELEMETRY_SERVICE", False):
+    if not AUTO_START_TELEMETRY_SERVICE:
         return None
     try:
-        host = getattr(settings, "TELEMETRY_SERVICE_HOST", "0.0.0.0")
-        port = int(getattr(settings, "TELEMETRY_SERVICE_PORT", 8000))
+        host = TELEMETRY_SERVICE_HOST or "0.0.0.0"
+        port = int(TELEMETRY_SERVICE_PORT)
     except Exception:
         host, port = "0.0.0.0", 8000
     try:
@@ -286,8 +299,8 @@ def check_seed_seen(seed_bytes: bytes, *, mode: str, range_id: Optional[str] = N
     """Return True if the central telemetry database marks this seed as seen.
 
     Network failures are treated as "unknown/not seen" and return False. The
-    server is expected to accept either POST or GET to the
-    ``settings.TELEMETRY_CHECK_ENDPOINT`` with a JSON body or query string:
+    server is expected to accept either POST or GET to
+    :data:`config.telemetry.TELEMETRY_CHECK_ENDPOINT` with a JSON body or query string:
 
     { "seed_fingerprint": SHA256(seed||app_id), "mode": mode, "range_id": str|None }
 
@@ -297,8 +310,8 @@ def check_seed_seen(seed_bytes: bytes, *, mode: str, range_id: Optional[str] = N
     try:
         app_id = _CLIENT.app_id if _CLIENT else _get_app_id()
         fp = hashlib.sha256(seed_bytes + app_id.encode()).hexdigest()
-        url = getattr(settings, "TELEMETRY_CHECK_ENDPOINT", settings.TELEMETRY_ENDPOINT)
-        timeout = getattr(settings, "TELEMETRY_CHECK_TIMEOUT", 1.5) or 1.5
+        url = TELEMETRY_CHECK_ENDPOINT or TELEMETRY_ENDPOINT
+        timeout = TELEMETRY_CHECK_TIMEOUT or 1.5
         payload = {"seed_fingerprint": fp, "mode": mode, "range_id": range_id}
         try:
             r = requests.post(url, json=payload, timeout=timeout)

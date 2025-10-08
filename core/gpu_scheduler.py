@@ -18,9 +18,9 @@ except Exception:  # pragma: no cover
 from config.settings import (
     GPU_STRATEGY,
     GPU_VENDOR,
-    VANITY_OUTPUT_DIR,
     BACKLOG_MONITOR_INTERVAL_SECONDS,
 )
+from config.directories import VANITY_OUTPUT_DIR
 from core.logger import log_message
 
 

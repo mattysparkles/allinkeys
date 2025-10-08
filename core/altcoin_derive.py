@@ -39,8 +39,6 @@ MAX_FIELD_SIZE = 10000  # 10KB per field safety cap
 
 from config.settings import (
     ENABLE_SEED_VERIFICATION,
-    CSV_DIR,
-    VANITY_OUTPUT_DIR,
     MAX_CSV_MB,
     BCH_CASHADDR_ENABLED,
     ALTCOIN_GPUS_INDEX,
@@ -51,6 +49,7 @@ from config.settings import (
     MAX_OUTPUT_LINES,
     ROTATE_INTERVAL_SECONDS,
 )
+from config.directories import CSV_DIR, VANITY_OUTPUT_DIR
 from core.logger import log_message
 from core.dashboard import update_dashboard_stat, get_metric, record_rate
 from core.worker_bootstrap import _safe_set_metric, _safe_inc_metric

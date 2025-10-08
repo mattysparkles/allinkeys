@@ -1,0 +1,45 @@
+"""Telemetry configuration extracted from ``config.settings``."""
+
+from __future__ import annotations
+
+import os
+
+from .environment import env_flag, env_int
+
+CLIENT_VERSION = os.getenv("ALLINKEYS_VERSION", "dev")
+SEED_TELEMETRY_ENABLED = env_flag("SEED_TELEMETRY_ENABLED", True)
+# Flag allowing modules to opt-in to experimental telemetry features.
+ENABLE_TELEMETRY = env_flag("ENABLE_TELEMETRY", False)
+TELEMETRY_ENDPOINT = os.getenv(
+    "TELEMETRY_ENDPOINT", "https://telemetry.sparkleserver.site/v1/seed"
+)
+TELEMETRY_CHECK_ENDPOINT = os.getenv(
+    "TELEMETRY_CHECK_ENDPOINT", f"{TELEMETRY_ENDPOINT.rstrip('/')}/check"
+)
+TELEMETRY_BATCH_SIZE = env_int("TELEMETRY_BATCH_SIZE", 100) or 100
+TELEMETRY_FLUSH_SECONDS = env_int("TELEMETRY_FLUSH_SECONDS", 10) or 10
+TELEMETRY_MAX_BACKOFF = env_int("TELEMETRY_MAX_BACKOFF", 300) or 300
+TELEMETRY_CHECK_TIMEOUT = float(os.getenv("TELEMETRY_CHECK_TIMEOUT", "1.5"))
+
+CENTRAL_TELEMETRY_NODE = env_flag("CENTRAL_TELEMETRY_NODE", False)
+AUTO_START_TELEMETRY_SERVICE = env_flag(
+    "AUTO_START_TELEMETRY_SERVICE", False
+) or CENTRAL_TELEMETRY_NODE
+TELEMETRY_SERVICE_HOST = os.getenv("TELEMETRY_SERVICE_HOST", "0.0.0.0")
+TELEMETRY_SERVICE_PORT = env_int("TELEMETRY_SERVICE_PORT", 8000) or 8000
+
+__all__ = [
+    "CLIENT_VERSION",
+    "SEED_TELEMETRY_ENABLED",
+    "ENABLE_TELEMETRY",
+    "TELEMETRY_ENDPOINT",
+    "TELEMETRY_CHECK_ENDPOINT",
+    "TELEMETRY_BATCH_SIZE",
+    "TELEMETRY_FLUSH_SECONDS",
+    "TELEMETRY_MAX_BACKOFF",
+    "TELEMETRY_CHECK_TIMEOUT",
+    "CENTRAL_TELEMETRY_NODE",
+    "AUTO_START_TELEMETRY_SERVICE",
+    "TELEMETRY_SERVICE_HOST",
+    "TELEMETRY_SERVICE_PORT",
+]

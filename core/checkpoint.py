@@ -3,9 +3,11 @@ import json
 import time
 from datetime import datetime
 from config.settings import (
-    CHECKPOINT_PATH, CHECKPOINT_ENABLED, CHECKPOINT_INTERVAL_SECONDS,
-    MAX_CHECKPOINT_HISTORY
+    CHECKPOINT_ENABLED,
+    CHECKPOINT_INTERVAL_SECONDS,
+    MAX_CHECKPOINT_HISTORY,
 )
+from config.directories import CHECKPOINT_PATH
 from core.logger import get_logger
 
 # Dedicated module logger

@@ -10,14 +10,16 @@ import sqlite3
 from datetime import datetime
 
 from config.settings import (
+    ENABLE_PGP,
+    NORMALIZE_BECH32_LOWER,
+)
+from config.directories import (
     CSV_DIR,
     DOWNLOADS_DIR,
     CHECKED_CSV_LOG,
     RECHECKED_CSV_LOG,
     CSV_CHECKPOINT_STATE,
-    ENABLE_PGP,
     PGP_PUBLIC_KEY_PATH,
-    NORMALIZE_BECH32_LOWER,
     MATCHES_DIR,
 )
 from utils.file_utils import find_latest_funded_file

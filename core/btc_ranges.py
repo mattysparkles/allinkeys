@@ -7,11 +7,10 @@ from pathlib import Path
 
 from config.settings import (
     ALL_BTC_ADDRESSES_URL,
-    ALL_BTC_ADDRESSES_DIR,
     ALL_BTC_RANGES_COUNT,
-    ALL_BTC_GZ_LOCAL,
     BTC_RANGE_FILE_PATTERN,
 )
+from config.directories import ALL_BTC_ADDRESSES_DIR, ALL_BTC_GZ_LOCAL
 from core.dashboard import set_metric
 from utils.network_utils import download_file
 from config.constants import DOWNLOAD_SHA256

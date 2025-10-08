@@ -20,12 +20,12 @@ from config.settings import (
     DEFAULT_BTC_PATTERNS,
     DEFAULT_BTC_PATTERNS_BECH32,
     DEFAULT_BTC_PATTERNS_BECH32M,
-    VANITY_OUTPUT_DIR,
     ENABLE_BC1_DEFAULT,
     VANITY_MODE,
     OCLVANITYGEN_PATH,
     find_vanitysearch_binary,
 )
+from config.directories import VANITY_OUTPUT_DIR
 from core.logger import get_logger
 from core.dashboard import update_dashboard_stat
 from core.utils.io_safety import atomic_open, atomic_commit

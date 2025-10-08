@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Optional, Tuple, Set, TextIO
 
 from core.altcoin_derive import derive_altcoin_addresses_from_hex, convert_txt_to_csv
-from config.settings import VANITY_OUTPUT_DIR, CSV_DIR
 from core.paths import VANITY_OUTPUT_DIR as VANITY_DIR_P, CSV_DIR as CSV_DIR_P, LOG_DIR as LOG_DIR_P, ensure_dirs
 from core.logger import log_message
 
