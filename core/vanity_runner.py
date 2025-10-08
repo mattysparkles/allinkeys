@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import threading
 import time
 import tempfile
 from typing import Dict, List, Tuple, Optional
@@ -14,6 +15,7 @@ from config.settings import (
     VANITYSEARCH_BIN_CPU,
     MIN_EXPECTED_GPU_MKEYS,
     MAX_OUTPUT_FILE_SIZE,
+    MAX_OUTPUT_LINES,
     ENABLE_P2PKH,
     ENABLE_P2WPKH,
     ENABLE_TAPROOT,
@@ -23,18 +25,27 @@ from config.settings import (
     ENABLE_BC1_DEFAULT,
     VANITY_MODE,
     OCLVANITYGEN_PATH,
+    ROTATE_INTERVAL_SECONDS,
     find_vanitysearch_binary,
 )
 from config.directories import VANITY_OUTPUT_DIR
 from core.logger import get_logger
 from core.dashboard import update_dashboard_stat
-from core.utils.io_safety import atomic_open, atomic_commit
 from core.vanity_io import ensure_dir
 from core.oclvanity_runner import run_oclvanitygen
 
 logger = get_logger(__name__)
 logger.info(
     "Atomic writes enabled for vanity outputs (temp → rename). Empty outputs are skipped."
+)
+
+# Regex used to detect valid vanity output lines in files.
+ADDR_LINE_RE = re.compile(
+    r"^(?:PubAddr(?:ess)?\s*:\s*)?"
+    r"(1[1-9A-HJ-NP-Za-km-z]{25,34}|"
+    r"3[1-9A-HJ-NP-Za-km-z]{25,34}|"
+    r"bc1[0-9ac-hj-np-z]{11,71})",
+    re.IGNORECASE,
 )
 
 # throttle warning frequency
@@ -242,7 +253,17 @@ def run_vanitysearch(
     else:
         core_args, pattern = [], ""
 
-    cmd = [binary] + core_args
+    output_file = Path(output_path)
+    temp_file = Path(str(output_file) + ".part")
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    for p in (output_file, temp_file):
+        if p.exists():
+            try:
+                p.unlink()
+            except OSError:
+                logger.debug(f"Unable to remove stale file before run: {p}", exc_info=True)
+
+    cmd = [binary] + core_args + ["-o", str(temp_file)]
     if backend in ("cuda", "opencl") and device_id is not None:
         cmd += ["-gpu", str(device_id)]
     if pattern:
@@ -251,14 +272,62 @@ def run_vanitysearch(
     update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
     logger.info(f"Executing VanitySearch: {' '.join(cmd)}")
 
-    tmp_path, tmp_handle = atomic_open(output_path)
-    buffer: List[str] = []
-    valid_lines = 0
-    addr_re = re.compile(
-        r"^(?:PubAddr|PubAddress)\s*:\s*(\S+)|"  # legacy marker
-        r"^(1[1-9A-HJ-NP-Za-km-z]{25,34}|3[1-9A-HJ-NP-Za-km-z]{25,34}|bc1[0-9ac-hj-np-z]{11,71})$",
-        re.IGNORECASE,
-    )
+    def _monitor_rotation(proc: subprocess.Popen) -> None:
+        start = time.time()
+        last_tick = 0
+        while proc.poll() is None:
+            if pause_event and pause_event.is_set():
+                logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
+                proc.terminate()
+                break
+
+            elapsed = int(time.time() - start)
+            if ROTATE_INTERVAL_SECONDS and elapsed // 5 > last_tick // 5:
+                logger.info(
+                    "[Rotation] Elapsed=%ss / Interval=%ss",
+                    elapsed,
+                    ROTATE_INTERVAL_SECONDS,
+                )
+                last_tick = elapsed
+
+            if ROTATE_INTERVAL_SECONDS and time.time() - start >= ROTATE_INTERVAL_SECONDS:
+                logger.info(
+                    f"⏱️ Rotation interval reached ({ROTATE_INTERVAL_SECONDS}s). Terminating for rotation."
+                )
+                proc.terminate()
+                break
+
+            try:
+                if temp_file.exists():
+                    size_now = temp_file.stat().st_size
+                    if size_now >= MAX_OUTPUT_FILE_SIZE:
+                        logger.info(
+                            f"📏 Size threshold {size_now}/{MAX_OUTPUT_FILE_SIZE} bytes reached."
+                            f" Rotating {temp_file.name}"
+                        )
+                        proc.terminate()
+                        break
+
+                    if MAX_OUTPUT_LINES:
+                        try:
+                            with temp_file.open(
+                                "r", encoding="utf-8", errors="ignore"
+                            ) as fh:
+                                line_count = sum(1 for _ in fh)
+                            if line_count >= MAX_OUTPUT_LINES:
+                                logger.info(
+                                    f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached."
+                                    f" Rotating {temp_file.name}"
+                                )
+                                proc.terminate()
+                                break
+                        except (FileNotFoundError, PermissionError, OSError):
+                            pass
+            except (FileNotFoundError, PermissionError, OSError):
+                logger.debug("Output not ready or locked during monitoring; retrying")
+
+            time.sleep(1)
+
     try:
         proc = subprocess.Popen(
             cmd,
@@ -266,9 +335,11 @@ def run_vanitysearch(
             stderr=subprocess.STDOUT,
             text=True,
         )
+        monitor = threading.Thread(target=_monitor_rotation, args=(proc,))
+        monitor.start()
+
         start = time.time()
         for line in proc.stdout:
-            buffer.append(line)
             m = re.search(r"([0-9.]+)\s*([MK])?Key/s", line, re.IGNORECASE)
             if m:
                 speed = float(m.group(1))
@@ -278,42 +349,38 @@ def run_vanitysearch(
                 if backend != "cpu" and speed < MIN_EXPECTED_GPU_MKEYS:
                     _warn_once("low_speed", "Speed suggests CPU; check GPU selection")
 
-            if addr_re.match(line.strip()):
-                valid_lines += 1
-                if valid_lines == 1:
-                    tmp_handle.writelines(buffer)
-                else:
-                    tmp_handle.write(line)
-            elif valid_lines > 0:
-                tmp_handle.write(line)
-
             if pause_event and pause_event.is_set():
                 proc.terminate()
             if timeout and time.time() - start > timeout:
                 proc.terminate()
-            if (
-                Path(tmp_path).exists()
-                and Path(tmp_path).stat().st_size >= MAX_OUTPUT_FILE_SIZE
-            ):
-                proc.terminate()
         proc.wait()
+        monitor.join()
     except Exception:
         logger.exception("Failed to execute VanitySearch")
-        tmp_handle.close()
-        p = Path(tmp_path)
-        if p.exists():
-            p.unlink(missing_ok=True)
+        for p in (temp_file, output_file):
+            try:
+                p.unlink(missing_ok=True)
+            except Exception:
+                pass
         return False
 
-    tmp_handle.close()
-    if valid_lines == 0:
-        p = Path(tmp_path)
-        if p.exists():
-            p.unlink(missing_ok=True)
-        logger.info(f"No address lines emitted by VanitySearch for {addr_mode}")
+    if not temp_file.exists():
+        logger.info("No VanitySearch output produced for %s", addr_mode)
         return False
 
-    atomic_commit(tmp_path, output_path)
+    total_lines = _finalize_vanity_file(temp_file, output_file, ADDR_LINE_RE)
+    if total_lines == 0:
+        logger.info(
+            "No address lines emitted by VanitySearch for %s; output discarded",
+            addr_mode,
+        )
+        return False
+
+    logger.info(
+        "📄 VanitySearch wrote %s lines to %s",
+        total_lines,
+        output_file.name,
+    )
     return True
 
 
