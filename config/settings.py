@@ -50,6 +50,28 @@ from config.telemetry import (
     TELEMETRY_SERVICE_PORT,
 )
 
+# 🔐 API KEY INITIALIZER (FIX)
+# ================================================================
+def _init_api_key(name: str) -> str:
+    """
+    Centralized API key loader.
+
+    - Uses environment variables
+    - Warns (does NOT crash) if missing
+    - Allows non-fatal startup for dev/test
+    """
+    value = os.getenv(name)
+    if not value:
+        warnings.warn(
+            f"[CONFIG WARNING] API key '{name}' not set. "
+            "Related features may be disabled.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return ""
+    return value
+# ================================================================
+
 # Number of days to keep downloaded files before purging
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
 
