@@ -19,7 +19,9 @@ def sort_if_ready(input_path: str, logger, min_bytes: int = 128) -> Optional[str
     addrs = set()
 
     try:
-        with open(input_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(
+            input_path, "r", encoding="utf-8", errors="ignore", buffering=1024 * 1024
+        ) as f:
             for line in f:
                 s = line.strip()
                 if not s:

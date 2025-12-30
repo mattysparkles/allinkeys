@@ -1,7 +1,10 @@
 import threading
 import sqlite3
 
+import pytest
+
 from core import seed_tracker
+from utils.thread_guard import can_spawn_thread
 
 
 def test_seed_tracker_roundtrip(tmp_path, monkeypatch):
@@ -33,7 +36,12 @@ def test_seed_tracker_concurrency(tmp_path, monkeypatch):
     def worker():
         seed_tracker.record_seed_range(1, 5)
 
-    threads = [threading.Thread(target=worker) for _ in range(4)]
+    threads = []
+    for _ in range(4):
+        if can_spawn_thread("seed_tracker_test"):
+            threads.append(threading.Thread(target=worker))
+        else:
+            pytest.skip("Thread guard prevented thread creation")
     for t in threads:
         t.start()
     for t in threads:

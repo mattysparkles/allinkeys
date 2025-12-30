@@ -30,6 +30,7 @@ from .deriv_paths import SUPPORTED_COINS, resolve_paths
 from .encoders_mnemonic import encode_privkey, privkey_to_pubkey
 from gpu.mnemonic_opencl import available_devices, pbkdf2_sha512
 from utils.file_utils import find_latest_funded_file
+from utils.thread_guard import can_spawn_thread
 from core.dashboard import increment_metric, update_dashboard_stat, get_metric, init_dashboard_manager
 
 # ---------------------------------------------------------------------------
@@ -207,7 +208,11 @@ def run_mnemonic_mode(args) -> None:
     ):
         from ui.dashboard_gui import start_dashboard
 
-        threading.Thread(target=start_dashboard, daemon=True).start()
+        if can_spawn_thread("dashboard_launcher"):
+            threading.Thread(target=start_dashboard, daemon=True).start()
+        else:
+            log_message = getattr(settings, "log_message", print)
+            log_message("[ThreadGuard] Dashboard thread launch skipped")
 
     # Determine coins
     if getattr(args, "allcoins", False):

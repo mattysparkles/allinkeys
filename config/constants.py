@@ -11,6 +11,7 @@ SECP256K1_ORDER = int("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD
 DOWNLOAD_SHA256 = {
     # Coin funded address lists
     "https://addresses.loyce.club/Bitcoin_addresses_LATEST.txt.gz": "0" * 64,
+    "https://bitkeys.work/Bitcoin_addresses_LATEST.txt.gz": "0" * 64,
     "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Dogecoin/Latest_Dogecoin_Addresses.tsv.gz": "0" * 64,
     "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Litecoin/Latest_Litecoin_Addresses.tsv.gz": "0" * 64,
     "https://raw.githubusercontent.com/Pymmdrza/Rich-Address-Wallet/refs/heads/main/ETHEREUM/EthRich.txt": "0" * 64,

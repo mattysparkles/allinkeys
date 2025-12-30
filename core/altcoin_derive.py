@@ -148,7 +148,9 @@ def _monitor_watchdogs(watchdogs, processes, gpu_queues, backoff):
         now = time.time()
         try:
             size = os.path.getsize(path)
-            with open(path, "r", encoding="utf-8", errors="ignore") as wf:
+            with open(
+                path, "r", encoding="utf-8", errors="ignore", buffering=1024 * 1024
+            ) as wf:
                 lines = sum(1 for _ in wf)
         except FileNotFoundError:
             size = 0

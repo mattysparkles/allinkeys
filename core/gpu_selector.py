@@ -14,6 +14,8 @@ try:
 except ImportError:
     GPUtil = None
 
+from utils.thread_guard import can_spawn_thread
+
 # Shared state
 assigned_gpus = {
     "vanitysearch": [],
@@ -153,6 +155,10 @@ def _input_with_timeout(prompt: str, timeout: int) -> str | None:
             result.append(input(prompt))
         except Exception:
             pass
+
+    if not can_spawn_thread("gpu_input"):
+        print("[ThreadGuard] Input thread denied; falling back to defaults")
+        return None
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()

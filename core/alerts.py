@@ -20,6 +20,8 @@ from Crypto.Cipher import PKCS1_OAEP
 import base64
 from datetime import datetime
 
+from utils.thread_guard import can_spawn_thread
+
 import gettext
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -195,6 +197,9 @@ def _audio_worker() -> None:
 def _start_audio_worker() -> None:
     global audio_thread
     if audio_thread is None or not audio_thread.is_alive():
+        if not can_spawn_thread("audio_alert"):
+            log_message(_("⚠️ Audio alert thread denied by ThreadGuard"), "WARN")
+            return
         audio_thread = threading.Thread(target=_audio_worker, daemon=True)
         audio_thread.start()
 
@@ -407,10 +412,17 @@ def alert_match(match_data: Dict[str, Any], test_mode: bool = False) -> None:
     # 🖥️ Desktop Window Alert
     if ALERT_FLAGS.get("ENABLE_DESKTOP_WINDOW_ALERT") and not _rate_limited("popup"):
         try:
-            threading.Thread(target=_show_desktop_popup, args=(alert_type,), daemon=True).start()
-            log_message(_("✅ Desktop popup displayed."), "INFO")
-            _safe_inc_metric("alerts_sent_today.popup")
-            _safe_inc_metric("alerts_sent_lifetime.popup")
+            if can_spawn_thread("desktop_popup"):
+                threading.Thread(
+                    target=_show_desktop_popup, args=(alert_type,), daemon=True
+                ).start()
+                log_message(_("✅ Desktop popup displayed."), "INFO")
+                _safe_inc_metric("alerts_sent_today.popup")
+                _safe_inc_metric("alerts_sent_lifetime.popup")
+            else:
+                log_message(
+                    _("⚠️ Desktop popup suppressed; thread limit reached"), "WARN"
+                )
         except Exception as e:
             log_message(_("❌ Desktop alert error: %s") % e, "ERROR")
 
