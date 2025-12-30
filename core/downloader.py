@@ -25,6 +25,11 @@ from core.logger import log_message
 from config.settings import NORMALIZE_BECH32_LOWER
 from config.constants import DOWNLOAD_SHA256
 
+BTC_ADDRESS_SOURCES = [
+    "https://addresses.loyce.club/Bitcoin_addresses_LATEST.txt.gz",
+    "https://bitkeys.work/Bitcoin_addresses_LATEST.txt.gz",
+]
+
 
 def parse_address_lines(file_obj):
     """Yield cleaned addresses from open file object."""
@@ -138,7 +143,7 @@ def generate_test_csv():
 
     return test_csv_path
 
-def _download_single_coin(coin: str, url: str) -> None:
+def _download_single_coin(coin: str, urls: list[str]) -> None:
     """Handle downloading and processing for a single coin."""
     try:
         now = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
@@ -151,7 +156,14 @@ def _download_single_coin(coin: str, url: str) -> None:
         output_unique = str((DL_PATH / f"{coin.upper()}_UNIQUE_addresses_{now}.txt").resolve())
         gz_path = output_full + ".gz"
 
+        last_good = output_full + ".lastgood"
+        if os.path.exists(output_full):
+            shutil.copy(output_full, last_good)
+
         total_size = 0
+        download_success = False
+        last_error: Exception | None = None
+        active_url = None
 
         def _progress(downloaded: int, total: int) -> None:
             nonlocal total_size
@@ -160,14 +172,42 @@ def _download_single_coin(coin: str, url: str) -> None:
                 pct = downloaded * 100 / total
                 update_dashboard_stat(f"download_progress.{coin}", pct)
 
-        download_file(
-            url,
-            gz_path,
-            expected_sha256=DOWNLOAD_SHA256.get(url),
-            timeout=30,
-            progress_cb=_progress,
-        )
-        log_message(f"{coin.upper()}: Download complete")
+        for url in urls:
+            try:
+                download_file(
+                    url,
+                    gz_path,
+                    expected_sha256=DOWNLOAD_SHA256.get(url),
+                    timeout=30,
+                    progress_cb=_progress,
+                )
+                download_success = True
+                active_url = url
+                log_message(f"{coin.upper()}: Download complete from {url}")
+                break
+            except Exception as exc:  # pragma: no cover - network variability
+                last_error = exc
+                log_message(f"⚠️ {coin.upper()}: BTC source failed {url} ({exc})", "WARN")
+                try:
+                    os.remove(gz_path)
+                except OSError:
+                    pass
+
+        if not download_success:
+            log_message(
+                f"❌ {coin.upper()}: All download sources failed; using cache if available",
+                "ERROR",
+            )
+            if os.path.exists(last_good):
+                shutil.copy(last_good, output_full)
+                log_message(
+                    f"{coin.upper()}: Restored last known good address file from cache",
+                    "WARN",
+                )
+            if last_error:
+                raise last_error
+            return
+
         if total_size:
             update_dashboard_stat(f"download_progress.{coin}", 100)
 
@@ -175,14 +215,27 @@ def _download_single_coin(coin: str, url: str) -> None:
             magic = test_f.read(2)
         is_gzipped = magic == b"\x1f\x8b"
 
-        if is_gzipped:
-            with gzip.open(gz_path, "rb") as f_in, open(output_full, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            os.remove(gz_path)
-            log_message(f"{coin.upper()}: Decompressed to {output_full}")
-        else:
-            shutil.move(gz_path, output_full)
-            log_message(f"{coin.upper()}: File was not gzipped. Saved as-is.")
+        try:
+            if is_gzipped:
+                with gzip.open(gz_path, "rb") as f_in, open(output_full, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+                os.remove(gz_path)
+                log_message(f"{coin.upper()}: Decompressed to {output_full}")
+            else:
+                shutil.move(gz_path, output_full)
+                log_message(f"{coin.upper()}: File was not gzipped. Saved as-is.")
+        except Exception as exc:
+            log_message(
+                f"❌ {coin.upper()}: Failed to finalize download from {active_url}: {exc}",
+                "ERROR",
+            )
+            if os.path.exists(last_good):
+                shutil.copy(last_good, output_full)
+                log_message(
+                    f"{coin.upper()}: Restored last known good address file after failure",
+                    "WARN",
+                )
+            raise
 
         if coin == "btc":
             with open(output_full, "r", encoding="utf-8") as f:
@@ -242,8 +295,14 @@ def download_and_compare_address_lists() -> None:
     total = len(COIN_DOWNLOAD_URLS)
     disable = not sys.stderr.isatty()
     with ThreadPoolExecutor(max_workers=total or 1) as executor:
-        futures = [executor.submit(_download_single_coin, coin, url)
-                   for coin, url in COIN_DOWNLOAD_URLS.items()]
+        futures = [
+            executor.submit(
+                _download_single_coin,
+                coin,
+                BTC_ADDRESS_SOURCES if coin == "btc" else [url],
+            )
+            for coin, url in COIN_DOWNLOAD_URLS.items()
+        ]
         with tqdm(total=total, disable=disable, desc="downloads", unit="coin") as pbar:
             for future in as_completed(futures):
                 # Bubble exceptions to fail fast

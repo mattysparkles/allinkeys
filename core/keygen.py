@@ -38,6 +38,7 @@ from core.seed_tracker import (
     get_condensed_ranges,
 )
 from core.telemetry import check_seed_seen, record_seed_event
+from utils.thread_guard import can_spawn_thread
 
 # Runtime trackers / metrics window
 total_keys_generated = 0
@@ -317,7 +318,9 @@ def parse_vanity_file(path):
     pattern = re.compile(r"(?i)priv(?:key)?(?: \(hex\))?:\s*(?:0x)?([0-9a-f]+)")
 
     try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+        with open(
+            path, "r", encoding="utf-8", errors="ignore", buffering=1024 * 1024
+        ) as fh:
             for raw in fh:
                 line = raw.strip()
                 hex_part = None
@@ -494,7 +497,13 @@ def run_vanitysearch_stream(
                             break
                         # Line-based rotation is expensive; guard errors from Windows file locks
                         try:
-                            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                            with open(
+                                path,
+                                "r",
+                                encoding="utf-8",
+                                errors="ignore",
+                                buffering=1024 * 1024,
+                            ) as f:
                                 # Use a lightweight line count pass. If it takes too long it will pick up next tick.
                                 line_count = sum(1 for _ in f)
                             if line_count >= MAX_OUTPUT_LINES:
@@ -510,10 +519,16 @@ def run_vanitysearch_stream(
                     logger.debug("Output not ready or locked during monitoring; retrying")
                 time.sleep(1)
 
-        timer_thread = threading.Thread(
-            target=monitor_process, args=(proc, temp_output_path)
-        )
-        timer_thread.start()
+        timer_thread = None
+        if can_spawn_thread("vanity_rotation_monitor"):
+            timer_thread = threading.Thread(
+                target=monitor_process, args=(proc, temp_output_path)
+            )
+            timer_thread.start()
+        else:
+            logger.warning(
+                "[ThreadGuard] Skipping rotation monitor; thread budget exhausted"
+            )
         wait_timeout = (
             ROTATE_MAX_WAIT_SECONDS
             if ROTATE_MAX_WAIT_SECONDS and ROTATE_MAX_WAIT_SECONDS > 0
@@ -531,7 +546,8 @@ def run_vanitysearch_stream(
             finally:
                 proc.wait()
         finally:
-            timer_thread.join()
+            if timer_thread:
+                timer_thread.join()
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False

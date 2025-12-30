@@ -3,6 +3,7 @@
 import os
 import sys
 import subprocess
+import logging
 import tkinter as tk
 from tkinter import messagebox
 import ttkbootstrap as ttk
@@ -117,7 +118,7 @@ class DashboardGUI:
             )
             logo_label.pack()
 
-        addr_frame = ttk.LabelFrame(self.container, text=_("BTC Address Types"))
+        addr_frame = ttk.Labelframe(self.container, text=_("BTC Address Types"))
         addr_frame.pack(fill="x", padx=10, pady=5)
         addr_frame.grid_columnconfigure(0, weight=1)
         addr_frame.grid_columnconfigure(1, weight=1)
@@ -260,7 +261,7 @@ class DashboardGUI:
             if not keys:
                 continue
             parent = column_frames[group]
-            frame = ttk.LabelFrame(parent, text=_(group))
+            frame = ttk.Labelframe(parent, text=_(group))
             frame.pack(fill="both", expand=True, pady=10)
             frame.grid_columnconfigure(1, weight=1)
             SMALL_FONT_KEYS = {
@@ -372,7 +373,7 @@ class DashboardGUI:
 
         # Alert Configuration Checkboxes
         if SHOW_ALERT_TYPE_SELECTOR_CHECKBOXES:
-            alert_frame = ttk.LabelFrame(self.container, text=_("Alert Methods"))
+            alert_frame = ttk.Labelframe(self.container, text=_("Alert Methods"))
             alert_frame.pack(fill="x", padx=10, pady=(5, 0))
 
             from core import alerts
@@ -444,7 +445,7 @@ class DashboardGUI:
             ).pack(pady=(0, 10))
 
     def _group_button_set(self, parent, label, col):
-        sub_frame = ttk.LabelFrame(parent, text=_(label))
+        sub_frame = ttk.Labelframe(parent, text=_(label))
         sub_frame.grid(row=0, column=col, padx=5)
         # Default to running so buttons show correct state until metrics sync
         self.module_states[label] = "running"
@@ -922,22 +923,27 @@ class DashboardGUI:
 
 
 def start_dashboard():
-    root = ttk.Window(themename="darkly")
-    root.geometry("900x600")
-    if DASHBOARD_PASSWORD_HASH:
-        root.withdraw()
-        from tkinter import simpledialog
+    try:
+        root = ttk.Window(themename="darkly")
+        root.geometry("900x600")
+        if DASHBOARD_PASSWORD_HASH:
+            root.withdraw()
+            from tkinter import simpledialog
 
-        pw = simpledialog.askstring(
-            "Dashboard Login", "Password:", show="*", parent=root
-        )
-        if not pw or not verify_password(pw, DASHBOARD_PASSWORD_HASH):
-            messagebox.showerror("Authentication", "Invalid password")
-            root.destroy()
-            return
-        root.deiconify()
-    DashboardGUI(root)
-    root.mainloop()
+            pw = simpledialog.askstring(
+                "Dashboard Login", "Password:", show="*", parent=root
+            )
+            if not pw or not verify_password(pw, DASHBOARD_PASSWORD_HASH):
+                messagebox.showerror("Authentication", "Invalid password")
+                root.destroy()
+                return
+            root.deiconify()
+        DashboardGUI(root)
+        root.mainloop()
+    except Exception:
+        logging.exception("Dashboard crashed")
+    finally:
+        logging.info("Dashboard thread exited cleanly")
 
 
 if __name__ == "__main__":

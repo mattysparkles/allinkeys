@@ -3,9 +3,12 @@ import time
 import threading
 from glob import glob
 
+from typing import Optional
+
 from config.directories import DOWNLOADS_DIR
 from config.settings import RETENTION_DAYS
 from core.logger import log_message
+from utils.thread_guard import can_spawn_thread
 
 
 def find_latest_funded_file(
@@ -71,13 +74,17 @@ def cleanup_old_files(
 def start_daily_cleanup(
     directory: str = DOWNLOADS_DIR,
     retention_days: int = RETENTION_DAYS,
-) -> threading.Thread:
+) -> Optional[threading.Thread]:
     """Start a daemon thread that runs cleanup once per day."""
 
     def _loop() -> None:
         while True:
             cleanup_old_files(directory, retention_days)
             time.sleep(24 * 60 * 60)
+
+    if not can_spawn_thread("daily_cleanup"):
+        log_message("⚠️ Daily cleanup thread skipped; thread limit reached", "WARN")
+        return None
 
     thread = threading.Thread(target=_loop, daemon=True)
     thread.start()

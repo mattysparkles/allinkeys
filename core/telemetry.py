@@ -49,6 +49,7 @@ from config.telemetry import (
     TELEMETRY_SERVICE_PORT,
 )
 from core.logger import get_logger
+from utils.thread_guard import can_spawn_thread
 
 logger = get_logger(__name__)
 
@@ -237,7 +238,10 @@ class TelemetryClient:
                 shutdown_event.wait(wait)
             self.flush_once()
 
-        threading.Thread(target=_loop, name="telemetry", daemon=True).start()
+        if can_spawn_thread("telemetry"):
+            threading.Thread(target=_loop, name="telemetry", daemon=True).start()
+        else:
+            logger.warning("[Telemetry] Skipping telemetry thread; at thread limit")
 
 
 _CLIENT: Optional[TelemetryClient] = None

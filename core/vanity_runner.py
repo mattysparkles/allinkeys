@@ -33,6 +33,7 @@ from core.logger import get_logger
 from core.dashboard import update_dashboard_stat
 from core.vanity_io import ensure_dir
 from core.oclvanity_runner import run_oclvanitygen
+from utils.thread_guard import can_spawn_thread
 
 logger = get_logger(__name__)
 logger.info(
@@ -50,6 +51,9 @@ ADDR_LINE_RE = re.compile(
 
 # throttle warning frequency
 _LAST_WARN: Dict[str, float] = {}
+
+_rotation_monitor_running = False
+_rotation_lock = threading.Lock()
 
 
 def _warn_once(name: str, msg: str, interval: float = 30.0) -> None:
@@ -311,7 +315,7 @@ def run_vanitysearch(
                     if MAX_OUTPUT_LINES:
                         try:
                             with temp_file.open(
-                                "r", encoding="utf-8", errors="ignore"
+                                "r", encoding="utf-8", errors="ignore", buffering=1024 * 1024
                             ) as fh:
                                 line_count = sum(1 for _ in fh)
                             if line_count >= MAX_OUTPUT_LINES:
@@ -335,8 +339,20 @@ def run_vanitysearch(
             stderr=subprocess.STDOUT,
             text=True,
         )
-        monitor = threading.Thread(target=_monitor_rotation, args=(proc,))
-        monitor.start()
+        monitor = None
+        if can_spawn_thread("vanity_rotation_monitor"):
+            with _rotation_lock:
+                if _rotation_monitor_running:
+                    logger.info(
+                        "Rotation monitor already running; skipping duplicate start"
+                    )
+                else:
+                    _rotation_monitor_running = True
+                    monitor = threading.Thread(target=_monitor_rotation, args=(proc,))
+            if monitor:
+                monitor.start()
+        else:
+            logger.warning("[ThreadGuard] Rotation monitor not started; thread cap hit")
 
         start = time.time()
         for line in proc.stdout:
@@ -354,7 +370,12 @@ def run_vanitysearch(
             if timeout and time.time() - start > timeout:
                 proc.terminate()
         proc.wait()
-        monitor.join()
+        if monitor:
+            try:
+                monitor.join()
+            finally:
+                with _rotation_lock:
+                    _rotation_monitor_running = False
     except Exception:
         logger.exception("Failed to execute VanitySearch")
         for p in (temp_file, output_file):
@@ -362,7 +383,17 @@ def run_vanitysearch(
                 p.unlink(missing_ok=True)
             except Exception:
                 pass
+        if monitor:
+            try:
+                monitor.join(timeout=2)
+            except Exception:
+                pass
+            finally:
+                with _rotation_lock:
+                    _rotation_monitor_running = False
         return False
+
+    time.sleep(1.5)
 
     if not temp_file.exists():
         logger.info("No VanitySearch output produced for %s", addr_mode)
@@ -474,7 +505,9 @@ def _count_matching_lines(path: Path, addr_re: re.Pattern[str]) -> int:
 
     count = 0
     try:
-        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+        with path.open(
+            "r", encoding="utf-8", errors="ignore", buffering=1024 * 1024
+        ) as fh:
             for raw in fh:
                 if addr_re.search(raw.strip()):
                     count += 1
@@ -487,7 +520,9 @@ def _has_vanity_output(path: Path, addr_re: re.Pattern[str]) -> bool:
     """Check if the VanitySearch temp file already contains a vanity line."""
 
     try:
-        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+        with path.open(
+            "r", encoding="utf-8", errors="ignore", buffering=1024 * 1024
+        ) as fh:
             for raw in fh:
                 if addr_re.search(raw.strip()):
                     return True

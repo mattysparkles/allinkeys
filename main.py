@@ -13,6 +13,7 @@ from multiprocessing import Process
 import psutil
 from dashboard.metrics_window import CPUPercent
 from core.logger import get_logger
+from utils.thread_guard import can_spawn_thread
 
 # Wrap stdout once with UTF-8 encoding if not already wrapped
 if not isinstance(sys.stdout, io.TextIOWrapper):
@@ -591,7 +592,10 @@ def run_only_mode(args):
         ):
             from ui.dashboard_gui import start_dashboard
 
-            threading.Thread(target=start_dashboard, daemon=True).start()
+            if can_spawn_thread("dashboard_launcher"):
+                threading.Thread(target=start_dashboard, daemon=True).start()
+            else:
+                logger.warning("[ThreadGuard] Dashboard thread launch skipped")
 
         from core.keygen import run_btc_only  # call into keygen module
 
@@ -724,7 +728,10 @@ def run_allinkeys(args):
             update_dashboard_stat("thread_health_flags", status)
             time.sleep(2)
 
-    threading.Thread(target=monitor, daemon=True).start()
+    if can_spawn_thread("dashboard_monitor"):
+        threading.Thread(target=monitor, daemon=True).start()
+    else:
+        logger.warning("[ThreadGuard] Dashboard monitor thread skipped")
 
     try:
         if (
