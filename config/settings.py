@@ -113,6 +113,20 @@ BTC_MIN_FILE_AGE_SEC = 2.0  # ignore files newer than this
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
 
 
+def _init_api_key(var: str) -> str:
+    """Return API key from environment and warn when missing."""
+
+    value = os.getenv(var, "")
+    if value:
+        return value
+
+    warnings.warn(
+        f"Environment variable {var} is not set; related alerts will be disabled.",
+        stacklevel=2,
+    )
+    return ""
+
+
 def find_vanitysearch_binary():
     """Return the first VanitySearch binary found for the host OS.
 
