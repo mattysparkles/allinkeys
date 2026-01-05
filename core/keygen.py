@@ -468,6 +468,22 @@ def run_vanitysearch_stream(
             start = time.time()
             logger.info("[Rotation] Monitor started for %s", os.path.basename(path))
             last_tick = 0
+            line_state = {"offset": 0, "lines": 0}
+
+            def _count_lines_incrementally(target: str) -> int:
+                """Return updated line count without re-reading the whole file."""
+
+                try:
+                    with open(target, "rb") as fh:
+                        fh.seek(line_state["offset"])
+                        chunk = fh.read()
+                        line_state["offset"] = fh.tell()
+                except (FileNotFoundError, PermissionError, OSError):
+                    return line_state["lines"]
+
+                line_state["lines"] += chunk.count(b"\n")
+                return line_state["lines"]
+
             while p.poll() is None:
                 if pause_event and pause_event.is_set():
                     logger.info(
@@ -478,7 +494,9 @@ def run_vanitysearch_stream(
                 # Heartbeat every 5s so we can see rotation timer progress
                 elapsed = int(time.time() - start)
                 if elapsed // 5 > last_tick // 5:
-                    logger.info("[Rotation] Elapsed=%ss / Interval=%ss", elapsed, ROTATE_INTERVAL_SECONDS)
+                    logger.info(
+                        "[Rotation] Elapsed=%ss / Interval=%ss", elapsed, ROTATE_INTERVAL_SECONDS
+                    )
                     last_tick = elapsed
                 if time.time() - start >= ROTATE_INTERVAL_SECONDS:
                     logger.info(
@@ -495,26 +513,14 @@ def run_vanitysearch_stream(
                             )
                             p.terminate()
                             break
-                        # Line-based rotation is expensive; guard errors from Windows file locks
-                        try:
-                            with open(
-                                path,
-                                "r",
-                                encoding="utf-8",
-                                errors="ignore",
-                                buffering=1024 * 1024,
-                            ) as f:
-                                # Use a lightweight line count pass. If it takes too long it will pick up next tick.
-                                line_count = sum(1 for _ in f)
+                        if MAX_OUTPUT_LINES:
+                            line_count = _count_lines_incrementally(path)
                             if line_count >= MAX_OUTPUT_LINES:
                                 logger.info(
                                     f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached. Rotating {os.path.basename(path)}"
                                 )
                                 p.terminate()
                                 break
-                        except (FileNotFoundError, PermissionError, OSError):
-                            # File may be locked by writer on Windows; try again next tick
-                            pass
                 except (FileNotFoundError, PermissionError, OSError):
                     logger.debug("Output not ready or locked during monitoring; retrying")
                 time.sleep(1)
