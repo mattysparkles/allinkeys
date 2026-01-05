@@ -575,15 +575,20 @@ def run_vanitysearch_stream(
         return False
 
     # Post-process output file: use parser; do not delete zero-byte files
-    if os.path.exists(temp_output_path):
-        try:
-            Path(temp_output_path).replace(current_output_path)
-        except Exception:
-            logger.warning(
-                "⚠️ Failed to finalize VanitySearch output %s", temp_output_path,
-                exc_info=True,
-            )
-            return False
+    if not os.path.exists(temp_output_path):
+        logger.error(f"❌ Output file not created: {current_output_path}")
+        # Returning False forces the caller to retry this part instead of
+        # silently advancing the batch counter without producing a file.
+        return False
+
+    try:
+        Path(temp_output_path).replace(current_output_path)
+    except Exception:
+        logger.warning(
+            "⚠️ Failed to finalize VanitySearch output %s", temp_output_path,
+            exc_info=True,
+        )
+        return False
 
     if os.path.exists(current_output_path):
         size = os.path.getsize(current_output_path)
@@ -629,9 +634,8 @@ def run_vanitysearch_stream(
                 pass
         except Exception as e:
             logger.warning(f"⚠️ Failed to parse {current_output_path}: {e}")
-        return True
+            return False
 
-    logger.error(f"❌ Output file not created: {current_output_path}")
     return True
 
 

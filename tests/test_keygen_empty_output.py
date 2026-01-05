@@ -66,7 +66,7 @@ def test_empty_vanity_output_advances(monkeypatch, tmp_path):
 
 
 def test_missing_vanity_output_advances(monkeypatch, tmp_path):
-    """Missing VanitySearch outputs should still advance rotation."""
+    """Missing VanitySearch outputs should retry the same part instead of advancing."""
 
     monkeypatch.delitem(sys.modules, "core.keygen", raising=False)
     keygen = importlib.import_module("core.keygen")
@@ -103,10 +103,7 @@ def test_missing_vanity_output_advances(monkeypatch, tmp_path):
     monkeypatch.setattr(keygen.subprocess, "Popen", DummyProcNoFile)
 
     result = keygen.run_vanitysearch_stream(0x2, 1, 0, None, None)
-    assert result is True
-
-    output_path = Path(tmp_path) / "batch_1_part_0_seed_00000002.txt"
-    assert not output_path.exists()
+    assert result is False
 
 
 def test_rotation_fallback_without_thread(monkeypatch, tmp_path):
