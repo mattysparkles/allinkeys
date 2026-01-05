@@ -453,6 +453,8 @@ def run_vanitysearch_stream(
         return False
 
     # Launch and monitor (VanitySearch writes file via -o; we do NOT open it)
+    rotation_triggered = threading.Event()
+
     try:
         proc = subprocess.Popen(
             cmd,
@@ -489,6 +491,7 @@ def run_vanitysearch_stream(
                     logger.info(
                         "⏸️ Pause requested. Terminating VanitySearch process...",
                     )
+                    rotation_triggered.set()
                     p.terminate()
                     break
                 # Heartbeat every 5s so we can see rotation timer progress
@@ -502,6 +505,7 @@ def run_vanitysearch_stream(
                     logger.info(
                         f"⏱️ Rotation interval reached ({ROTATE_INTERVAL_SECONDS}s). Terminating for rotation.",
                     )
+                    rotation_triggered.set()
                     p.terminate()
                     break
                 try:
@@ -511,6 +515,7 @@ def run_vanitysearch_stream(
                             logger.info(
                                 f"📏 Size threshold {size_now}/{MAX_OUTPUT_FILE_SIZE} bytes reached. Rotating {os.path.basename(path)}"
                             )
+                            rotation_triggered.set()
                             p.terminate()
                             break
                         if MAX_OUTPUT_LINES:
@@ -519,6 +524,7 @@ def run_vanitysearch_stream(
                                 logger.info(
                                     f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached. Rotating {os.path.basename(path)}"
                                 )
+                                rotation_triggered.set()
                                 p.terminate()
                                 break
                 except (FileNotFoundError, PermissionError, OSError):
@@ -533,19 +539,20 @@ def run_vanitysearch_stream(
             timer_thread.start()
         else:
             logger.warning(
-                "[ThreadGuard] Skipping rotation monitor; thread budget exhausted"
+                "[ThreadGuard] Skipping rotation monitor thread; running inline"
             )
+            monitor_process(proc, temp_output_path)
         wait_timeout = (
             ROTATE_MAX_WAIT_SECONDS
             if ROTATE_MAX_WAIT_SECONDS and ROTATE_MAX_WAIT_SECONDS > 0
-            else None
+            else max(ROTATE_INTERVAL_SECONDS + 15, 30)
         )
         try:
             proc.wait(timeout=wait_timeout)
         except subprocess.TimeoutExpired:
             logger.warning(
                 "⚠️ VanitySearch did not exit within %ss after terminate; killing.",
-                ROTATE_MAX_WAIT_SECONDS,
+                wait_timeout,
             )
             try:
                 proc.kill()
@@ -554,6 +561,15 @@ def run_vanitysearch_stream(
         finally:
             if timer_thread:
                 timer_thread.join()
+
+        if proc.poll() is None and rotation_triggered.is_set():
+            logger.warning(
+                "⚠️ VanitySearch ignored termination after rotation; force killing.",
+            )
+            try:
+                proc.kill()
+            finally:
+                proc.wait(timeout=5)
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
