@@ -2,8 +2,11 @@
 
 import os
 import gzip
+import ssl
 from typing import Iterable, List, Tuple
 from pathlib import Path
+
+from requests.exceptions import RequestException
 
 from config.settings import (
     ALL_BTC_ADDRESSES_URL,
@@ -30,34 +33,34 @@ def download_with_progress(url: str, dest_path: str, logger) -> None:
         else:
             logger.info(f"Downloading BTC addresses {downloaded} bytes")
 
-    try:
+    def _attempt_download(target_url: str, *, allow_http: bool = False) -> None:
         download_file(
-            url,
+            target_url,
             dest_path,
             expected_sha256=DOWNLOAD_SHA256.get(url),
             chunk_size=1024 * 1024,
             progress_cb=_progress,
             timeout=30,
+            allow_http=allow_http,
         )
-    except Exception as exc:
+
+    try:
+        _attempt_download(url)
+        logger.info("BTC address download complete")
+        return
+    except (RequestException, ssl.SSLError, TimeoutError, OSError) as exc:
         # Attempt insecure HTTP fallback if HTTPS fails
         if url.startswith("https://"):
             http_url = "http://" + url[len("https://") :]
-            logger.warning(
-                "HTTPS download failed (%s). Falling back to HTTP.", exc,
-            )
-            download_file(
-                http_url,
-                dest_path,
-                expected_sha256=DOWNLOAD_SHA256.get(url),
-                chunk_size=1024 * 1024,
-                progress_cb=_progress,
-                timeout=30,
-                allow_http=True,
-            )
-        else:
-            raise
-    logger.info("BTC address download complete")
+            logger.warning("HTTPS download failed (%s). Falling back to HTTP.", exc)
+            try:
+                _attempt_download(http_url, allow_http=True)
+                logger.info("BTC address download complete via HTTP fallback")
+                return
+            except Exception as http_exc:
+                logger.error("HTTP fallback download failed (%s)", http_exc)
+                raise
+        raise
 
 
 def build_lexicographic_ranges_from_gz(
