@@ -291,7 +291,7 @@ TOKENVIEW_API_KEY = os.getenv("TOKENVIEW_API_KEY", "")
 
 # ===================== 🌍 COIN SOURCES ==========================
 COIN_DOWNLOAD_URLS = {
-    "btc": "https://addresses.loyce.club/Bitcoin_addresses_LATEST.txt.gz",
+    "btc": "http://addresses.loyce.club/Bitcoin_addresses_LATEST.txt.gz",
     "doge": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Dogecoin/Latest_Dogecoin_Addresses.tsv.gz",
     "ltc": "https://github.com/Pymmdrza/Rich-Address-Wallet/releases/download/Litecoin/Latest_Litecoin_Addresses.tsv.gz",
     "eth": "https://raw.githubusercontent.com/Pymmdrza/Rich-Address-Wallet/refs/heads/main/ETHEREUM/EthRich.txt",
