@@ -279,6 +279,20 @@ def run_vanitysearch(
     def _monitor_rotation(proc: subprocess.Popen) -> None:
         start = time.time()
         last_tick = 0
+        line_state = {"offset": 0, "lines": 0}
+
+        def _count_lines_incrementally() -> int:
+            try:
+                with temp_file.open("rb") as fh:
+                    fh.seek(line_state["offset"])
+                    chunk = fh.read()
+                    line_state["offset"] = fh.tell()
+            except (FileNotFoundError, PermissionError, OSError):
+                return line_state["lines"]
+
+            line_state["lines"] += chunk.count(b"\n")
+            return line_state["lines"]
+
         while proc.poll() is None:
             if pause_event and pause_event.is_set():
                 logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
@@ -313,20 +327,14 @@ def run_vanitysearch(
                         break
 
                     if MAX_OUTPUT_LINES:
-                        try:
-                            with temp_file.open(
-                                "r", encoding="utf-8", errors="ignore", buffering=1024 * 1024
-                            ) as fh:
-                                line_count = sum(1 for _ in fh)
-                            if line_count >= MAX_OUTPUT_LINES:
-                                logger.info(
-                                    f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached."
-                                    f" Rotating {temp_file.name}"
-                                )
-                                proc.terminate()
-                                break
-                        except (FileNotFoundError, PermissionError, OSError):
-                            pass
+                        line_count = _count_lines_incrementally()
+                        if line_count >= MAX_OUTPUT_LINES:
+                            logger.info(
+                                f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached."
+                                f" Rotating {temp_file.name}"
+                            )
+                            proc.terminate()
+                            break
             except (FileNotFoundError, PermissionError, OSError):
                 logger.debug("Output not ready or locked during monitoring; retrying")
 
