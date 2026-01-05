@@ -581,13 +581,45 @@ def run_vanitysearch_stream(
         # silently advancing the batch counter without producing a file.
         return False
 
-    try:
-        Path(temp_output_path).replace(current_output_path)
-    except Exception:
-        logger.warning(
-            "⚠️ Failed to finalize VanitySearch output %s", temp_output_path,
-            exc_info=True,
+    def _finalize_output_path() -> bool:
+        """Atomically move ``temp_output_path`` into place with retries.
+
+        On Windows the VanitySearch process may hold the file handle a fraction
+        longer after ``terminate`` returns, causing ``Path.replace`` to raise a
+        ``PermissionError``.  A short retry loop avoids declaring the run a
+        failure when the file becomes writable moments later.
+        """
+
+        for attempt in range(5):
+            try:
+                Path(temp_output_path).replace(current_output_path)
+                return True
+            except PermissionError as e:
+                wait = 0.2 * (attempt + 1)
+                logger.warning(
+                    "⚠️ Failed to finalize VanitySearch output %s (attempt %s/5): %s",\
+                    temp_output_path,\
+                    attempt + 1,\
+                    e,
+                )
+                time.sleep(wait)
+            except Exception:
+                logger.warning(
+                    "⚠️ Failed to finalize VanitySearch output %s", temp_output_path,
+                    exc_info=True,
+                )
+                return False
+        logger.error(
+            "❌ Unable to finalize VanitySearch output after retries: %s",
+            temp_output_path,
         )
+        return False
+
+    try:
+        if not _finalize_output_path():
+            return False
+    except Exception:
+        logger.warning("⚠️ Unexpected error while finalizing output", exc_info=True)
         return False
 
     if os.path.exists(current_output_path):

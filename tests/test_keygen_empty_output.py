@@ -8,6 +8,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 sys.modules.setdefault("dotenv", types.SimpleNamespace(load_dotenv=lambda *a, **k: None))
+# Provide a dummy requests module so telemetry imports do not require the real dependency
+sys.modules.setdefault(
+    "requests",
+    types.SimpleNamespace(
+        Session=lambda *a, **k: None,
+        post=lambda *a, **k: None,
+    ),
+)
 
 
 def test_empty_vanity_output_advances(monkeypatch, tmp_path):
@@ -156,3 +164,63 @@ def test_rotation_fallback_without_thread(monkeypatch, tmp_path):
     output_path = Path(tmp_path) / "batch_2_part_0_seed_00000003.txt"
     # Empty files are deleted but rotation should still advance
     assert not output_path.exists()
+
+
+def test_finalize_retry_on_windows_lock(monkeypatch, tmp_path):
+    """Finalize should retry when the output file is briefly locked."""
+
+    monkeypatch.delitem(sys.modules, "core.keygen", raising=False)
+    keygen = importlib.import_module("core.keygen")
+
+    fake_exe = tmp_path / "vanitysearch"
+    fake_exe.write_text("")
+    fake_exe.chmod(0o755)
+
+    monkeypatch.setattr(keygen, "VANITYSEARCH_PATH", fake_exe)
+    monkeypatch.setattr(keygen, "VANITY_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setattr(keygen, "ROTATE_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(keygen, "get_vanitysearch_gpu_ids", lambda: [])
+
+    class LockedOnceProc:
+        def __init__(self, cmd, stdout=None, stderr=None, env=None):
+            self.cmd = cmd
+            self.pid = 22222
+            self._terminated = False
+            self.returncode = None
+            out_path = Path(cmd[cmd.index("-o") + 1])
+            out_path.write_text("data")
+
+        def terminate(self):
+            self._terminated = True
+            if self.returncode is None:
+                self.returncode = -15
+
+        def poll(self):
+            return self.returncode if self._terminated else None
+
+        def wait(self, timeout=None):
+            self._terminated = True
+            self.returncode = 0
+            return 0
+
+    monkeypatch.setattr(keygen.subprocess, "Popen", LockedOnceProc)
+
+    called = {"count": 0}
+
+    real_replace = Path.replace
+
+    def flaky_replace(self, target):
+        called["count"] += 1
+        if called["count"] == 1:
+            raise PermissionError("file is locked")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace, raising=False)
+
+    result = keygen.run_vanitysearch_stream(0x4, 3, 0, None, None)
+    assert result is True
+
+    # File should end up finalized despite initial lock
+    hex_seed_short = hex(0x4)[2:].lstrip("0")[:8] or "00000000"
+    output_path = Path(tmp_path) / f"batch_3_part_0_seed_{hex_seed_short}.txt"
+    assert output_path.exists()
