@@ -622,6 +622,10 @@ def run_only_mode(args):
         f"Warning: altcoin-only mode not fully implemented for: {', '.join(coins)}",
         file=sys.stderr,
     )
+    if not getattr(args, "skip_downloads", False):
+        from core.downloader import download_and_compare_address_lists
+
+        download_and_compare_address_lists(coins=coins)
     return 1
 
 
