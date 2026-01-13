@@ -99,7 +99,7 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
         daily_iter = []
         if not skip_downloads:
             from core.downloader import download_and_compare_address_lists
-            download_and_compare_address_lists()
+            download_and_compare_address_lists(coins=["btc"])
             daily_iter = list(_iter_daily())
         else:
             daily_iter = list(_iter_daily())
@@ -121,7 +121,7 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
     else:
         if not skip_downloads:
             from core.downloader import download_and_compare_address_lists
-            download_and_compare_address_lists()
+            download_and_compare_address_lists(coins=["btc"])
         FUNDed_SET = set(_iter_daily())
         if funded_fp:
             logger.info(

@@ -26,8 +26,8 @@ from config.settings import NORMALIZE_BECH32_LOWER
 from config.constants import DOWNLOAD_SHA256
 
 BTC_ADDRESS_SOURCES = [
+    "http://addresses.loyce.club/Bitcoin_addresses_LATEST.txt.gz",
     "https://addresses.loyce.club/Bitcoin_addresses_LATEST.txt.gz",
-    "https://bitkeys.work/Bitcoin_addresses_LATEST.txt.gz",
 ]
 
 
@@ -285,14 +285,20 @@ def _download_single_coin(coin: str, urls: list[str]) -> None:
         log_message(f"❌ {coin.upper()} download failed: {str(e)}", "ERROR")
 
 
-def download_and_compare_address_lists() -> None:
-    """Download and process all funded address lists concurrently with progress.
+def download_and_compare_address_lists(coins: list[str] | None = None) -> None:
+    """Download and process funded address lists concurrently with progress.
 
     Progress bar is disabled in headless/CI mode (when stderr is not a TTY).
     """
     ensure_dirs()
 
-    total = len(COIN_DOWNLOAD_URLS)
+    if coins:
+        coin_set = {c.lower() for c in coins}
+        urls = {coin: url for coin, url in COIN_DOWNLOAD_URLS.items() if coin in coin_set}
+    else:
+        urls = COIN_DOWNLOAD_URLS
+
+    total = len(urls)
     disable = not sys.stderr.isatty()
     with ThreadPoolExecutor(max_workers=total or 1) as executor:
         futures = [
@@ -301,7 +307,7 @@ def download_and_compare_address_lists() -> None:
                 coin,
                 BTC_ADDRESS_SOURCES if coin == "btc" else [url],
             )
-            for coin, url in COIN_DOWNLOAD_URLS.items()
+            for coin, url in urls.items()
         ]
         with tqdm(total=total, disable=disable, desc="downloads", unit="coin") as pbar:
             for future in as_completed(futures):
