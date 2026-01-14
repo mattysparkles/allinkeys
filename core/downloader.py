@@ -180,6 +180,7 @@ def _download_single_coin(coin: str, urls: list[str]) -> None:
                     expected_sha256=DOWNLOAD_SHA256.get(url),
                     timeout=30,
                     progress_cb=_progress,
+                    allow_http=url.startswith("http://"),
                 )
                 download_success = True
                 active_url = url
