@@ -96,9 +96,8 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
 
     stop_event = shutdown_event or threading.Event()
 
-    def poll():
-        if stop_event.is_set():
-            return
+    poll_interval = max(1, int(BACKLOG_MONITOR_INTERVAL_SECONDS))
+    while not stop_event.is_set():
         try:
             swing_mode = shared_metrics.get("swing_mode", SWING_MODE)
         except Exception:
@@ -146,11 +145,7 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
             _safe_set_metric("vanity_gpu_on", bool(vanity_flag.value))
             _safe_set_metric("altcoin_gpu_on", bool(altcoin_flag.value))
 
-        if not stop_event.is_set():
-            threading.Timer(BACKLOG_MONITOR_INTERVAL_SECONDS, poll).start()
-
-    poll()
-    stop_event.wait()
+        stop_event.wait(poll_interval)
 
 
 def start_scheduler(shared_metrics, shutdown_event):
