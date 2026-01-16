@@ -65,10 +65,7 @@ def _seed_in_ranges(seed: int, ranges) -> bool:
 def telemetry_enabled() -> bool:
     """Return ``True`` when experimental telemetry features are active."""
 
-    return bool(
-        getattr(settings, "ENABLE_TELEMETRY", False)
-        and getattr(settings, "SEED_TELEMETRY_ENABLED", False)
-    )
+    return bool(getattr(settings, "SEED_TELEMETRY_ENABLED", False))
 
 # Batch progress
 KEYGEN_STATE = {
