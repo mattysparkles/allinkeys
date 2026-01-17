@@ -401,12 +401,15 @@ def run_vanitysearch_stream(
     hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
     hex_seed_short = hex(initial_seed_int)[2:].lstrip("0")[:8] or "00000000"
 
-    # Output path (VanitySearch owns this file via -o)
+    # Output path (VanitySearch owns this file via -o). We intentionally pass
+    # the FINAL filename directly to VanitySearch so it alone controls file
+    # creation. Do NOT switch to Python-side rotation, temp files, or stdout
+    # parsing; doing so has repeatedly caused output to stick to one file and
+    # leak memory. Each run MUST generate a fresh file via -o.
     current_output_path = os.path.join(
         VANITY_OUTPUT_DIR,
         f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}.txt",
     )
-    temp_output_path = current_output_path + ".part"
     last_output_file = current_output_path
 
     # Ensure we start from a clean slate so previous runs do not bleed into the
@@ -414,8 +417,6 @@ def run_vanitysearch_stream(
     try:
         if os.path.exists(current_output_path):
             os.remove(current_output_path)
-        if os.path.exists(temp_output_path):
-            os.remove(temp_output_path)
     except OSError:
         logger.warning(
             "⚠️ Unable to remove stale VanitySearch output %s before launch",
@@ -438,7 +439,9 @@ def run_vanitysearch_stream(
         logger.error("VanitySearch binary not found: %s", exe_path)
         raise FileNotFoundError("VanitySearch binary not found.")
 
-    cmd = [exe_path, "-s", str(hex_seed_full), "-o", str(temp_output_path)]
+    # IMPORTANT: Use VanitySearch's native -o output handling with a unique
+    # filename. Python must not manage file rotation or write output directly.
+    cmd = [exe_path, "-s", str(hex_seed_full), "-o", str(current_output_path)]
     if use_gpu:
         cmd.append("-gpu")  # CUDA acceleration
     if not BTC_COMPRESSED:
@@ -542,14 +545,14 @@ def run_vanitysearch_stream(
         timer_thread = None
         if can_spawn_thread("vanity_rotation_monitor"):
             timer_thread = threading.Thread(
-                target=monitor_process, args=(proc, temp_output_path)
+                target=monitor_process, args=(proc, current_output_path)
             )
             timer_thread.start()
         else:
             logger.warning(
                 "[ThreadGuard] Skipping rotation monitor thread; running inline"
             )
-            monitor_process(proc, temp_output_path)
+            monitor_process(proc, current_output_path)
         wait_timeout = (
             ROTATE_MAX_WAIT_SECONDS
             if ROTATE_MAX_WAIT_SECONDS and ROTATE_MAX_WAIT_SECONDS > 0
@@ -582,52 +585,12 @@ def run_vanitysearch_stream(
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
 
-    # Post-process output file: use parser; do not delete zero-byte files
-    if not os.path.exists(temp_output_path):
+    # Post-process output file: parse results and drop empty outputs. The file
+    # itself must be created by VanitySearch via -o (no Python writes).
+    if not os.path.exists(current_output_path):
         logger.error(f"❌ Output file not created: {current_output_path}")
         # Returning False forces the caller to retry this part instead of
         # silently advancing the batch counter without producing a file.
-        return False
-
-    def _finalize_output_path() -> bool:
-        """Atomically move ``temp_output_path`` into place with retries.
-
-        On Windows the VanitySearch process may hold the file handle a fraction
-        longer after ``terminate`` returns, causing ``Path.replace`` to raise a
-        ``PermissionError``.  A short retry loop avoids declaring the run a
-        failure when the file becomes writable moments later.
-        """
-
-        for attempt in range(5):
-            try:
-                Path(temp_output_path).replace(current_output_path)
-                return True
-            except PermissionError as e:
-                wait = 0.2 * (attempt + 1)
-                logger.warning(
-                    "⚠️ Failed to finalize VanitySearch output %s (attempt %s/5): %s",\
-                    temp_output_path,\
-                    attempt + 1,\
-                    e,
-                )
-                time.sleep(wait)
-            except Exception:
-                logger.warning(
-                    "⚠️ Failed to finalize VanitySearch output %s", temp_output_path,
-                    exc_info=True,
-                )
-                return False
-        logger.error(
-            "❌ Unable to finalize VanitySearch output after retries: %s",
-            temp_output_path,
-        )
-        return False
-
-    try:
-        if not _finalize_output_path():
-            return False
-    except Exception:
-        logger.warning("⚠️ Unexpected error while finalizing output", exc_info=True)
         return False
 
     if os.path.exists(current_output_path):
