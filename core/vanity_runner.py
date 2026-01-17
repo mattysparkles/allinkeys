@@ -37,7 +37,7 @@ from utils.thread_guard import can_spawn_thread
 
 logger = get_logger(__name__)
 logger.info(
-    "Atomic writes enabled for vanity outputs (temp → rename). Empty outputs are skipped."
+    "VanitySearch output uses native -o handling (no Python-side rotation). Empty outputs are skipped."
 )
 
 # Regex used to detect valid vanity output lines in files.
@@ -258,16 +258,19 @@ def run_vanitysearch(
         core_args, pattern = [], ""
 
     output_file = Path(output_path)
-    temp_file = Path(str(output_file) + ".part")
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    for p in (output_file, temp_file):
-        if p.exists():
-            try:
-                p.unlink()
-            except OSError:
-                logger.debug(f"Unable to remove stale file before run: {p}", exc_info=True)
+    if output_file.exists():
+        try:
+            output_file.unlink()
+        except OSError:
+            logger.debug(
+                "Unable to remove stale file before run: %s", output_file, exc_info=True
+            )
 
-    cmd = [binary] + core_args + ["-o", str(temp_file)]
+    # IMPORTANT: Pass the FINAL output path directly to VanitySearch via -o.
+    # Do not introduce Python-side rotation, temp files, or stdout rewriting.
+    # VanitySearch must own file creation to avoid repeated regressions.
+    cmd = [binary] + core_args + ["-o", str(output_file)]
     if backend in ("cuda", "opencl") and device_id is not None:
         cmd += ["-gpu", str(device_id)]
     if pattern:
@@ -283,7 +286,7 @@ def run_vanitysearch(
 
         def _count_lines_incrementally() -> int:
             try:
-                with temp_file.open("rb") as fh:
+                with output_file.open("rb") as fh:
                     fh.seek(line_state["offset"])
                     chunk = fh.read()
                     line_state["offset"] = fh.tell()
@@ -316,12 +319,12 @@ def run_vanitysearch(
                 break
 
             try:
-                if temp_file.exists():
-                    size_now = temp_file.stat().st_size
+                if output_file.exists():
+                    size_now = output_file.stat().st_size
                     if size_now >= MAX_OUTPUT_FILE_SIZE:
                         logger.info(
                             f"📏 Size threshold {size_now}/{MAX_OUTPUT_FILE_SIZE} bytes reached."
-                            f" Rotating {temp_file.name}"
+                            f" Rotating {output_file.name}"
                         )
                         proc.terminate()
                         break
@@ -331,7 +334,7 @@ def run_vanitysearch(
                         if line_count >= MAX_OUTPUT_LINES:
                             logger.info(
                                 f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached."
-                                f" Rotating {temp_file.name}"
+                                f" Rotating {output_file.name}"
                             )
                             proc.terminate()
                             break
@@ -386,11 +389,10 @@ def run_vanitysearch(
                     _rotation_monitor_running = False
     except Exception:
         logger.exception("Failed to execute VanitySearch")
-        for p in (temp_file, output_file):
-            try:
-                p.unlink(missing_ok=True)
-            except Exception:
-                pass
+        try:
+            output_file.unlink(missing_ok=True)
+        except Exception:
+            pass
         if monitor:
             try:
                 monitor.join(timeout=2)
@@ -403,16 +405,20 @@ def run_vanitysearch(
 
     time.sleep(1.5)
 
-    if not temp_file.exists():
+    if not output_file.exists():
         logger.info("No VanitySearch output produced for %s", addr_mode)
         return False
 
-    total_lines = _finalize_vanity_file(temp_file, output_file, ADDR_LINE_RE)
+    total_lines = _count_matching_lines(output_file, ADDR_LINE_RE)
     if total_lines == 0:
         logger.info(
             "No address lines emitted by VanitySearch for %s; output discarded",
             addr_mode,
         )
+        try:
+            output_file.unlink(missing_ok=True)
+        except Exception:
+            logger.debug("Unable to remove empty VanitySearch output", exc_info=True)
         return False
 
     logger.info(
@@ -499,13 +505,12 @@ def _warn_zero_matches(
     )
 
 
-def _next_vanity_paths(directory: str, counter: int, prefix: str = "vanity") -> Tuple[Path, Path]:
-    """Return final and temporary paths for VanitySearch output."""
+def _next_vanity_paths(directory: str, counter: int, prefix: str = "vanity") -> Path:
+    """Return the next output path for VanitySearch output."""
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     final_name = f"{prefix}_{ts}_{counter:03d}.txt"
-    final_path = Path(directory) / final_name
-    return final_path, final_path.with_suffix(final_path.suffix + ".part")
+    return Path(directory) / final_name
 
 
 def _count_matching_lines(path: Path, addr_re: re.Pattern[str]) -> int:
@@ -525,7 +530,7 @@ def _count_matching_lines(path: Path, addr_re: re.Pattern[str]) -> int:
 
 
 def _has_vanity_output(path: Path, addr_re: re.Pattern[str]) -> bool:
-    """Check if the VanitySearch temp file already contains a vanity line."""
+    """Check if the VanitySearch output file already contains a vanity line."""
 
     try:
         with path.open(
@@ -537,28 +542,6 @@ def _has_vanity_output(path: Path, addr_re: re.Pattern[str]) -> bool:
     except FileNotFoundError:
         return False
     return False
-
-
-def _finalize_vanity_file(temp_path: Path, final_path: Path, addr_re: re.Pattern[str]) -> int:
-    """Rename the VanitySearch temp file when it contains valid lines."""
-
-    if not temp_path.exists():
-        return 0
-
-    matches = _count_matching_lines(temp_path, addr_re)
-    if matches:
-        try:
-            final_path.parent.mkdir(parents=True, exist_ok=True)
-            temp_path.replace(final_path)
-        except Exception:
-            logger.exception("Failed to finalise VanitySearch output file")
-            return 0
-    else:
-        try:
-            temp_path.unlink(missing_ok=True)
-        except Exception:
-            logger.debug("Unable to remove empty VanitySearch temp file", exc_info=True)
-    return matches
 
 
 def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) -> int:
@@ -629,11 +612,14 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
 
             while True:
                 file_counter += 1
-                final_path, temp_path = _next_vanity_paths(out_dir, file_counter)
+                final_path = _next_vanity_paths(out_dir, file_counter)
                 args = (
                     args_base
                     + current_multi_suffix
-                    + ["-o", str(temp_path)]
+                    # Use VanitySearch -o with a unique final filename. Do not
+                    # add Python-side rotation or temp file rewriting; it has
+                    # regressed output handling in the past.
+                    + ["-o", str(final_path)]
                     + current_single_suffix
                 )
                 fallback_triggered = False
@@ -661,7 +647,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                                 )
                                 last_line_ts = time.time()
                             if not has_output:
-                                has_output = _has_vanity_output(temp_path, addr_re)
+                                has_output = _has_vanity_output(final_path, addr_re)
                             if (
                                 attempt_fallback
                                 and not has_output
@@ -703,14 +689,14 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                 except Exception as e:
                     logger.warning(f"⚠️ VanitySearch {mode_name} failed: {e}")
                     try:
-                        temp_path.unlink(missing_ok=True)
+                        final_path.unlink(missing_ok=True)
                     except Exception:
                         pass
                     break
 
                 if fallback_triggered:
                     try:
-                        temp_path.unlink(missing_ok=True)
+                        final_path.unlink(missing_ok=True)
                     except Exception:
                         pass
                     current_multi_suffix = []
@@ -718,13 +704,19 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                     attempt_fallback = False
                     continue
 
-                total_lines = _finalize_vanity_file(temp_path, final_path, addr_re)
+                total_lines = _count_matching_lines(final_path, addr_re)
                 if total_lines > 0:
                     logger.info(
                         f"✅ VanitySearch finished ({mode_name}) with {total_lines} matches."
                     )
                     return total_lines
                 else:
+                    try:
+                        final_path.unlink(missing_ok=True)
+                    except Exception:
+                        logger.debug(
+                            "Unable to remove empty VanitySearch output", exc_info=True
+                        )
                     if rc == 0:
                         _warn_zero_matches(
                             mode_name, len(pats), bool(multi_suffix), seed

@@ -166,8 +166,8 @@ def test_rotation_fallback_without_thread(monkeypatch, tmp_path):
     assert not output_path.exists()
 
 
-def test_finalize_retry_on_windows_lock(monkeypatch, tmp_path):
-    """Finalize should retry when the output file is briefly locked."""
+def test_output_file_preserved_with_data(monkeypatch, tmp_path):
+    """Non-empty VanitySearch outputs should remain on disk after the run."""
 
     monkeypatch.delitem(sys.modules, "core.keygen", raising=False)
     keygen = importlib.import_module("core.keygen")
@@ -205,22 +205,10 @@ def test_finalize_retry_on_windows_lock(monkeypatch, tmp_path):
 
     monkeypatch.setattr(keygen.subprocess, "Popen", LockedOnceProc)
 
-    called = {"count": 0}
-
-    real_replace = Path.replace
-
-    def flaky_replace(self, target):
-        called["count"] += 1
-        if called["count"] == 1:
-            raise PermissionError("file is locked")
-        return real_replace(self, target)
-
-    monkeypatch.setattr(Path, "replace", flaky_replace, raising=False)
-
     result = keygen.run_vanitysearch_stream(0x4, 3, 0, None, None)
     assert result is True
 
-    # File should end up finalized despite initial lock
+    # File should be present since VanitySearch writes directly via -o.
     hex_seed_short = hex(0x4)[2:].lstrip("0")[:8] or "00000000"
     output_path = Path(tmp_path) / f"batch_3_part_0_seed_{hex_seed_short}.txt"
     assert output_path.exists()
