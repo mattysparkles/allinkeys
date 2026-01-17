@@ -50,6 +50,9 @@ from config.telemetry import (
     TELEMETRY_SERVICE_PORT,
 )
 
+# Human-friendly machine name override for telemetry display.
+MACHINE_NAME = None
+
 # 🔐 API KEY INITIALIZER (FIX)
 # ================================================================
 def _init_api_key(name: str) -> str:

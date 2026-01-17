@@ -32,6 +32,8 @@ so it matches the naming convention expected by the application.
   - `TELEMETRY_CHECK_TIMEOUT`: remote check timeout (`TELEMETRY_CHECK_TIMEOUT`)
   - `AUTO_START_TELEMETRY_SERVICE`: launch embedded FastAPI service
   - `TELEMETRY_SERVICE_HOST`/`PORT`: bind address for embedded service
+- **Machine identity**
+  - `MACHINE_NAME`: optional display name override (defaults to generated)
 - **Line 116 – ALL_BTC_ADDRESSES_URL**: `"https://alladdresses.loyce.club/all_Bitcoin_addresses_ever_used_sorted.txt.gz"` – Source list of all BTC addresses
 - **Line 117 – ALL_BTC_ADDRESSES_DIR**: `BASE_DIR / "all_btc_addresses"` – Where the downloaded list is stored
 - **Line 118 – ALL_BTC_RANGES_COUNT**: `20` – Number of range files to split the list into

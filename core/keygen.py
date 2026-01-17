@@ -37,7 +37,7 @@ from core.seed_tracker import (
     record_seed_range,
     get_condensed_ranges,
 )
-from core.telemetry import check_seed_seen, record_seed_event
+from core.telemetry import check_seed_seen, record_range_event, record_seed_event
 from utils.thread_guard import can_spawn_thread
 
 # Runtime trackers / metrics window
@@ -167,6 +167,17 @@ def _telemetry_context():
         num = getattr(settings, "PUZZLE_NUMBER", None)
         return "puzzle", (f"puzzle-{num}" if num is not None else "puzzle")
     return "vanity", "default"
+
+
+def _range_space() -> tuple[int, int]:
+    """Return (space_min, space_max) for normalized range telemetry."""
+    if getattr(settings, "PUZZLE_MODE", False):
+        start = int(getattr(settings, "PUZZLE_START", "0"), 16)
+        end = int(getattr(settings, "PUZZLE_END", "0"), 16)
+        if end < start:
+            start, end = end, start
+        return start, end
+    return 0, SECP256K1_ORDER - 1
 
 
 def _central_seen(seed: int) -> bool:
@@ -642,6 +653,20 @@ def run_vanitysearch_stream(
             )
             if first_seed is not None and last_seed is not None:
                 record_seed_range(first_seed, last_seed)
+                if telemetry_enabled():
+                    try:
+                        mode, range_id = _telemetry_context()
+                        space_min, space_max = _range_space()
+                        record_range_event(
+                            mode=mode,
+                            range_id=range_id,
+                            start=first_seed,
+                            end=last_seed,
+                            space_min=space_min,
+                            space_max=space_max,
+                        )
+                    except Exception:
+                        pass
 
             if telemetry_enabled():
                 try:

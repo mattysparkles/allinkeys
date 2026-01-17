@@ -15,6 +15,11 @@ addresses or WIFs:
 ``seed_fingerprint`` – SHA256(seed_bytes || app_instance_id).
 ``timestamp_iso`` – Event timestamp in ISO‑8601 format.
 ``used`` / ``match_found`` – Result flags.
+``machine_id`` – Stable per-machine identifier (opaque).
+``machine_name`` – Human-friendly display name (mutable).
+``range_recent`` – Bounded list of recently checked ranges.
+``range_distribution`` – Normalized range metadata for density visualization.
+``reference_overlays`` – Reserved stub for future range correlation.
 
 The telemetry queue is capped at 100k entries and behaves as a ring buffer.
 When offline, events remain on disk and are retried with exponential backoff
@@ -27,9 +32,10 @@ import hashlib
 import json
 import sqlite3
 import threading
+from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 import multiprocessing
@@ -50,11 +56,13 @@ from config.telemetry import (
 )
 from core.logger import get_logger
 from utils.thread_guard import can_spawn_thread
+from utils.machine_identity import get_machine_id, get_machine_name
 
 logger = get_logger(__name__)
 
 QUEUE_DB = Path(LOG_DIR) / "telemetry_queue.db"
 INSTANCE_ID_PATH = Path(LOG_DIR) / "app_instance_id"
+RANGE_RECENT_LIMIT = 50
 
 
 def _get_app_id(path: Path = INSTANCE_ID_PATH) -> str:
@@ -90,6 +98,10 @@ class TelemetryClient:
         self.max_backoff = max_backoff
         self.db_path = Path(db_path)
         self.app_id = _get_app_id(instance_id_path)
+        self.machine_id = get_machine_id()
+        self.machine_name = get_machine_name(self.machine_id)
+        self._recent_ranges: deque[Dict[str, Any]] = deque(maxlen=RANGE_RECENT_LIMIT)
+        self._range_lock = threading.Lock()
         self._backoff = flush_seconds
         if self.enabled:
             self._init_db()
@@ -118,6 +130,96 @@ class TelemetryClient:
         conn.close()
 
     # ------------------------------ Queue ops ------------------------------
+    def record_range_event(
+        self,
+        *,
+        mode: str,
+        range_id: str,
+        start: int,
+        end: int,
+        space_min: Optional[int] = None,
+        space_max: Optional[int] = None,
+    ) -> None:
+        """Record a bounded recent range observation for telemetry payloads."""
+
+        if not self.enabled:
+            return
+
+        start_val, end_val = int(start), int(end)
+        if end_val < start_val:
+            start_val, end_val = end_val, start_val
+        position = (start_val + end_val) // 2
+        space_span = None
+        if space_min is not None and space_max is not None and space_max > space_min:
+            space_span = space_max - space_min
+        normalized_position = (
+            (position - space_min) / space_span
+            if space_span and space_min is not None
+            else None
+        )
+        normalized_span = (
+            (end_val - start_val) / space_span if space_span else None
+        )
+        payload = {
+            "mode": mode,
+            "range_id": range_id,
+            "start": start_val,
+            "end": end_val,
+            "position": position,
+            "timestamp_iso": datetime.utcnow().isoformat() + "Z",
+            "space_min": space_min,
+            "space_max": space_max,
+            "normalized_position": normalized_position,
+            "normalized_span": normalized_span,
+            "reference_overlays": [],
+        }
+        with self._range_lock:
+            self._recent_ranges.append(payload)
+
+    def _range_distribution(self, ranges: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        summaries: Dict[str, Dict[str, Any]] = {}
+        for entry in ranges:
+            range_key = entry.get("range_id") or "default"
+            summary = summaries.setdefault(
+                range_key,
+                {
+                    "range_id": range_key,
+                    "observed_count": 0,
+                    "observed_min": None,
+                    "observed_max": None,
+                    "normalized_min": None,
+                    "normalized_max": None,
+                    "space_min": entry.get("space_min"),
+                    "space_max": entry.get("space_max"),
+                },
+            )
+            position = entry.get("position")
+            normalized = entry.get("normalized_position")
+            if isinstance(position, int):
+                summary["observed_count"] += 1
+                summary["observed_min"] = (
+                    position
+                    if summary["observed_min"] is None
+                    else min(summary["observed_min"], position)
+                )
+                summary["observed_max"] = (
+                    position
+                    if summary["observed_max"] is None
+                    else max(summary["observed_max"], position)
+                )
+            if isinstance(normalized, (float, int)):
+                summary["normalized_min"] = (
+                    normalized
+                    if summary["normalized_min"] is None
+                    else min(summary["normalized_min"], normalized)
+                )
+                summary["normalized_max"] = (
+                    normalized
+                    if summary["normalized_max"] is None
+                    else max(summary["normalized_max"], normalized)
+                )
+        return list(summaries.values())
+
     def record_event(
         self,
         seed_bytes: bytes,
@@ -133,6 +235,8 @@ class TelemetryClient:
             return
 
         fingerprint = hashlib.sha256(seed_bytes + self.app_id.encode()).hexdigest()
+        with self._range_lock:
+            recent_ranges = list(self._recent_ranges)
         payload = {
             "app_instance_id": self.app_id,
             "client_version": CLIENT_VERSION,
@@ -142,6 +246,11 @@ class TelemetryClient:
             "timestamp_iso": datetime.utcnow().isoformat() + "Z",
             "used": used,
             "match_found": match_found,
+            "machine_id": self.machine_id,
+            "machine_name": self.machine_name,
+            "range_recent": recent_ranges,
+            "range_distribution": self._range_distribution(recent_ranges),
+            "reference_overlays": [],
         }
         data = json.dumps(payload)
 
@@ -355,4 +464,27 @@ def record_seed_event(
         range_id=range_id,
         used=used,
         match_found=match_found,
+    )
+
+
+def record_range_event(
+    *,
+    mode: str,
+    range_id: str,
+    start: int,
+    end: int,
+    space_min: Optional[int] = None,
+    space_max: Optional[int] = None,
+) -> None:
+    """Record a range observation for telemetry payload enrichment."""
+
+    if _CLIENT is None:
+        return
+    _CLIENT.record_range_event(
+        mode=mode,
+        range_id=range_id,
+        start=start,
+        end=end,
+        space_min=space_min,
+        space_max=space_max,
     )
