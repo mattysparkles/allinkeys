@@ -19,6 +19,34 @@ addresses.
 | `timestamp_iso`    | ISO‑8601 timestamp of the event                               |
 | `used`             | Whether the seed was previously seen                          |
 | `match_found`      | Whether a funded address match was discovered                 |
+| `machine_id`       | Stable, opaque machine identifier                             |
+| `machine_name`     | Human-friendly display name                                   |
+| `range_recent`     | Bounded list of recently checked ranges                        |
+| `range_distribution` | Normalized metadata for plotting range density              |
+| `reference_overlays` | Reserved for future reference range overlays                |
+
+## Machine Identity & Naming
+
+Telemetry uses a stable machine identifier derived in the following order:
+
+1. OS machine identifier when available:
+   - Linux: `/etc/machine-id` or `/var/lib/dbus/machine-id`
+   - Windows: `MachineGuid` registry value
+   - macOS: `IOPlatformUUID` (ioreg)
+2. Fallback: hashed MAC address + hostname
+
+The machine identifier is hashed into an opaque `machine_id` and persisted in
+`logs/machine_identity.json`. The same file stores the generated display name.
+
+### Naming Behavior
+
+- If `MACHINE_NAME` is set in `config/settings.py`, that value is used as
+  `machine_name`.
+- Otherwise, a deterministic adjective‑noun name is generated from `machine_id`
+  and stored in `logs/machine_identity.json`.
+
+Changing `MACHINE_NAME` updates the display name only; historical telemetry is
+still associated by the stable `machine_id`.
 
 ## Opt‑out
 

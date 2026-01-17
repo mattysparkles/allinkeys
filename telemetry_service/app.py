@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from datetime import datetime
@@ -32,6 +33,19 @@ def _connect() -> sqlite3.Connection:
         );
         """
     )
+    existing_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(seed_events)").fetchall()
+    }
+    optional_columns = {
+        "machine_id": "TEXT",
+        "machine_name": "TEXT",
+        "range_recent": "TEXT",
+        "range_distribution": "TEXT",
+        "reference_overlays": "TEXT",
+    }
+    for name, col_type in optional_columns.items():
+        if name not in existing_cols:
+            conn.execute(f"ALTER TABLE seed_events ADD COLUMN {name} {col_type}")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_seed_fingerprint ON seed_events(seed_fingerprint)"
     )
@@ -47,6 +61,11 @@ class TelemetryItem(BaseModel):
     timestamp_iso: Optional[str] = None
     used: Optional[bool] = False
     match_found: Optional[bool] = False
+    machine_id: Optional[str] = None
+    machine_name: Optional[str] = None
+    range_recent: Optional[List[Dict[str, Any]]] = None
+    range_distribution: Optional[List[Dict[str, Any]]] = None
+    reference_overlays: Optional[List[Dict[str, Any]]] = None
 
 
 app = FastAPI(title="AllInKeys Central Telemetry")
@@ -66,8 +85,9 @@ def ingest(items: List[TelemetryItem]) -> Dict[str, Any]:
                     """
                     INSERT INTO seed_events (
                         seed_fingerprint, app_instance_id, client_version, mode, range_id,
-                        first_seen, last_seen, used, match_found
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        first_seen, last_seen, used, match_found, machine_id, machine_name,
+                        range_recent, range_distribution, reference_overlays
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item.seed_fingerprint,
@@ -79,6 +99,15 @@ def ingest(items: List[TelemetryItem]) -> Dict[str, Any]:
                         ts,
                         1 if item.used else 0,
                         1 if item.match_found else 0,
+                        item.machine_id,
+                        item.machine_name,
+                        json.dumps(item.range_recent) if item.range_recent else None,
+                        json.dumps(item.range_distribution)
+                        if item.range_distribution
+                        else None,
+                        json.dumps(item.reference_overlays)
+                        if item.reference_overlays
+                        else None,
                     ),
                 )
     finally:
@@ -117,4 +146,3 @@ def _check(seed_fp: str) -> Dict[str, Any]:
         return {"used": bool(used)}
     finally:
         conn.close()
-
