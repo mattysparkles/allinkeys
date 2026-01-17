@@ -358,8 +358,10 @@ def run_vanitysearch_stream(
     initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None
 ):
     """
-    Run VanitySearch once. VanitySearch writes the output via `-o <file>`.
-    Python does not monitor stdout or rotate files; VanitySearch owns output creation.
+    Run one VanitySearch batch. A batch is one process invocation that writes
+    exactly one output file via `-o <file>` and is bounded by settings limits.
+    Rotation is implemented by process restart because VanitySearch cannot
+    rotate files itself.
     Returns True if an output file exists at the end; False otherwise.
     """
     global total_keys_generated, last_output_file
@@ -551,7 +553,8 @@ def start_keygen_loop(
     Main keygen loop:
     - Initializes dashboard & control events
     - Ensures output directory exists
-    - Steps through FILES_PER_BATCH files per batch, producing new output files
+    - Each VanitySearch batch is one process invocation and one output file
+    - FILES_PER_BATCH defines the max pages (files) per macro-batch cycle
     - Saves checkpoints for mid-batch resume
     """
     # Metrics shared memory init

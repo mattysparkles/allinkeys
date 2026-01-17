@@ -14,6 +14,9 @@ from config.settings import (
     VANITYSEARCH_BIN_CUDA,
     VANITYSEARCH_BIN_OPENCL,
     VANITYSEARCH_BIN_CPU,
+    VANITY_ROTATE_LINES,
+    VANITY_MAX_BYTES,
+    VANITY_ROTATE_SECONDS,
     ENABLE_P2PKH,
     ENABLE_P2WPKH,
     ENABLE_TAPROOT,
@@ -373,6 +376,28 @@ def _reserve_output_path(output_dir: str, prefix: str) -> Path:
     return output_path
 
 
+def _scan_output_progress(
+    output_path: Path, offset: int, lines_seen: int
+) -> Tuple[int, int, int]:
+    """Return updated (offset, lines_seen, file_size) for a growing output file."""
+    if not output_path.exists():
+        return offset, lines_seen, 0
+    file_size = output_path.stat().st_size
+    if file_size < offset:
+        offset = 0
+    if file_size == offset:
+        return offset, lines_seen, file_size
+    with output_path.open("rb") as fh:
+        fh.seek(offset)
+        while True:
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            lines_seen += chunk.count(b"\n")
+        offset = fh.tell()
+    return offset, lines_seen, file_size
+
+
 # INFRASTRUCTURE: DO NOT MODIFY — VANITYSEARCH CONTROLS OUTPUT ROTATION
 def run_vanitysearch_batch(
     *,
@@ -385,6 +410,9 @@ def run_vanitysearch_batch(
     timeout: Optional[int] = None,
     pause_event=None,
     stdout_setting=None,
+    max_lines: Optional[int] = None,
+    max_bytes: Optional[int] = None,
+    max_seconds: Optional[int] = None,
 ) -> Tuple[Path, int]:
     """Invoke VanitySearch using native -o file output with strict safeguards."""
     if stdout_setting not in (None, subprocess.DEVNULL):
@@ -392,12 +420,26 @@ def run_vanitysearch_batch(
     if stdout_setting is None:
         stdout_setting = subprocess.DEVNULL
 
+    if max_lines is None:
+        max_lines = VANITY_ROTATE_LINES
+    if max_bytes is None:
+        max_bytes = VANITY_MAX_BYTES
+    if max_seconds is None:
+        max_seconds = VANITY_ROTATE_SECONDS
+    if max_seconds and timeout:
+        timeout = min(timeout, max_seconds)
+    elif max_seconds:
+        timeout = max_seconds
+
     output_path = _reserve_output_path(output_dir, output_prefix)
     cmd = [binary] + base_args + ["-o", str(output_path)]
     if pattern:
         cmd.append(pattern)
 
     logger.info(f"Launching VanitySearch: {' '.join(cmd)}")
+    logger.info(
+        "Rotation is implemented by process restart. VanitySearch cannot rotate files."
+    )
     proc = subprocess.Popen(
         cmd,
         stdout=stdout_setting,
@@ -406,11 +448,30 @@ def run_vanitysearch_batch(
     )
 
     start = time.time()
+    offset = 0
+    lines_seen = 0
     while proc.poll() is None:
         if pause_event and pause_event.is_set():
             proc.terminate()
             break
         if timeout and time.time() - start > timeout:
+            proc.terminate()
+            break
+        offset, lines_seen, file_size = _scan_output_progress(
+            output_path, offset, lines_seen
+        )
+        if max_lines and lines_seen >= max_lines:
+            logger.info(
+                "VanitySearch batch reached %s lines; restarting for rotation.",
+                max_lines,
+            )
+            proc.terminate()
+            break
+        if max_bytes and file_size >= max_bytes:
+            logger.info(
+                "VanitySearch batch reached %s bytes; restarting for rotation.",
+                max_bytes,
+            )
             proc.terminate()
             break
         time.sleep(0.5)
