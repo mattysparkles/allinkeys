@@ -3,8 +3,6 @@
 import os
 from pathlib import Path
 import time
-import subprocess
-import threading
 import secrets
 import platform
 import re
@@ -15,10 +13,6 @@ from threading import Lock
 from config.settings import (
     VANITYSEARCH_PATH,
     VANITY_PATTERN,
-    MAX_OUTPUT_FILE_SIZE,
-    MAX_OUTPUT_LINES,
-    ROTATE_INTERVAL_SECONDS,
-    ROTATE_MAX_WAIT_SECONDS,
     FILES_PER_BATCH,
 )
 from config.directories import VANITY_OUTPUT_DIR
@@ -32,13 +26,13 @@ from core.gpu_selector import (
 )  # ✅ Correct GPU selection integration
 from core.logger import get_logger
 import config.settings as settings
+from core.vanity_runner import run_vanitysearch_batch
 from core.seed_tracker import (
     seed_in_used_range,
     record_seed_range,
     get_condensed_ranges,
 )
 from core.telemetry import check_seed_seen, record_range_event, record_seed_event
-from utils.thread_guard import can_spawn_thread
 
 # Runtime trackers / metrics window
 total_keys_generated = 0
@@ -365,8 +359,8 @@ def run_vanitysearch_stream(
 ):
     """
     Run VanitySearch once. VanitySearch writes the output via `-o <file>`.
-    We monitor the file for rotation triggers (time/size/line-count) and update metrics.
-    Returns True if a non-empty output file exists at the end; False otherwise.
+    Python does not monitor stdout or rotate files; VanitySearch owns output creation.
+    Returns True if an output file exists at the end; False otherwise.
     """
     global total_keys_generated, last_output_file
 
@@ -401,28 +395,11 @@ def run_vanitysearch_stream(
     hex_seed_full = hex(initial_seed_int)[2:].rjust(64, "0")
     hex_seed_short = hex(initial_seed_int)[2:].lstrip("0")[:8] or "00000000"
 
-    # Output path (VanitySearch owns this file via -o). We intentionally pass
-    # the FINAL filename directly to VanitySearch so it alone controls file
-    # creation. Do NOT switch to Python-side rotation, temp files, or stdout
-    # parsing; doing so has repeatedly caused output to stick to one file and
-    # leak memory. Each run MUST generate a fresh file via -o.
-    current_output_path = os.path.join(
-        VANITY_OUTPUT_DIR,
-        f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}.txt",
+    # Output path prefix (VanitySearch owns this file via -o). Each run MUST
+    # generate a fresh file via -o. Do not reuse filenames or rotate in Python.
+    output_prefix = (
+        f"batch_{batch_id}_part_{index_within_batch}_seed_{hex_seed_short}"
     )
-    last_output_file = current_output_path
-
-    # Ensure we start from a clean slate so previous runs do not bleed into the
-    # new VanitySearch execution. If a stale file exists we remove it first.
-    try:
-        if os.path.exists(current_output_path):
-            os.remove(current_output_path)
-    except OSError:
-        logger.warning(
-            "⚠️ Unable to remove stale VanitySearch output %s before launch",
-            current_output_path,
-            exc_info=True,
-        )
 
     # Normalize pattern and ensure it's final positional arg
     pattern = str(VANITY_PATTERN).strip()
@@ -441,18 +418,17 @@ def run_vanitysearch_stream(
 
     # IMPORTANT: Use VanitySearch's native -o output handling with a unique
     # filename. Python must not manage file rotation or write output directly.
-    cmd = [exe_path, "-s", str(hex_seed_full), "-o", str(current_output_path)]
+    base_args = ["-s", str(hex_seed_full)]
     if use_gpu:
-        cmd.append("-gpu")  # CUDA acceleration
+        base_args.append("-gpu")  # CUDA acceleration
     if not BTC_COMPRESSED:
-        cmd.append("-u")  # uncompressed WIF
-    cmd.append(pattern)  # <<< MUST be last
+        base_args.append("-u")  # uncompressed WIF
 
-    cmd_preview = " ".join(map(str, cmd))
+    cmd_preview = " ".join(map(str, [exe_path] + base_args + [pattern]))
     logger.info(
         f"🧬 Starting VanitySearch:\n"
         f"   Seed: {hex_seed_full}\n"
-        f"   Output: {current_output_path}\n"
+        f"   Output prefix: {output_prefix}\n"
         f"   GPUs: {selected_gpu_ids or 'CPU'}\n"
         f"   Pattern: {pattern}"
     )
@@ -463,124 +439,22 @@ def run_vanitysearch_stream(
         logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
         return False
 
-    # Launch and monitor (VanitySearch writes file via -o; we do NOT open it)
-    rotation_triggered = threading.Event()
-
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,  # do not tee into the same file
-            stderr=subprocess.STDOUT,
+        current_output_path, rc = run_vanitysearch_batch(
+            binary=exe_path,
+            base_args=base_args,
+            output_dir=VANITY_OUTPUT_DIR,
+            output_prefix=output_prefix,
+            pattern=pattern,
             env={**os.environ, **gpu_env},
+            pause_event=pause_event,
         )
-        logger.info(f"Spawned VanitySearch PID {proc.pid} with args {cmd_preview}")
-
-        def monitor_process(p, path):
-            """Monitor file size/lines and pause requests while VanitySearch runs."""
-
-            start = time.time()
-            logger.info("[Rotation] Monitor started for %s", os.path.basename(path))
-            last_tick = 0
-            line_state = {"offset": 0, "lines": 0}
-
-            def _count_lines_incrementally(target: str) -> int:
-                """Return updated line count without re-reading the whole file."""
-
-                try:
-                    with open(target, "rb") as fh:
-                        fh.seek(line_state["offset"])
-                        chunk = fh.read()
-                        line_state["offset"] = fh.tell()
-                except (FileNotFoundError, PermissionError, OSError):
-                    return line_state["lines"]
-
-                line_state["lines"] += chunk.count(b"\n")
-                return line_state["lines"]
-
-            while p.poll() is None:
-                if pause_event and pause_event.is_set():
-                    logger.info(
-                        "⏸️ Pause requested. Terminating VanitySearch process...",
-                    )
-                    rotation_triggered.set()
-                    p.terminate()
-                    break
-                # Heartbeat every 5s so we can see rotation timer progress
-                elapsed = int(time.time() - start)
-                if elapsed // 5 > last_tick // 5:
-                    logger.info(
-                        "[Rotation] Elapsed=%ss / Interval=%ss", elapsed, ROTATE_INTERVAL_SECONDS
-                    )
-                    last_tick = elapsed
-                if time.time() - start >= ROTATE_INTERVAL_SECONDS:
-                    logger.info(
-                        f"⏱️ Rotation interval reached ({ROTATE_INTERVAL_SECONDS}s). Terminating for rotation.",
-                    )
-                    rotation_triggered.set()
-                    p.terminate()
-                    break
-                try:
-                    if os.path.exists(path):
-                        size_now = os.path.getsize(path)
-                        if size_now >= MAX_OUTPUT_FILE_SIZE:
-                            logger.info(
-                                f"📏 Size threshold {size_now}/{MAX_OUTPUT_FILE_SIZE} bytes reached. Rotating {os.path.basename(path)}"
-                            )
-                            rotation_triggered.set()
-                            p.terminate()
-                            break
-                        if MAX_OUTPUT_LINES:
-                            line_count = _count_lines_incrementally(path)
-                            if line_count >= MAX_OUTPUT_LINES:
-                                logger.info(
-                                    f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached. Rotating {os.path.basename(path)}"
-                                )
-                                rotation_triggered.set()
-                                p.terminate()
-                                break
-                except (FileNotFoundError, PermissionError, OSError):
-                    logger.debug("Output not ready or locked during monitoring; retrying")
-                time.sleep(1)
-
-        timer_thread = None
-        if can_spawn_thread("vanity_rotation_monitor"):
-            timer_thread = threading.Thread(
-                target=monitor_process, args=(proc, current_output_path)
-            )
-            timer_thread.start()
-        else:
-            logger.warning(
-                "[ThreadGuard] Skipping rotation monitor thread; running inline"
-            )
-            monitor_process(proc, current_output_path)
-        wait_timeout = (
-            ROTATE_MAX_WAIT_SECONDS
-            if ROTATE_MAX_WAIT_SECONDS and ROTATE_MAX_WAIT_SECONDS > 0
-            else max(ROTATE_INTERVAL_SECONDS + 15, 30)
-        )
-        try:
-            proc.wait(timeout=wait_timeout)
-        except subprocess.TimeoutExpired:
-            logger.warning(
-                "⚠️ VanitySearch did not exit within %ss after terminate; killing.",
-                wait_timeout,
-            )
-            try:
-                proc.kill()
-            finally:
-                proc.wait()
-        finally:
-            if timer_thread:
-                timer_thread.join()
-
-        if proc.poll() is None and rotation_triggered.is_set():
-            logger.warning(
-                "⚠️ VanitySearch ignored termination after rotation; force killing.",
-            )
-            try:
-                proc.kill()
-            finally:
-                proc.wait(timeout=5)
+        last_output_file = str(current_output_path)
+        if rc != 0 and pause_event and pause_event.is_set():
+            return False
+    except RuntimeError:
+        logger.exception("VanitySearch execution aborted due to safeguard.")
+        raise
     except Exception as e:
         logger.exception(f"Failed to execute VanitySearch: {e}")
         return False
@@ -677,7 +551,7 @@ def start_keygen_loop(
     Main keygen loop:
     - Initializes dashboard & control events
     - Ensures output directory exists
-    - Steps through FILES_PER_BATCH files per batch, rotating outputs via runner
+    - Steps through FILES_PER_BATCH files per batch, producing new output files
     - Saves checkpoints for mid-batch resume
     """
     # Metrics shared memory init
