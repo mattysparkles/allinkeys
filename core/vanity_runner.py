@@ -4,7 +4,8 @@ import subprocess
 import threading
 import time
 import tempfile
-from typing import Dict, List, Tuple, Optional
+import uuid
+from typing import Dict, List, Tuple, Optional, Set
 from pathlib import Path
 
 from config.settings import (
@@ -13,9 +14,6 @@ from config.settings import (
     VANITYSEARCH_BIN_CUDA,
     VANITYSEARCH_BIN_OPENCL,
     VANITYSEARCH_BIN_CPU,
-    MIN_EXPECTED_GPU_MKEYS,
-    MAX_OUTPUT_FILE_SIZE,
-    MAX_OUTPUT_LINES,
     ENABLE_P2PKH,
     ENABLE_P2WPKH,
     ENABLE_TAPROOT,
@@ -25,7 +23,6 @@ from config.settings import (
     ENABLE_BC1_DEFAULT,
     VANITY_MODE,
     OCLVANITYGEN_PATH,
-    ROTATE_INTERVAL_SECONDS,
     find_vanitysearch_binary,
 )
 from config.directories import VANITY_OUTPUT_DIR
@@ -33,7 +30,6 @@ from core.logger import get_logger
 from core.dashboard import update_dashboard_stat
 from core.vanity_io import ensure_dir
 from core.oclvanity_runner import run_oclvanitygen
-from utils.thread_guard import can_spawn_thread
 
 logger = get_logger(__name__)
 logger.info(
@@ -52,8 +48,8 @@ ADDR_LINE_RE = re.compile(
 # throttle warning frequency
 _LAST_WARN: Dict[str, float] = {}
 
-_rotation_monitor_running = False
-_rotation_lock = threading.Lock()
+_USED_VANITY_OUTPUTS: Set[str] = set()
+_OUTPUT_PATHS_LOCK = threading.Lock()
 
 
 def _warn_once(name: str, msg: str, interval: float = 30.0) -> None:
@@ -225,23 +221,25 @@ def build_vanitysearch_args(hex_seed: str) -> List[Tuple[List[str], str]]:
 
 def run_vanitysearch(
     seed_args: List[str],
-    output_path: str,
     device_id: Optional[int],
     backend: str,
     timeout: int = 60,
     pause_event=None,
     addr_mode: str = "p2pkh",
 ) -> bool:
-    """Execute VanitySearch with live speed parsing and atomic output handling."""
+    """Execute VanitySearch with native -o output handling only."""
     if pause_event and pause_event.is_set():
         logger.info("Keygen paused; skipping VanitySearch job")
         return False
 
     if backend == "oclvanitygen":
         pattern = seed_args[0] if seed_args else DEFAULT_BTC_PATTERNS[0]
+        output_path = _reserve_output_path(
+            str(VANITY_OUTPUT_DIR), f"vanitysearch_{addr_mode}"
+        )
         return run_oclvanitygen(
             pattern,
-            output_path,
+            str(output_path),
             timeout=timeout,
             pause_event=pause_event,
             addr_mode=addr_mode,
@@ -257,150 +255,25 @@ def run_vanitysearch(
     else:
         core_args, pattern = [], ""
 
-    output_file = Path(output_path)
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    if output_file.exists():
-        try:
-            output_file.unlink()
-        except OSError:
-            logger.debug(
-                "Unable to remove stale file before run: %s", output_file, exc_info=True
-            )
-
     # IMPORTANT: Pass the FINAL output path directly to VanitySearch via -o.
     # Do not introduce Python-side rotation, temp files, or stdout rewriting.
     # VanitySearch must own file creation to avoid repeated regressions.
-    cmd = [binary] + core_args + ["-o", str(output_file)]
+    base_args = core_args
     if backend in ("cuda", "opencl") and device_id is not None:
-        cmd += ["-gpu", str(device_id)]
-    if pattern:
-        cmd.append(pattern)
+        base_args = base_args + ["-gpu", str(device_id)]
 
+    output_file, rc = run_vanitysearch_batch(
+        binary=binary,
+        base_args=base_args,
+        output_dir=str(VANITY_OUTPUT_DIR),
+        output_prefix=f"vanitysearch_{addr_mode}",
+        pattern=pattern or None,
+        timeout=timeout,
+        pause_event=pause_event,
+    )
     update_dashboard_stat("vanitysearch_addr_mode", addr_mode)
-    logger.info(f"Executing VanitySearch: {' '.join(cmd)}")
-
-    def _monitor_rotation(proc: subprocess.Popen) -> None:
-        start = time.time()
-        last_tick = 0
-        line_state = {"offset": 0, "lines": 0}
-
-        def _count_lines_incrementally() -> int:
-            try:
-                with output_file.open("rb") as fh:
-                    fh.seek(line_state["offset"])
-                    chunk = fh.read()
-                    line_state["offset"] = fh.tell()
-            except (FileNotFoundError, PermissionError, OSError):
-                return line_state["lines"]
-
-            line_state["lines"] += chunk.count(b"\n")
-            return line_state["lines"]
-
-        while proc.poll() is None:
-            if pause_event and pause_event.is_set():
-                logger.info("⏸️ Pause requested. Terminating VanitySearch process...")
-                proc.terminate()
-                break
-
-            elapsed = int(time.time() - start)
-            if ROTATE_INTERVAL_SECONDS and elapsed // 5 > last_tick // 5:
-                logger.info(
-                    "[Rotation] Elapsed=%ss / Interval=%ss",
-                    elapsed,
-                    ROTATE_INTERVAL_SECONDS,
-                )
-                last_tick = elapsed
-
-            if ROTATE_INTERVAL_SECONDS and time.time() - start >= ROTATE_INTERVAL_SECONDS:
-                logger.info(
-                    f"⏱️ Rotation interval reached ({ROTATE_INTERVAL_SECONDS}s). Terminating for rotation."
-                )
-                proc.terminate()
-                break
-
-            try:
-                if output_file.exists():
-                    size_now = output_file.stat().st_size
-                    if size_now >= MAX_OUTPUT_FILE_SIZE:
-                        logger.info(
-                            f"📏 Size threshold {size_now}/{MAX_OUTPUT_FILE_SIZE} bytes reached."
-                            f" Rotating {output_file.name}"
-                        )
-                        proc.terminate()
-                        break
-
-                    if MAX_OUTPUT_LINES:
-                        line_count = _count_lines_incrementally()
-                        if line_count >= MAX_OUTPUT_LINES:
-                            logger.info(
-                                f"📏 Line threshold {line_count}/{MAX_OUTPUT_LINES} reached."
-                                f" Rotating {output_file.name}"
-                            )
-                            proc.terminate()
-                            break
-            except (FileNotFoundError, PermissionError, OSError):
-                logger.debug("Output not ready or locked during monitoring; retrying")
-
-            time.sleep(1)
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        monitor = None
-        if can_spawn_thread("vanity_rotation_monitor"):
-            with _rotation_lock:
-                if _rotation_monitor_running:
-                    logger.info(
-                        "Rotation monitor already running; skipping duplicate start"
-                    )
-                else:
-                    _rotation_monitor_running = True
-                    monitor = threading.Thread(target=_monitor_rotation, args=(proc,))
-            if monitor:
-                monitor.start()
-        else:
-            logger.warning("[ThreadGuard] Rotation monitor not started; thread cap hit")
-
-        start = time.time()
-        for line in proc.stdout:
-            m = re.search(r"([0-9.]+)\s*([MK])?Key/s", line, re.IGNORECASE)
-            if m:
-                speed = float(m.group(1))
-                if m.group(2) and m.group(2).upper() == "K":
-                    speed /= 1000.0
-                update_dashboard_stat("vanitysearch_current_mkeys", round(speed, 2))
-                if backend != "cpu" and speed < MIN_EXPECTED_GPU_MKEYS:
-                    _warn_once("low_speed", "Speed suggests CPU; check GPU selection")
-
-            if pause_event and pause_event.is_set():
-                proc.terminate()
-            if timeout and time.time() - start > timeout:
-                proc.terminate()
-        proc.wait()
-        if monitor:
-            try:
-                monitor.join()
-            finally:
-                with _rotation_lock:
-                    _rotation_monitor_running = False
-    except Exception:
-        logger.exception("Failed to execute VanitySearch")
-        try:
-            output_file.unlink(missing_ok=True)
-        except Exception:
-            pass
-        if monitor:
-            try:
-                monitor.join(timeout=2)
-            except Exception:
-                pass
-            finally:
-                with _rotation_lock:
-                    _rotation_monitor_running = False
+    logger.info(f"Executing VanitySearch (no stdout capture): {output_file}")
+    if rc != 0 and pause_event and pause_event.is_set():
         return False
 
     time.sleep(1.5)
@@ -483,16 +356,72 @@ def _apply_mode_flags(args: List[str]) -> None:
         pass  # compressed-only (no flag)
 
 
-def _popen_stream(args: List[str]) -> subprocess.Popen:
-    return subprocess.Popen(
-        args,
-        stdout=subprocess.PIPE,
+def _reserve_output_path(output_dir: str, prefix: str) -> Path:
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    unique = uuid.uuid4().hex
+    output_path = output_root / f"{prefix}_{ts}_{unique}.txt"
+    with _OUTPUT_PATHS_LOCK:
+        if str(output_path) in _USED_VANITY_OUTPUTS:
+            raise RuntimeError(f"VanitySearch output filename reused: {output_path}")
+        if output_path.exists():
+            raise RuntimeError(
+                f"VanitySearch output filename already exists: {output_path}"
+            )
+        _USED_VANITY_OUTPUTS.add(str(output_path))
+    return output_path
+
+
+# INFRASTRUCTURE: DO NOT MODIFY — VANITYSEARCH CONTROLS OUTPUT ROTATION
+def run_vanitysearch_batch(
+    *,
+    binary: str,
+    base_args: List[str],
+    output_dir: str,
+    output_prefix: str,
+    pattern: Optional[str] = None,
+    env: Optional[Dict[str, str]] = None,
+    timeout: Optional[int] = None,
+    pause_event=None,
+    stdout_setting=None,
+) -> Tuple[Path, int]:
+    """Invoke VanitySearch using native -o file output with strict safeguards."""
+    if stdout_setting not in (None, subprocess.DEVNULL):
+        raise RuntimeError("VanitySearch stdout capture is forbidden.")
+    if stdout_setting is None:
+        stdout_setting = subprocess.DEVNULL
+
+    output_path = _reserve_output_path(output_dir, output_prefix)
+    cmd = [binary] + base_args + ["-o", str(output_path)]
+    if pattern:
+        cmd.append(pattern)
+
+    logger.info(f"Launching VanitySearch: {' '.join(cmd)}")
+    proc = subprocess.Popen(
+        cmd,
+        stdout=stdout_setting,
         stderr=subprocess.STDOUT,
-        bufsize=1,
-        universal_newlines=True,
-        encoding="utf-8",
-        errors="replace",
+        env=env,
     )
+
+    start = time.time()
+    while proc.poll() is None:
+        if pause_event and pause_event.is_set():
+            proc.terminate()
+            break
+        if timeout and time.time() - start > timeout:
+            proc.terminate()
+            break
+        time.sleep(0.5)
+
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+    return output_path, proc.returncode or 0
 
 
 def _warn_zero_matches(
@@ -503,14 +432,6 @@ def _warn_zero_matches(
         f"⚠️ VanitySearch exited cleanly with 0 matches | mode={mode} | patterns={pattern_count} | "
         f"input={'-i' if used_file else 'single'} | seed={seed} | device={get_selected_device_name()}"
     )
-
-
-def _next_vanity_paths(directory: str, counter: int, prefix: str = "vanity") -> Path:
-    """Return the next output path for VanitySearch output."""
-
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    final_name = f"{prefix}_{ts}_{counter:03d}.txt"
-    return Path(directory) / final_name
 
 
 def _count_matching_lines(path: Path, addr_re: re.Pattern[str]) -> int:
@@ -527,21 +448,6 @@ def _count_matching_lines(path: Path, addr_re: re.Pattern[str]) -> int:
     except FileNotFoundError:
         return 0
     return count
-
-
-def _has_vanity_output(path: Path, addr_re: re.Pattern[str]) -> bool:
-    """Check if the VanitySearch output file already contains a vanity line."""
-
-    try:
-        with path.open(
-            "r", encoding="utf-8", errors="ignore", buffering=1024 * 1024
-        ) as fh:
-            for raw in fh:
-                if addr_re.search(raw.strip()):
-                    return True
-    except FileNotFoundError:
-        return False
-    return False
 
 
 def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) -> int:
@@ -569,17 +475,15 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
     if not pats:
         pats = ["1**"]  # safe default
 
-    base = [exe, "-s", seed, "-q"]
+    base = ["-s", seed, "-q"]
     _apply_mode_flags(base)
-    logger.info(f"Base VanitySearch command: {' '.join(base)}")
+    logger.info(f"Base VanitySearch command: {' '.join([exe] + base)}")
 
     modes = [
         ("GPU", ["-gpu"]),
         ("OPENCL", ["-opencl"]),
         ("CPU", ["-cpu"]),
     ]
-
-    file_counter = 0
 
     # Build single- or multi-pattern invocation:
     tmpfile = None
@@ -611,81 +515,22 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
             attempt_fallback = bool(current_multi_suffix)
 
             while True:
-                file_counter += 1
-                final_path = _next_vanity_paths(out_dir, file_counter)
-                args = (
-                    args_base
-                    + current_multi_suffix
-                    # Use VanitySearch -o with a unique final filename. Do not
-                    # add Python-side rotation or temp file rewriting; it has
-                    # regressed output handling in the past.
-                    + ["-o", str(final_path)]
-                    + current_single_suffix
-                )
-                fallback_triggered = False
+                args = args_base + current_multi_suffix
                 try:
                     logger.info(
                         f"🧪 VanitySearch ({mode_name}) command: {' '.join(args)}"
                     )
-                    logger.info(f"Popen args ({mode_name}): {args}")
-                    proc = _popen_stream(args)
-                    last_line_ts = mode_start = time.time()
-                    has_output = False
-
-                    while True:
-                        if stop_event and stop_event.is_set():
-                            proc.terminate()
-                            break
-
-                        line = proc.stdout.readline()
-                        if not line:
-                            if proc.poll() is not None:
-                                break
-                            if time.time() - last_line_ts > 5:
-                                logger.debug(
-                                    "⏳ VanitySearch running (no output yet)..."
-                                )
-                                last_line_ts = time.time()
-                            if not has_output:
-                                has_output = _has_vanity_output(final_path, addr_re)
-                            if (
-                                attempt_fallback
-                                and not has_output
-                                and time.time() - mode_start > 10
-                            ):
-                                proc.terminate()
-                                logger.warning(
-                                    "⚠️ No output for 10s; sanity-checking with 1**"
-                                )
-                                fallback_triggered = True
-                                break
-                            time.sleep(0.05)
-                            continue
-
-                        last_line_ts = time.time()
-                        striped = line.rstrip("\n")
-                        if striped:
-                            clean = striped.strip()
-                            m = re.search(
-                                r"([0-9.]+)\s*([MK])?Key/s", clean, re.IGNORECASE
-                            )
-                            if m:
-                                speed = float(m.group(1))
-                                if m.group(2) and m.group(2).upper() == "K":
-                                    speed /= 1000.0
-                                update_dashboard_stat(
-                                    "vanitysearch_current_mkeys", round(speed, 2)
-                                )
-                                if (
-                                    get_selected_backend() != "cpu"
-                                    and speed < MIN_EXPECTED_GPU_MKEYS
-                                ):
-                                    _warn_once(
-                                        "low_speed",
-                                        "Speed suggests CPU; check GPU selection",
-                                    )
-
-                    rc = proc.wait(timeout=10)
+                    final_path, rc = run_vanitysearch_batch(
+                        binary=exe,
+                        base_args=args,
+                        output_dir=out_dir,
+                        output_prefix=f"vanity_{mode_name.lower()}",
+                        pattern=current_single_suffix[0] if current_single_suffix else None,
+                        pause_event=stop_event,
+                    )
+                except RuntimeError:
+                    logger.exception("VanitySearch safeguard triggered; aborting.")
+                    raise
                 except Exception as e:
                     logger.warning(f"⚠️ VanitySearch {mode_name} failed: {e}")
                     try:
@@ -694,17 +539,17 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                         pass
                     break
 
-                if fallback_triggered:
+                total_lines = _count_matching_lines(final_path, addr_re)
+                if attempt_fallback and total_lines == 0 and current_multi_suffix:
                     try:
                         final_path.unlink(missing_ok=True)
                     except Exception:
                         pass
+                    logger.warning("⚠️ No output; sanity-checking with 1**")
                     current_multi_suffix = []
                     current_single_suffix = ["1**"]
                     attempt_fallback = False
                     continue
-
-                total_lines = _count_matching_lines(final_path, addr_re)
                 if total_lines > 0:
                     logger.info(
                         f"✅ VanitySearch finished ({mode_name}) with {total_lines} matches."

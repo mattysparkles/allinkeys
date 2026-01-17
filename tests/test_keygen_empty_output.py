@@ -24,6 +24,7 @@ def test_empty_vanity_output_advances(monkeypatch, tmp_path):
 
     monkeypatch.delitem(sys.modules, "core.keygen", raising=False)
     keygen = importlib.import_module("core.keygen")
+    vanity_runner = importlib.import_module("core.vanity_runner")
 
     # Ensure the keygen module uses the temporary output directory.
 
@@ -33,7 +34,6 @@ def test_empty_vanity_output_advances(monkeypatch, tmp_path):
 
     monkeypatch.setattr(keygen, "VANITYSEARCH_PATH", fake_exe)
     monkeypatch.setattr(keygen, "VANITY_OUTPUT_DIR", str(tmp_path))
-    monkeypatch.setattr(keygen, "ROTATE_INTERVAL_SECONDS", 0)
     monkeypatch.setattr(keygen, "get_vanitysearch_gpu_ids", lambda: [])
 
     class DummyProc:
@@ -64,13 +64,13 @@ def test_empty_vanity_output_advances(monkeypatch, tmp_path):
 
             return 0
 
-    monkeypatch.setattr(keygen.subprocess, "Popen", DummyProc)
+    monkeypatch.setattr(vanity_runner.subprocess, "Popen", DummyProc)
 
     result = keygen.run_vanitysearch_stream(0x1, 0, 0, None, None)
     assert result is True
 
-    output_path = Path(tmp_path) / "batch_0_part_0_seed_00000001.txt"
-    assert not output_path.exists()
+    output_files = list(Path(tmp_path).glob("batch_0_part_0_seed_00000001_*.txt"))
+    assert not output_files
 
 
 def test_missing_vanity_output_advances(monkeypatch, tmp_path):
@@ -78,6 +78,7 @@ def test_missing_vanity_output_advances(monkeypatch, tmp_path):
 
     monkeypatch.delitem(sys.modules, "core.keygen", raising=False)
     keygen = importlib.import_module("core.keygen")
+    vanity_runner = importlib.import_module("core.vanity_runner")
 
     fake_exe = tmp_path / "vanitysearch"
     fake_exe.write_text("")
@@ -85,7 +86,6 @@ def test_missing_vanity_output_advances(monkeypatch, tmp_path):
 
     monkeypatch.setattr(keygen, "VANITYSEARCH_PATH", fake_exe)
     monkeypatch.setattr(keygen, "VANITY_OUTPUT_DIR", str(tmp_path))
-    monkeypatch.setattr(keygen, "ROTATE_INTERVAL_SECONDS", 5)
     monkeypatch.setattr(keygen, "get_vanitysearch_gpu_ids", lambda: [])
 
     class DummyProcNoFile:
@@ -108,17 +108,18 @@ def test_missing_vanity_output_advances(monkeypatch, tmp_path):
             self.returncode = 0
             return 0
 
-    monkeypatch.setattr(keygen.subprocess, "Popen", DummyProcNoFile)
+    monkeypatch.setattr(vanity_runner.subprocess, "Popen", DummyProcNoFile)
 
     result = keygen.run_vanitysearch_stream(0x2, 1, 0, None, None)
     assert result is False
 
 
-def test_rotation_fallback_without_thread(monkeypatch, tmp_path):
-    """Rotation must still occur when the monitor thread cannot start."""
+def test_unique_output_filename_per_run(monkeypatch, tmp_path):
+    """Each run should create a unique output filename."""
 
     monkeypatch.delitem(sys.modules, "core.keygen", raising=False)
     keygen = importlib.import_module("core.keygen")
+    vanity_runner = importlib.import_module("core.vanity_runner")
 
     fake_exe = tmp_path / "vanitysearch"
     fake_exe.write_text("")
@@ -126,9 +127,7 @@ def test_rotation_fallback_without_thread(monkeypatch, tmp_path):
 
     monkeypatch.setattr(keygen, "VANITYSEARCH_PATH", fake_exe)
     monkeypatch.setattr(keygen, "VANITY_OUTPUT_DIR", str(tmp_path))
-    monkeypatch.setattr(keygen, "ROTATE_INTERVAL_SECONDS", 1)
     monkeypatch.setattr(keygen, "get_vanitysearch_gpu_ids", lambda: [])
-    monkeypatch.setattr(keygen, "can_spawn_thread", lambda *a, **k: False)
 
     class StubbornProc:
         def __init__(self, cmd, stdout=None, stderr=None, env=None):
@@ -137,7 +136,7 @@ def test_rotation_fallback_without_thread(monkeypatch, tmp_path):
             self._terminated = False
             self.returncode = None
             out_path = Path(cmd[cmd.index("-o") + 1])
-            out_path.touch()
+            out_path.write_text("data")
 
         def terminate(self):
             self._terminated = True
@@ -156,14 +155,16 @@ def test_rotation_fallback_without_thread(monkeypatch, tmp_path):
             self.returncode = 0
             return 0
 
-    monkeypatch.setattr(keygen.subprocess, "Popen", StubbornProc)
+    monkeypatch.setattr(vanity_runner.subprocess, "Popen", StubbornProc)
 
     result = keygen.run_vanitysearch_stream(0x3, 2, 0, None, None)
     assert result is True
 
-    output_path = Path(tmp_path) / "batch_2_part_0_seed_00000003.txt"
-    # Empty files are deleted but rotation should still advance
-    assert not output_path.exists()
+    first_path = Path(keygen.last_output_file)
+    result = keygen.run_vanitysearch_stream(0x3, 2, 0, None, None)
+    assert result is True
+    second_path = Path(keygen.last_output_file)
+    assert first_path != second_path
 
 
 def test_output_file_preserved_with_data(monkeypatch, tmp_path):
@@ -171,6 +172,7 @@ def test_output_file_preserved_with_data(monkeypatch, tmp_path):
 
     monkeypatch.delitem(sys.modules, "core.keygen", raising=False)
     keygen = importlib.import_module("core.keygen")
+    vanity_runner = importlib.import_module("core.vanity_runner")
 
     fake_exe = tmp_path / "vanitysearch"
     fake_exe.write_text("")
@@ -178,7 +180,6 @@ def test_output_file_preserved_with_data(monkeypatch, tmp_path):
 
     monkeypatch.setattr(keygen, "VANITYSEARCH_PATH", fake_exe)
     monkeypatch.setattr(keygen, "VANITY_OUTPUT_DIR", str(tmp_path))
-    monkeypatch.setattr(keygen, "ROTATE_INTERVAL_SECONDS", 0)
     monkeypatch.setattr(keygen, "get_vanitysearch_gpu_ids", lambda: [])
 
     class LockedOnceProc:
@@ -203,12 +204,11 @@ def test_output_file_preserved_with_data(monkeypatch, tmp_path):
             self.returncode = 0
             return 0
 
-    monkeypatch.setattr(keygen.subprocess, "Popen", LockedOnceProc)
+    monkeypatch.setattr(vanity_runner.subprocess, "Popen", LockedOnceProc)
 
     result = keygen.run_vanitysearch_stream(0x4, 3, 0, None, None)
     assert result is True
 
     # File should be present since VanitySearch writes directly via -o.
-    hex_seed_short = hex(0x4)[2:].lstrip("0")[:8] or "00000000"
-    output_path = Path(tmp_path) / f"batch_3_part_0_seed_{hex_seed_short}.txt"
+    output_path = Path(keygen.last_output_file)
     assert output_path.exists()
