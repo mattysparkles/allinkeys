@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AllInKeys Telemetry Dashboard</title>
+    <style>
+      body {
+        font-family: "Inter", system-ui, sans-serif;
+        margin: 0;
+        padding: 32px;
+        background: #0f1115;
+        color: #f5f7fb;
+      }
+      h1 {
+        margin-bottom: 24px;
+      }
+      .section {
+        background: #171a21;
+        border-radius: 16px;
+        padding: 24px;
+        margin-bottom: 24px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      }
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .summary-card {
+        background: #1f2430;
+        padding: 16px;
+        border-radius: 12px;
+      }
+      .summary-card span {
+        display: block;
+        color: #9aa4b2;
+        font-size: 12px;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .summary-card strong {
+        font-size: 20px;
+      }
+      canvas {
+        width: 100% !important;
+        height: 320px !important;
+      }
+      .status {
+        color: #9aa4b2;
+        font-size: 14px;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Telemetry Dashboard</h1>
+
+    <section class="section">
+      <h2>Range Distribution</h2>
+      <div class="summary-grid">
+        <div class="summary-card">
+          <span>% Keyspace Covered</span>
+          <strong id="coveragePercent">--</strong>
+        </div>
+        <div class="summary-card">
+          <span>Unique Ranges</span>
+          <strong id="uniqueRanges">--</strong>
+        </div>
+        <div class="summary-card">
+          <span>Total Submissions</span>
+          <strong id="totalSubmissions">--</strong>
+        </div>
+      </div>
+      <canvas id="rangeDistributionChart"></canvas>
+      <div class="status" id="rangeDistributionStatus"></div>
+    </section>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="./dashboard.js"></script>
+  </body>
+</html>

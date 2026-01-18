@@ -95,6 +95,32 @@ class TelemetryItem(BaseModel):
 app = FastAPI(title="AllInKeys Central Telemetry")
 
 
+def _safe_load_json(payload: Optional[str]) -> List[Dict[str, Any]]:
+    if not payload:
+        return []
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(parsed, list):
+        return [entry for entry in parsed if isinstance(entry, dict)]
+    return []
+
+
+def _merge_intervals(intervals: List[tuple[float, float]]) -> List[tuple[float, float]]:
+    if not intervals:
+        return []
+    intervals = sorted(intervals)
+    merged = [intervals[0]]
+    for start, end in intervals[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
 @app.post("/v1/seed")
 def ingest(items: List[TelemetryItem]) -> Dict[str, Any]:
     if not isinstance(items, list) or not items:
@@ -246,6 +272,112 @@ def seed_range(
             for row in rows
         ]
         return {"ranges": ranges, "since": since, "mode": mode, "limit": limit}
+    finally:
+        conn.close()
+
+
+@app.get("/v1/dashboard/{slug}/ranges/distribution")
+def range_distribution(
+    slug: str,
+    since: Optional[str] = Query(None),
+    mode: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    conn = _connect()
+    try:
+        filters = ["range_id IS NOT NULL"]
+        params: List[Any] = []
+        if since:
+            filters.append("last_seen >= ?")
+            params.append(since)
+        if mode:
+            filters.append("mode = ?")
+            params.append(mode)
+        where_clause = f"WHERE {' AND '.join(filters)}"
+        counts = conn.execute(
+            f"""
+            SELECT range_id, COUNT(*) AS count
+            FROM seed_events
+            {where_clause}
+            GROUP BY range_id
+            """,
+            params,
+        ).fetchall()
+        total_submissions = sum(row[1] for row in counts) if counts else 0
+        distribution_rows = conn.execute(
+            f"""
+            SELECT range_distribution
+            FROM seed_events
+            {where_clause} AND range_distribution IS NOT NULL
+            """,
+            params,
+        ).fetchall()
+        position_map: Dict[str, Dict[str, Optional[float]]] = {}
+        for row in distribution_rows:
+            for entry in _safe_load_json(row[0]):
+                range_key = entry.get("range_id") or "default"
+                normalized_min = entry.get("normalized_min")
+                normalized_max = entry.get("normalized_max")
+                if not isinstance(normalized_min, (int, float)) or not isinstance(
+                    normalized_max, (int, float)
+                ):
+                    continue
+                summary = position_map.setdefault(
+                    range_key, {"normalized_min": None, "normalized_max": None}
+                )
+                summary["normalized_min"] = (
+                    normalized_min
+                    if summary["normalized_min"] is None
+                    else min(summary["normalized_min"], normalized_min)
+                )
+                summary["normalized_max"] = (
+                    normalized_max
+                    if summary["normalized_max"] is None
+                    else max(summary["normalized_max"], normalized_max)
+                )
+        ranges: List[Dict[str, Any]] = []
+        for range_id, count in counts:
+            position_summary = position_map.get(range_id)
+            normalized_min = (
+                position_summary.get("normalized_min")
+                if position_summary
+                else None
+            )
+            normalized_max = (
+                position_summary.get("normalized_max")
+                if position_summary
+                else None
+            )
+            position = None
+            if normalized_min is not None and normalized_max is not None:
+                position = (normalized_min + normalized_max) / 2 * 100
+            percent = (count / total_submissions * 100) if total_submissions else 0
+            ranges.append(
+                {
+                    "range_value": range_id,
+                    "submission_count": count,
+                    "submission_percent": percent,
+                    "position": position,
+                    "normalized_min": normalized_min,
+                    "normalized_max": normalized_max,
+                }
+            )
+        intervals = [
+            (entry["normalized_min"], entry["normalized_max"])
+            for entry in ranges
+            if entry["normalized_min"] is not None
+            and entry["normalized_max"] is not None
+        ]
+        merged = _merge_intervals(intervals)
+        coverage = sum(end - start for start, end in merged) * 100 if merged else 0
+        return {
+            "slug": slug,
+            "total_submissions": total_submissions,
+            "unique_ranges": len(ranges),
+            "coverage_percent": coverage,
+            "ranges": ranges,
+            "since": since,
+            "mode": mode,
+        }
     finally:
         conn.close()
 
