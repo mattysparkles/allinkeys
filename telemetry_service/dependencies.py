@@ -8,9 +8,56 @@ from telemetry_service.db import get_db_connection
 from telemetry_service.models import UserPublic
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+optional_oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/auth/login",
+    auto_error=False,
+)
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> UserPublic:
+    try:
+        payload = decode_access_token(token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        ) from exc
+    username = payload.get("sub")
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT id, username, created_at, is_admin
+            FROM users
+            WHERE username = ?
+            """,
+            (username,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+            )
+        return UserPublic(
+            id=row[0],
+            username=row[1],
+            created_at=row[2],
+            is_admin=bool(row[3]),
+        )
+    finally:
+        conn.close()
+
+
+def get_optional_user(
+    token: str | None = Depends(optional_oauth2_scheme),
+) -> UserPublic | None:
+    if not token:
+        return None
     try:
         payload = decode_access_token(token)
     except ValueError as exc:

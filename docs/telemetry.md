@@ -98,6 +98,33 @@ Example response:
 }
 ```
 
+## Telemetry dashboard endpoints
+
+Dashboard endpoints power the public telemetry UI. If a bearer token is
+present, responses are scoped to the authenticated user; otherwise the results
+aggregate across all users.
+
+### `GET /v1/dashboard/{slug}/machines`
+
+Returns machine activity buckets (series) plus any cached machine metadata.
+
+### `GET /v1/dashboard/{slug}/machines/health`
+
+Returns machine health status and stale markers. Supports
+`stale_minutes=60`.
+
+### `GET /v1/dashboard/{slug}/ranges/recent`
+
+Returns the most recent ranges, default `limit=50`.
+
+### `GET /v1/dashboard/{slug}/ranges/distribution`
+
+Returns the range distribution snapshot, default `limit=200`.
+
+### `GET /v1/dashboard/{slug}/contributors/top`
+
+Returns the top contributors by submission count, default `limit=20`.
+
 ## Admin dashboard endpoints
 
 Admin endpoints require a bearer token for a user with `is_admin = true`. All admin

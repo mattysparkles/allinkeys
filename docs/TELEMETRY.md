@@ -88,3 +88,15 @@ The telemetry service includes admin-only endpoints under `/admin/*` for global
 visibility. Admins can review user and machine summaries, aggregate keyspace
 progress, and time-series metrics for KPS, backlog, and coverage. Access is
 restricted to users with `is_admin = true` and requires a bearer token.
+
+## Telemetry Dashboard API
+
+The public dashboard UI consumes `/v1/dashboard/{slug}/*` endpoints. If a bearer
+token is supplied, results are scoped to the authenticated user; otherwise data
+is aggregated across all users.
+
+- `GET /v1/dashboard/{slug}/machines`
+- `GET /v1/dashboard/{slug}/machines/health`
+- `GET /v1/dashboard/{slug}/ranges/recent`
+- `GET /v1/dashboard/{slug}/ranges/distribution`
+- `GET /v1/dashboard/{slug}/contributors/top`
