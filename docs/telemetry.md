@@ -44,6 +44,13 @@ Replace the host and key as needed:
 curl -H "X-API-Key: changeme" http://localhost:3088/v1/seed/stats
 ```
 
+You can scope queries to recent activity using `since=5m|1h|24h` and optionally filter by mode:
+
+```bash
+curl -H "X-API-Key: changeme" "http://localhost:3088/v1/seed/stats?since=1h"
+curl -H "X-API-Key: changeme" "http://localhost:3088/v1/seed/range?mode=btc_only&since=24h"
+```
+
 For POST ingestion:
 
 ```bash
@@ -51,6 +58,44 @@ curl -X POST http://localhost:3088/v1/seed \
   -H "Content-Type: application/json" \
   -H "X-API-Key: changeme" \
   -d '[{"seed_fingerprint":"abc123","used":true}]'
+```
+
+## Seed analytics endpoints
+
+### `GET /v1/seed/stats`
+
+Returns aggregate totals and per-mode counts.
+
+Example response:
+
+```json
+{
+  "total_seeds": 3024325,
+  "unique_seed_count": 102342,
+  "by_mode": {"btc_only": 23423, "vanity": 2030},
+  "last_seen": "2026-01-18T20:43:00Z"
+}
+```
+
+### `GET /v1/seed/range`
+
+Returns range-level summaries with match counts and unique seed totals per range.
+
+Example response:
+
+```json
+{
+  "ranges": [
+    {
+      "range_id": "range-1",
+      "count": 120,
+      "match_found": 4,
+      "unique_seed_count": 118
+    }
+  ],
+  "since": "1h",
+  "mode": "btc_only"
+}
 ```
 
 ## Security tips
