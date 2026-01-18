@@ -467,10 +467,8 @@ def run_vanitysearch_batch(
     max_seconds: Optional[int] = None,
 ) -> Tuple[Path, int, Optional[dict]]:
     """Invoke VanitySearch using native -o file output with strict safeguards."""
-    if stdout_setting not in (None, subprocess.DEVNULL):
+    if stdout_setting is not None:
         raise RuntimeError("VanitySearch stdout capture is forbidden.")
-    if stdout_setting is None:
-        stdout_setting = subprocess.DEVNULL
 
     if max_lines is None:
         max_lines = VANITY_ROTATE_LINES
@@ -488,14 +486,14 @@ def run_vanitysearch_batch(
     if pattern:
         cmd.append(pattern)
 
-    logger.info(f"Launching VanitySearch: {' '.join(cmd)}")
+    logger.info(f"Launching VanitySearch (detached): {' '.join(cmd)}")
     logger.info(
         "Rotation is implemented by process restart. VanitySearch cannot rotate files."
     )
     proc = subprocess.Popen(
         cmd,
-        stdout=stdout_setting,
-        stderr=subprocess.STDOUT,
+        stdout=None,
+        stderr=None,
         env=env,
     )
 
@@ -510,16 +508,52 @@ def run_vanitysearch_batch(
 
     start = time.time()
     rotation_info = None
-    parser = VanityOutputParser(output_path)
-    parser.start()
+    parser = None
+    rotation_start = None
     parser_detached = False
+    first_write_size = None
+    warned_rotation_before_write = False
+    logger.info("Waiting for first output write...")
+    while proc.poll() is None and first_write_size is None:
+        try:
+            file_size = output_path.stat().st_size
+        except FileNotFoundError:
+            file_size = 0
+        if file_size > 0:
+            first_write_size = file_size
+            break
+        if (
+            max_seconds
+            and not warned_rotation_before_write
+            and time.time() - start > max_seconds
+        ):
+            logger.warning(
+                "Rotation requested before first write; skipping until first output is written."
+            )
+            warned_rotation_before_write = True
+        time.sleep(0.5)
+
+    if first_write_size is not None:
+        logger.info("First write detected (size=%s)", first_write_size)
+        parser = VanityOutputParser(output_path)
+        parser.start()
+        logger.info("Parser attached")
+        rotation_start = time.time()
+        logger.info("Rotation armed")
+    else:
+        logger.warning("VanitySearch exited before first output write.")
+
     while proc.poll() is None:
+        if parser is None:
+            time.sleep(0.5)
+            continue
         if pause_event and pause_event.is_set():
             _stop_parser("pause", rotation=False)
             parser_detached = True
             proc.terminate()
             break
-        if timeout and time.time() - start > timeout:
+        elapsed = time.time() - rotation_start if rotation_start else 0
+        if timeout and rotation_start and elapsed > timeout:
             rotation_info = {
                 "reason": "timeout",
                 "timestamp": time.time(),
@@ -566,7 +600,7 @@ def run_vanitysearch_batch(
         proc.kill()
         proc.wait()
 
-    if not parser_detached:
+    if parser is not None and not parser_detached:
         _stop_parser("complete", rotation=False)
 
     return output_path, proc.returncode or 0, rotation_info
