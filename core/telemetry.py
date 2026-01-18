@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -65,8 +66,10 @@ logger = get_logger(__name__)
 
 QUEUE_DB = Path(LOG_DIR) / "telemetry_queue.db"
 INSTANCE_ID_PATH = Path(LOG_DIR) / "app_instance_id"
+MACHINE_ID_PATH = Path(LOG_DIR) / ".machine_id"
 RANGE_RECENT_LIMIT = 50
 CHECK_CACHE_MAX_SIZE = 10_000
+AUTH_TOKEN_ENV = "AUTH_TOKEN"
 
 _CHECK_CACHE: Dict[tuple[str, str, Optional[str]], tuple[bool, float]] = {}
 _CHECK_CACHE_LOCK = threading.Lock()
@@ -125,6 +128,21 @@ def _get_app_id(path: Path = INSTANCE_ID_PATH) -> str:
     return app_id
 
 
+def _load_machine_id(path: Path = MACHINE_ID_PATH) -> Optional[str]:
+    try:
+        return path.read_text(encoding="utf-8").strip() or None
+    except Exception:
+        return None
+
+
+def _save_machine_id(machine_id: str, path: Path = MACHINE_ID_PATH) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(machine_id, encoding="utf-8")
+    except Exception:
+        return
+
+
 def _telemetry_log_context(*, mode: Optional[str] = None, range_id: Optional[str] = None, endpoint: Optional[str] = None) -> dict:
     return {
         "mode": mode,
@@ -146,6 +164,8 @@ class TelemetryClient:
         max_backoff: int = TELEMETRY_MAX_BACKOFF,
         db_path: Path = QUEUE_DB,
         instance_id_path: Path = INSTANCE_ID_PATH,
+        machine_id_path: Path = MACHINE_ID_PATH,
+        auth_token: Optional[str] = None,
     ) -> None:
         self.enabled = enabled
         self.endpoint = endpoint
@@ -154,8 +174,11 @@ class TelemetryClient:
         self.max_backoff = max_backoff
         self.db_path = Path(db_path)
         self.app_id = _get_app_id(instance_id_path)
-        self.machine_id = get_machine_id()
-        self.machine_name = get_machine_name(self.machine_id)
+        self.machine_id_path = Path(machine_id_path)
+        self.machine_id = _load_machine_id(self.machine_id_path)
+        self.hardware_machine_id = get_machine_id()
+        self.machine_name = get_machine_name(self.hardware_machine_id)
+        self.auth_token = auth_token or os.getenv(AUTH_TOKEN_ENV)
         self._recent_ranges: deque[Dict[str, Any]] = deque(maxlen=RANGE_RECENT_LIMIT)
         self._range_lock = threading.Lock()
         self._backoff = flush_seconds
@@ -202,6 +225,84 @@ class TelemetryClient:
                 return conn
             except sqlite3.OperationalError:
                 raise
+
+    def _authorization_headers(self) -> Dict[str, str]:
+        if not self.auth_token:
+            return {}
+        return {"Authorization": f"Bearer {self.auth_token}"}
+
+    def _machine_endpoints(self, machine_id: Optional[str] = None) -> tuple[str, str]:
+        endpoint = self.endpoint.rstrip("/")
+        if "/v1/" in endpoint:
+            base = endpoint.split("/v1/")[0] + "/v1"
+        else:
+            base = endpoint
+        register_url = f"{base}/machines/register"
+        telemetry_url = (
+            f"{base}/machines/{machine_id}/telemetry" if machine_id else f"{base}/machines/telemetry"
+        )
+        return register_url, telemetry_url
+
+    def _ensure_machine_registered(self) -> bool:
+        if self.machine_id:
+            return True
+        if not self.auth_token:
+            try:
+                log_with_context(
+                    logger,
+                    "WARNING",
+                    "[Telemetry] Missing AUTH_TOKEN; cannot register machine",
+                    **_telemetry_log_context(endpoint=self.endpoint),
+                )
+            except Exception:
+                pass
+            return False
+        return self._register_machine()
+
+    def _register_machine(self) -> bool:
+        register_url, _ = self._machine_endpoints()
+        metrics = _system_metrics_payload()
+        payload = {
+            "machine_name": self.machine_name,
+            "gpu_info": metrics.get("gpu_name"),
+            "version": CLIENT_VERSION,
+        }
+        try:
+            response = requests.post(
+                register_url,
+                json=payload,
+                headers=self._authorization_headers(),
+                timeout=10,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            try:
+                log_with_context(
+                    logger,
+                    "WARNING",
+                    "[Telemetry] Machine registration failed | reason=%s",
+                    getattr(getattr(exc, "response", None), "status_code", exc),
+                    **_telemetry_log_context(endpoint=register_url),
+                )
+            except Exception:
+                pass
+            return False
+        machine_id = data.get("machine_id") if isinstance(data, dict) else None
+        if not machine_id:
+            try:
+                log_with_context(
+                    logger,
+                    "WARNING",
+                    "[Telemetry] Machine registration response missing machine_id",
+                    **_telemetry_log_context(endpoint=register_url),
+                )
+            except Exception:
+                pass
+            return False
+        self.machine_id = str(machine_id)
+        _save_machine_id(self.machine_id, self.machine_id_path)
+        return True
 
     def _sanity_check(self, conn: sqlite3.Connection) -> None:
         try:
@@ -405,7 +506,23 @@ class TelemetryClient:
         return cur.fetchall()
 
     def _send_batch(self, batch: Iterable[Dict[str, Any]]) -> requests.Response:
-        response = requests.post(self.endpoint, json=list(batch), timeout=10)
+        if not self._ensure_machine_registered():
+            raise RuntimeError("Machine registration required")
+        if not self.auth_token:
+            raise RuntimeError("Missing AUTH_TOKEN for telemetry upload")
+        _, telemetry_url = self._machine_endpoints(self.machine_id)
+        payload = []
+        for item in batch:
+            enriched = dict(item)
+            enriched.setdefault("machine_id", self.machine_id)
+            enriched.setdefault("machine_name", self.machine_name)
+            payload.append(enriched)
+        response = requests.post(
+            telemetry_url,
+            json=payload,
+            headers=self._authorization_headers(),
+            timeout=10,
+        )
         # Treat HTTP errors as failures so queued events are retried instead of
         # being dropped silently. ``raise_for_status`` preserves the response on
         # the exception for logging/backoff handling.
@@ -636,12 +753,16 @@ def check_seed_seen(seed_bytes: bytes, *, mode: str, range_id: Optional[str] = N
         url = TELEMETRY_CHECK_ENDPOINT or TELEMETRY_ENDPOINT
         timeout = TELEMETRY_CHECK_TIMEOUT or 1.5
         payload = {"seed_fingerprint": fp, "mode": mode, "range_id": range_id}
+        headers = {}
+        auth_token = _CLIENT.auth_token if _CLIENT else os.getenv(AUTH_TOKEN_ENV)
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
         try:
-            r = requests.post(url, json=payload, timeout=timeout)
+            r = requests.post(url, json=payload, headers=headers, timeout=timeout)
         except Exception:
             # Fallback to GET with query params if POST fails in some setups
             try:
-                r = requests.get(url, params=payload, timeout=timeout)
+                r = requests.get(url, params=payload, headers=headers, timeout=timeout)
             except Exception:
                 return False
         if r is None or getattr(r, "status_code", 599) >= 400:

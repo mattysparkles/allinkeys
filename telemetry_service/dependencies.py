@@ -47,3 +47,32 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> UserPublic:
         )
     finally:
         conn.close()
+
+
+def get_machine_for_user(machine_id: str, current_user: UserPublic) -> dict:
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT id, user_id, machine_name, gpu_info, version, status, last_seen
+            FROM machines
+            WHERE id = ? AND user_id = ?
+            """,
+            (machine_id, current_user.id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Machine not found",
+            )
+        return {
+            "id": row[0],
+            "user_id": row[1],
+            "machine_name": row[2],
+            "gpu_info": row[3],
+            "version": row[4],
+            "status": row[5],
+            "last_seen": row[6],
+        }
+    finally:
+        conn.close()
