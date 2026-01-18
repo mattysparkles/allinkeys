@@ -35,13 +35,21 @@ Copy `.env.example` to `.env` and fill in any credentials needed for alert chann
 
 ## 🚀 Quick Start
 
-1. **Start the full pipeline**
+1. **Start the full pipeline (default btc-only mode)**
 
    ```bash
    python main.py
    ```
 
    The orchestration script launches key generation, backlog conversion, and any enabled alert or dashboard modules according to `config/settings.py`.
+
+   You can also explicitly select a mode:
+
+   ```bash
+   python main.py --mode vanity
+   python main.py --mode btc_only
+   python main.py --mode mnemonic
+   ```
 
 2. **Run individual modules**
 
@@ -215,6 +223,7 @@ The default run will:
 
 | Flag | Description |
 |------|-------------|
+| `--mode {btc_only,vanity,mnemonic}` | Select execution mode (default: `btc_only`) |
 | `--skip-backlog` | Start without backlog conversion |
 | `--no-dashboard` | Do not launch the GUI dashboard |
 | `--dashboard-password <pw>` | Protect dashboard with password `pw` |
@@ -255,7 +264,8 @@ python main.py --only btc --puzzle 71 --chunk 5  # resume at chunk 5
 ### 🧠 Mnemonic Mode
 
 AllInKeys can also generate BIP‑39 mnemonics and derive keys directly
-without running VanitySearch.  Enable it with `--mnemonic` and select the
+without running VanitySearch. Enable it with `--mode mnemonic` (or the
+legacy `--mnemonic` flag) and select the
 mnemonic length via flags like `--12words` or `--24words`.  Output files
 are written to `output/mnemonic_output/`.  All related options are grouped under
 **Mnemonic Mode** in `python main.py --help`.
@@ -448,4 +458,3 @@ We make **no claims or guarantees** about the performance, security or accuracy 
 AllInKeys is provided for **educational and research use only**. The authors do not condone or support illegal behaviour. Use responsibly.
 
 🧠 _Created with love and paranoia by Sparkles_
-
