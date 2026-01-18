@@ -123,163 +123,162 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
 
     def update():
         nonlocal last_kps
-        if stop_event.is_set():
-            return
         global _last_disk_check, _backlog_total_time, _backlog_processed, _backlog_last_ts, _last_csv_created
-        try:
-            from core.dashboard import reset_daily_metrics_if_needed
+        from core.dashboard import reset_daily_metrics_if_needed
 
-            reset_daily_metrics_if_needed()
-            from core.keygen import keygen_progress
+        reset_daily_metrics_if_needed()
+        from core.keygen import keygen_progress
 
-            now = time.time()
-            disk_free = psutil.disk_usage("/").free
-            prev_t, prev_free = _last_disk_check
-            _last_disk_check = (now, disk_free)
-            rate = (prev_free - disk_free) / max(1, now - prev_t)
-            if rate > 0:
-                eta_sec = disk_free / rate
-                hrs = int(eta_sec // 3600)
-                mins = int((eta_sec % 3600) // 60)
-                secs = int(eta_sec % 60)
-                disk_eta = f"{hrs:02}:{mins:02}:{secs:02}"
-            else:
-                disk_eta = "N/A"
+        now = time.time()
+        disk_free = psutil.disk_usage("/").free
+        prev_t, prev_free = _last_disk_check
+        _last_disk_check = (now, disk_free)
+        rate = (prev_free - disk_free) / max(1, now - prev_t)
+        if rate > 0:
+            eta_sec = disk_free / rate
+            hrs = int(eta_sec // 3600)
+            mins = int((eta_sec % 3600) // 60)
+            secs = int(eta_sec % 60)
+            disk_eta = f"{hrs:02}:{mins:02}:{secs:02}"
+        else:
+            disk_eta = "N/A"
 
-            vm = psutil.virtual_memory()
-            ram_percent = vm.percent
-            stats = {
-                "cpu_usage": f"{cpu_sampler.sample():.1f}%",
-                "ram_usage": f"{vm.used / (1024 ** 3):.1f} GB / {vm.total / (1024 ** 3):.1f} GB ({ram_percent}%)",
-                "disk_free_gb": round(disk_free / (1024**3), 2),
-                "disk_fill_eta": disk_eta,
-                "gpu_stats": {},
-                "gpu_assignments": get_gpu_assignments(),
-            }
-            vs_ids = set(get_vanitysearch_gpu_ids())
-            ad_ids = set(get_altcoin_gpu_ids())
+        vm = psutil.virtual_memory()
+        ram_percent = vm.percent
+        stats = {
+            "cpu_usage": f"{cpu_sampler.sample():.1f}%",
+            "ram_usage": f"{vm.used / (1024 ** 3):.1f} GB / {vm.total / (1024 ** 3):.1f} GB ({ram_percent}%)",
+            "disk_free_gb": round(disk_free / (1024**3), 2),
+            "disk_fill_eta": disk_eta,
+            "gpu_stats": {},
+            "gpu_assignments": get_gpu_assignments(),
+        }
+        vs_ids = set(get_vanitysearch_gpu_ids())
+        ad_ids = set(get_altcoin_gpu_ids())
 
-            if GPUtil:
-                try:
-                    gpus = GPUtil.getGPUs()
-                    for gpu in gpus:
-                        try:
-                            usage = f"{gpu.load * 100:.0f}%"
-                            vram = f"{gpu.memoryUsed/1024:.1f}GB / {gpu.memoryTotal/1024:.1f}GB"
-                        except Exception:
-                            usage = "N/A"
-                            vram = "Unavailable"
-                        name = gpu.name
-                        if gpu.id in vs_ids:
-                            name += " (VS)"
-                        if gpu.id in ad_ids:
-                            name += " (AD)"
-                        if usage in ["N/A", None]:
-                            usage = (
-                                "Active (No Stats)"
-                                if gpu.id in ad_ids | vs_ids
-                                else "N/A"
-                            )
-                        stats["gpu_stats"][f"GPU{gpu.id}"] = {
+        if GPUtil:
+            try:
+                gpus = GPUtil.getGPUs()
+                for gpu in gpus:
+                    try:
+                        usage = f"{gpu.load * 100:.0f}%"
+                        vram = f"{gpu.memoryUsed/1024:.1f}GB / {gpu.memoryTotal/1024:.1f}GB"
+                    except Exception:
+                        usage = "N/A"
+                        vram = "Unavailable"
+                    name = gpu.name
+                    if gpu.id in vs_ids:
+                        name += " (VS)"
+                    if gpu.id in ad_ids:
+                        name += " (AD)"
+                    if usage in ["N/A", None]:
+                        usage = (
+                            "Active (No Stats)"
+                            if gpu.id in ad_ids | vs_ids
+                            else "N/A"
+                        )
+                    stats["gpu_stats"][f"GPU{gpu.id}"] = {
+                        "name": name,
+                        "usage": usage,
+                        "vram": vram,
+                        "temp": (
+                            f"{gpu.temperature}°C"
+                            if hasattr(gpu, "temperature")
+                            else "N/A"
+                        ),
+                    }
+            except Exception as e:
+                logger.warning(f"⚠️ GPU read failed: {e}")
+
+        next_id = len(stats["gpu_stats"])
+        if cl:
+            try:
+                for platform in cl.get_platforms():
+                    for device in platform.get_devices():
+                        already = any(
+                            info.get("name", "").startswith(device.name)
+                            for info in stats["gpu_stats"].values()
+                        )
+                        if already:
+                            continue
+                        name = device.name
+                        roles = []
+                        if next_id in vs_ids:
+                            roles.append("VS")
+                        if next_id in ad_ids:
+                            roles.append("AD")
+                        if roles:
+                            name += " (" + "/".join(roles) + ")"
+                        usage = "Active (No Stats)" if roles else "N/A"
+                        stats["gpu_stats"][f"GPU{next_id}"] = {
                             "name": name,
                             "usage": usage,
-                            "vram": vram,
-                            "temp": (
-                                f"{gpu.temperature}°C"
-                                if hasattr(gpu, "temperature")
-                                else "N/A"
-                            ),
+                            "vram": "Unavailable",
+                            "temp": "N/A",
                         }
-                except Exception as e:
-                    logger.warning(f"⚠️ GPU read failed: {e}")
+                        next_id += 1
+            except Exception as e:
+                logger.warning(f"⚠️ OpenCL GPU read failed: {e}")
 
-            next_id = len(stats["gpu_stats"])
-            if cl:
-                try:
-                    for platform in cl.get_platforms():
-                        for device in platform.get_devices():
-                            already = any(
-                                info.get("name", "").startswith(device.name)
-                                for info in stats["gpu_stats"].values()
-                            )
-                            if already:
-                                continue
-                            name = device.name
-                            roles = []
-                            if next_id in vs_ids:
-                                roles.append("VS")
-                            if next_id in ad_ids:
-                                roles.append("AD")
-                            if roles:
-                                name += " (" + "/".join(roles) + ")"
-                            usage = "Active (No Stats)" if roles else "N/A"
-                            stats["gpu_stats"][f"GPU{next_id}"] = {
-                                "name": name,
-                                "usage": usage,
-                                "vram": "Unavailable",
-                                "temp": "N/A",
-                            }
-                            next_id += 1
-                except Exception as e:
-                    logger.warning(f"⚠️ OpenCL GPU read failed: {e}")
+        # ----- Backlog ETA Calculation -----
+        metrics_snapshot = get_current_metrics()
+        queue_count = metrics_snapshot.get("backlog_files_queued", 0)
+        created_today = metrics_snapshot.get("csv_created_today", 0)
+        if created_today > _last_csv_created:
+            _backlog_total_time += now - _backlog_last_ts
+            _backlog_processed += created_today - _last_csv_created
+            _backlog_last_ts = now
+            _last_csv_created = created_today
 
-            # ----- Backlog ETA Calculation -----
-            metrics_snapshot = get_current_metrics()
-            queue_count = metrics_snapshot.get("backlog_files_queued", 0)
-            created_today = metrics_snapshot.get("csv_created_today", 0)
-            if created_today > _last_csv_created:
-                _backlog_total_time += now - _backlog_last_ts
-                _backlog_processed += created_today - _last_csv_created
-                _backlog_last_ts = now
-                _last_csv_created = created_today
-
-            if _backlog_processed > 0:
-                avg_time = _backlog_total_time / _backlog_processed
-                stats["backlog_avg_time"] = f"{avg_time:.2f}s"
-                if queue_count > 0:
-                    eta_sec = avg_time * queue_count
-                    stats["backlog_eta"] = str(timedelta(seconds=int(eta_sec)))
-                else:
-                    stats["backlog_eta"] = "N/A"
+        if _backlog_processed > 0:
+            avg_time = _backlog_total_time / _backlog_processed
+            stats["backlog_avg_time"] = f"{avg_time:.2f}s"
+            if queue_count > 0:
+                eta_sec = avg_time * queue_count
+                stats["backlog_eta"] = str(timedelta(seconds=int(eta_sec)))
             else:
                 stats["backlog_eta"] = "N/A"
+        else:
+            stats["backlog_eta"] = "N/A"
 
-            prog = keygen_progress()
-            curr_lifetime = get_metric("keys_generated_lifetime", 0)
-            current_kps = get_metric("keys_per_sec", 0)
-            if current_kps > 0:
-                last_kps = current_kps
+        prog = keygen_progress()
+        curr_lifetime = get_metric("keys_generated_lifetime", 0)
+        current_kps = get_metric("keys_per_sec", 0)
+        if current_kps > 0:
+            last_kps = current_kps
+        else:
+            status = get_metric("status", {}).get("keygen", "Stopped")
+            if status == "Running":
+                current_kps = last_kps
             else:
-                status = get_metric("status", {}).get("keygen", "Stopped")
-                if status == "Running":
-                    current_kps = last_kps
-                else:
-                    last_kps = 0.0
-            stats["keys_generated_lifetime"] = curr_lifetime
-            stats["keys_per_sec"] = round(current_kps, 2)
-            stats["uptime"] = prog["elapsed_time"]
-            stats["last_updated"] = datetime.utcnow().strftime("%H:%M:%S")
-            try:
-                from config.settings import BATCH_SIZE
+                last_kps = 0.0
+        stats["keys_generated_lifetime"] = curr_lifetime
+        stats["keys_per_sec"] = round(current_kps, 2)
+        stats["uptime"] = prog["elapsed_time"]
+        stats["last_updated"] = datetime.utcnow().strftime("%H:%M:%S")
+        try:
+            from config.settings import BATCH_SIZE
 
-                stats["vanity_progress_percent"] = round(
-                    (prog.get("index_within_batch", 0) / float(BATCH_SIZE)) * 100,
-                    2,
-                )
-            except Exception:
-                stats["vanity_progress_percent"] = 0
-            update_dashboard_stat(stats)
-            logger.debug(f"📊 Metrics updated: {stats}")
-        except Exception as e:
-            log_message(f"❌ Error in metrics updater: {e}", "ERROR")
-        if not stop_event.is_set():
-            if can_spawn_thread("metrics_timer"):
-                threading.Timer(settings.METRICS_POLL_INTERVAL_SECONDS, update).start()
-            else:
-                logger.warning("[ThreadGuard] Metrics timer skipped; thread limit reached")
+            stats["vanity_progress_percent"] = round(
+                (prog.get("index_within_batch", 0) / float(BATCH_SIZE)) * 100,
+                2,
+            )
+        except Exception:
+            stats["vanity_progress_percent"] = 0
+        update_dashboard_stat(stats)
+        logger.debug(f"📊 Metrics updated: {stats}")
 
-    update()
-    stop_event.wait()
+    failure_delay_seconds = 1
+    # Use a long-lived loop with stop_event.wait(...) to avoid Timer recursion and thread buildup.
+    while not stop_event.is_set():
+        try:
+            update()
+            if stop_event.wait(settings.METRICS_POLL_INTERVAL_SECONDS):
+                break
+        except Exception:
+            logger.exception("❌ Error in metrics updater loop")
+            if stop_event.wait(failure_delay_seconds):
+                break
 
 
 def should_skip_download_today(download_dir):
