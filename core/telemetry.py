@@ -103,6 +103,7 @@ class TelemetryClient:
         self._recent_ranges: deque[Dict[str, Any]] = deque(maxlen=RANGE_RECENT_LIMIT)
         self._range_lock = threading.Lock()
         self._backoff = flush_seconds
+        self._flusher_thread: Optional[threading.Thread] = None
         if self.enabled:
             self._init_db()
             try:
@@ -114,19 +115,76 @@ class TelemetryClient:
                 pass
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS telemetry (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                payload TEXT NOT NULL
+        try:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._sanity_check(conn)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS telemetry (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    payload TEXT NOT NULL
+                )
+                """
             )
-            """
-        )
-        return conn
+            return conn
+        except sqlite3.OperationalError as exc:
+            self._reset_db(exc)
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                self._sanity_check(conn)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS telemetry (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        payload TEXT NOT NULL
+                    )
+                    """
+                )
+                return conn
+            except sqlite3.OperationalError:
+                raise
+
+    def _sanity_check(self, conn: sqlite3.Connection) -> None:
+        try:
+            conn.execute("PRAGMA quick_check")
+        except sqlite3.OperationalError as exc:
+            raise exc
+
+    def _reset_db(self, exc: Exception) -> None:
+        try:
+            logger.warning("[Telemetry] SQLite error; resetting telemetry DB: %s", exc)
+        except Exception:
+            pass
+        try:
+            if self.db_path.exists():
+                self.db_path.unlink()
+        except Exception as delete_exc:
+            try:
+                logger.warning("[Telemetry] Failed to delete telemetry DB: %s", delete_exc)
+            except Exception:
+                pass
+        try:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS telemetry (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    payload TEXT NOT NULL
+                )
+                """
+            )
+            conn.close()
+        except Exception as reset_exc:
+            try:
+                logger.warning("[Telemetry] Telemetry DB reset failed: %s", reset_exc)
+            except Exception:
+                pass
 
     def _init_db(self) -> None:
-        conn = self._connect()
+        try:
+            conn = self._connect()
+        except sqlite3.OperationalError:
+            return
         conn.close()
 
     # ------------------------------ Queue ops ------------------------------
@@ -254,13 +312,18 @@ class TelemetryClient:
         }
         data = json.dumps(payload)
 
-        conn = self._connect()
+        try:
+            conn = self._connect()
+        except sqlite3.OperationalError:
+            return
         try:
             with conn:
                 conn.execute("INSERT INTO telemetry(payload) VALUES (?)", (data,))
                 conn.execute(
                     "DELETE FROM telemetry WHERE id NOT IN (SELECT id FROM telemetry ORDER BY id DESC LIMIT 100000)"
                 )
+        except sqlite3.OperationalError as exc:
+            self._reset_db(exc)
         finally:
             conn.close()
         try:
@@ -296,7 +359,11 @@ class TelemetryClient:
         if not self.enabled:
             return True
 
-        conn = self._connect()
+        try:
+            conn = self._connect()
+        except sqlite3.OperationalError:
+            self._backoff = min(self._backoff * 2, self.max_backoff)
+            return False
         try:
             batch = self._fetch_batch(conn)
             if not batch:
@@ -331,6 +398,10 @@ class TelemetryClient:
             except Exception:
                 pass
             return True
+        except sqlite3.OperationalError as exc:
+            self._reset_db(exc)
+            self._backoff = min(self._backoff * 2, self.max_backoff)
+            return False
         finally:
             conn.close()
 
@@ -338,6 +409,8 @@ class TelemetryClient:
         """Start the background flusher thread."""
 
         if not self.enabled:
+            return
+        if getattr(self, "_flusher_thread", None) is not None and self._flusher_thread.is_alive():
             return
 
         def _loop() -> None:
@@ -348,7 +421,8 @@ class TelemetryClient:
             self.flush_once()
 
         if can_spawn_thread("telemetry"):
-            threading.Thread(target=_loop, name="telemetry", daemon=True).start()
+            self._flusher_thread = threading.Thread(target=_loop, name="telemetry", daemon=True)
+            self._flusher_thread.start()
         else:
             logger.warning("[Telemetry] Skipping telemetry thread; at thread limit")
 
@@ -363,7 +437,8 @@ def start_telemetry(shutdown_event: threading.Event) -> None:
         return
 
     global _CLIENT
-    _CLIENT = TelemetryClient()
+    if _CLIENT is None:
+        _CLIENT = TelemetryClient()
     _CLIENT.start(shutdown_event)
     try:
         logger.info("[Telemetry] Background flusher thread started")

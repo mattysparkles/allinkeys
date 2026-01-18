@@ -22,6 +22,7 @@ from config.settings import (
 )
 from config.directories import VANITY_OUTPUT_DIR
 from core.logger import log_message
+from utils.thread_guard import can_spawn_thread
 
 
 # Alias VanitySearch output directory as the input backlog for altcoin derive
@@ -60,8 +61,8 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
 
     Parameters
     ----------
-    shared_metrics : multiprocessing.Manager().dict
-        Dictionary of shared dashboard metrics.
+    shared_metrics : dict-like
+        Dictionary of shared dashboard metrics (Manager dict on Unix, local on Windows).
     vanity_flag : multiprocessing.Value
         1 if vanity_search should use GPU, else 0.
     altcoin_flag : multiprocessing.Value
@@ -148,15 +149,48 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
         stop_event.wait(poll_interval)
 
 
+class _SchedulerThreadAdapter:
+    def __init__(self, thread: threading.Thread, shutdown_event) -> None:
+        self._thread = thread
+        self._shutdown_event = shutdown_event
+
+    def join(self, timeout: float | None = None) -> None:
+        try:
+            self._thread.join(timeout)
+        except RuntimeError:
+            pass
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
+    def terminate(self) -> None:
+        try:
+            self._shutdown_event.set()
+        except Exception:
+            pass
+
+
 def start_scheduler(shared_metrics, shutdown_event):
     """Helper to spawn the scheduler in its own process.
 
-    Returns (process, vanity_flag, altcoin_flag, assignment_flag)
+    Returns (process-or-thread, vanity_flag, altcoin_flag, assignment_flag)
     """
     ctx = multiprocessing.get_context("spawn")
     vanity_flag = ctx.Value("i", 1)
     altcoin_flag = ctx.Value("i", 1)
     assignment_flag = ctx.Value("i", 0)
+    if os.name == "nt":
+        if not can_spawn_thread("gpu_scheduler"):
+            log_message("[GPU Scheduler] Thread launch skipped; thread limit reached", "WARNING")
+            return _SchedulerThreadAdapter(threading.Thread(target=lambda: None), shutdown_event), vanity_flag, altcoin_flag, assignment_flag
+        thread = threading.Thread(
+            target=monitor_backlog_and_reassign,
+            args=(shared_metrics, vanity_flag, altcoin_flag, assignment_flag, shutdown_event),
+            name="GPUScheduler",
+            daemon=True,
+        )
+        thread.start()
+        return _SchedulerThreadAdapter(thread, shutdown_event), vanity_flag, altcoin_flag, assignment_flag
     proc = ctx.Process(
         target=monitor_backlog_and_reassign,
         args=(shared_metrics, vanity_flag, altcoin_flag, assignment_flag, shutdown_event),

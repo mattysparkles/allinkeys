@@ -10,6 +10,7 @@ from typing import Optional, Tuple, Set, TextIO
 from core.altcoin_derive import derive_altcoin_addresses_from_hex, convert_txt_to_csv
 from core.paths import VANITY_OUTPUT_DIR as VANITY_DIR_P, CSV_DIR as CSV_DIR_P, LOG_DIR as LOG_DIR_P, ensure_dirs
 from core.logger import log_message
+from utils.thread_guard import can_spawn_threads
 
 # === Portable Config for Batch Parsing Mode ===
 LOG_PATH = Path(LOG_DIR_P)
@@ -85,7 +86,11 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
 
     try:
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        executor = ThreadPoolExecutor(max_workers=4)
+        executor = None
+        if can_spawn_threads(4, "backlog_executor"):
+            executor = ThreadPoolExecutor(max_workers=4)
+        else:
+            log_message("⚠️ Backlog thread pool skipped; thread limit reached", "WARN")
         from core.dashboard import get_shutdown_event, get_pause_event
         while True:
             if get_shutdown_event() and get_shutdown_event().is_set():
@@ -125,17 +130,25 @@ def start_backlog_conversion_loop(shared_metrics=None, shutdown_event=None, paus
 
                     if not os.path.exists(output_path):
                         log_message(f"🔁 Converting {file} to CSV...", "INFO")
-                        futures.append(executor.submit(convert_txt_to_csv, txt_path, batch_id, pause_event, get_shutdown_event()))
+                        if executor:
+                            futures.append(executor.submit(convert_txt_to_csv, txt_path, batch_id, pause_event, get_shutdown_event()))
+                        else:
+                            try:
+                                convert_txt_to_csv(txt_path, batch_id, pause_event, get_shutdown_event())
+                                _safe_inc_metric("backlog_files_completed", 1)
+                            except Exception as e:
+                                log_message(f"❌ Backlog task error: {safe_str(e)}", "ERROR")
                     else:
                         log_message(f"✅ Already converted: {file}", "DEBUG")
 
-                for fut in as_completed(futures):
-                    try:
-                        fut.result()
-                    except Exception as e:
-                        log_message(f"❌ Backlog task error: {safe_str(e)}", "ERROR")
-                    else:
-                        _safe_inc_metric("backlog_files_completed", 1)
+                if executor:
+                    for fut in as_completed(futures):
+                        try:
+                            fut.result()
+                        except Exception as e:
+                            log_message(f"❌ Backlog task error: {safe_str(e)}", "ERROR")
+                        else:
+                            _safe_inc_metric("backlog_files_completed", 1)
 
             except Exception as e:
                 log_message(f"❌ Error in backlog conversion loop: {safe_str(e)}", "ERROR")
