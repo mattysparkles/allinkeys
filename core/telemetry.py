@@ -32,6 +32,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +48,7 @@ from config.telemetry import (
     SEED_TELEMETRY_ENABLED,
     TELEMETRY_BATCH_SIZE,
     TELEMETRY_CHECK_ENDPOINT,
+    TELEMETRY_CHECK_CACHE_TTL_SECONDS,
     TELEMETRY_CHECK_TIMEOUT,
     TELEMETRY_ENDPOINT,
     TELEMETRY_FLUSH_SECONDS,
@@ -55,6 +57,7 @@ from config.telemetry import (
     TELEMETRY_SERVICE_PORT,
 )
 from core.logger import get_logger, log_with_context
+from core.worker_bootstrap import _safe_inc_metric
 from utils.thread_guard import can_spawn_thread
 from utils.machine_identity import get_machine_id, get_machine_name
 
@@ -63,6 +66,10 @@ logger = get_logger(__name__)
 QUEUE_DB = Path(LOG_DIR) / "telemetry_queue.db"
 INSTANCE_ID_PATH = Path(LOG_DIR) / "app_instance_id"
 RANGE_RECENT_LIMIT = 50
+CHECK_CACHE_MAX_SIZE = 10_000
+
+_CHECK_CACHE: Dict[tuple[str, str, Optional[str]], tuple[bool, float]] = {}
+_CHECK_CACHE_LOCK = threading.Lock()
 
 
 def _get_app_id(path: Path = INSTANCE_ID_PATH) -> str:
@@ -512,6 +519,56 @@ def start_embedded_telemetry_service() -> Optional[multiprocessing.Process]:
         return None
 
 
+def _evict_expired_check_cache(now: float) -> None:
+    expired_keys = [
+        key for key, (_, expires_at) in _CHECK_CACHE.items() if expires_at <= now
+    ]
+    for key in expired_keys:
+        _CHECK_CACHE.pop(key, None)
+
+
+def _trim_check_cache(max_size: int) -> None:
+    if len(_CHECK_CACHE) <= max_size:
+        return
+    overflow = len(_CHECK_CACHE) - max_size
+    for key, _ in sorted(_CHECK_CACHE.items(), key=lambda item: item[1][1])[:overflow]:
+        _CHECK_CACHE.pop(key, None)
+
+
+def _get_cached_seed_check(
+    cache_key: tuple[str, str, Optional[str]],
+) -> Optional[bool]:
+    now = time.monotonic()
+    with _CHECK_CACHE_LOCK:
+        _evict_expired_check_cache(now)
+        entry = _CHECK_CACHE.get(cache_key)
+        if entry is None:
+            return None
+        used, expires_at = entry
+        if expires_at <= now:
+            _CHECK_CACHE.pop(cache_key, None)
+            return None
+        return used
+
+
+def _set_cached_seed_check(
+    cache_key: tuple[str, str, Optional[str]],
+    used: bool,
+) -> None:
+    if not used:
+        # Avoid caching negatives to prevent suppressing real matches.
+        return
+    ttl_seconds = TELEMETRY_CHECK_CACHE_TTL_SECONDS
+    if ttl_seconds <= 0:
+        return
+    now = time.monotonic()
+    expires_at = now + ttl_seconds
+    with _CHECK_CACHE_LOCK:
+        _evict_expired_check_cache(now)
+        _CHECK_CACHE[cache_key] = (used, expires_at)
+        _trim_check_cache(CHECK_CACHE_MAX_SIZE)
+
+
 # ---------------------------- Central status check ----------------------------
 def check_seed_seen(seed_bytes: bytes, *, mode: str, range_id: Optional[str] = None) -> bool:
     """Return True if the central telemetry database marks this seed as seen.
@@ -528,6 +585,12 @@ def check_seed_seen(seed_bytes: bytes, *, mode: str, range_id: Optional[str] = N
     try:
         app_id = _CLIENT.app_id if _CLIENT else _get_app_id()
         fp = hashlib.sha256(seed_bytes + app_id.encode()).hexdigest()
+        cache_key = (fp, mode, range_id)
+        cached = _get_cached_seed_check(cache_key)
+        if cached is not None:
+            _safe_inc_metric("telemetry_cache_hits")
+            return cached
+        _safe_inc_metric("telemetry_cache_misses")
         url = TELEMETRY_CHECK_ENDPOINT or TELEMETRY_ENDPOINT
         timeout = TELEMETRY_CHECK_TIMEOUT or 1.5
         payload = {"seed_fingerprint": fp, "mode": mode, "range_id": range_id}
@@ -545,7 +608,9 @@ def check_seed_seen(seed_bytes: bytes, *, mode: str, range_id: Optional[str] = N
             data = r.json()
         except Exception:
             return False
-        return bool(data.get("used", False))
+        used = bool(data.get("used", False))
+        _set_cached_seed_check(cache_key, used)
+        return used
     except Exception:
         # Never block callers; on any error default to not seen so local work continues
         return False
