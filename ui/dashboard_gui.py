@@ -702,7 +702,20 @@ class DashboardGUI:
             else:
                 y = height - 2 - (val - min_val) * (height - 4) / span
             points.extend([x, y])
-        canvas.create_line(points, fill=SPARKLINE_LINE, width=1.5)
+        if len(points) >= 4:
+            canvas.create_line(points, fill=SPARKLINE_LINE, width=1.5)
+        else:
+            x = points[0] if points else width / 2
+            y = points[1] if len(points) > 1 else height / 2
+            radius = 2
+            canvas.create_oval(
+                x - radius,
+                y - radius,
+                x + radius,
+                y + radius,
+                outline=SPARKLINE_LINE,
+                fill=SPARKLINE_LINE,
+            )
         canvas.create_line(0, height - 1, width, height - 1, fill="#333333")
 
     def update_sparklines(self, stats):
