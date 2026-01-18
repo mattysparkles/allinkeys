@@ -26,5 +26,7 @@ python-dotenv
 tzlocal
 fastapi
 uvicorn
+passlib[bcrypt]
+python-jose
 # Optional: install pyopencl separately for GPU acceleration
 pytest-cov
