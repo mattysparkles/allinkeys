@@ -55,6 +55,80 @@ _USED_VANITY_OUTPUTS: Set[str] = set()
 _OUTPUT_PATHS_LOCK = threading.Lock()
 
 
+class VanityOutputParser:
+    """Track output file progress in a background thread."""
+
+    def __init__(self, output_path: Path, poll_interval: float = 0.5) -> None:
+        self.output_path = output_path
+        self.poll_interval = poll_interval
+        self._stop_event = threading.Event()
+        self._stopped_event = threading.Event()
+        self._lock = threading.Lock()
+        self._offset = 0
+        self._lines_seen = 0
+        self._file_size = 0
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"vanity-parser-{output_path.name}",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        logger.info("Parser attached to %s", self.output_path)
+        self._thread.start()
+        logger.info("Rotation complete; parsing resumed")
+
+    def request_stop(self) -> None:
+        self._stop_event.set()
+
+    def wait_for_stop(self, timeout: float = 5.0) -> bool:
+        return self._stopped_event.wait(timeout=timeout)
+
+    def snapshot(self) -> Tuple[int, int, int]:
+        with self._lock:
+            return self._offset, self._lines_seen, self._file_size
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                if not self.output_path.exists():
+                    time.sleep(self.poll_interval)
+                    continue
+                file_size = self.output_path.stat().st_size
+                offset = self._offset
+                lines_seen = self._lines_seen
+                if file_size < offset:
+                    offset = 0
+                if file_size > offset:
+                    with self.output_path.open("rb") as fh:
+                        fh.seek(offset)
+                        while True:
+                            chunk = fh.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            lines_seen += chunk.count(b"\n")
+                        offset = fh.tell()
+                with self._lock:
+                    self._offset = offset
+                    self._lines_seen = lines_seen
+                    self._file_size = file_size
+            except Exception as exc:
+                if self._stop_event.is_set():
+                    logger.info(
+                        "Parser stopping; read error ignored for %s: %s",
+                        self.output_path,
+                        exc,
+                    )
+                else:
+                    logger.warning(
+                        "Parser read failed for %s: %s",
+                        self.output_path,
+                        exc,
+                    )
+            time.sleep(self.poll_interval)
+        self._stopped_event.set()
+
+
 def _warn_once(name: str, msg: str, interval: float = 30.0) -> None:
     """Emit ``msg`` at most once per ``interval`` seconds for the given ``name``."""
     now = time.time()
@@ -265,7 +339,7 @@ def run_vanitysearch(
     if backend in ("cuda", "opencl") and device_id is not None:
         base_args = base_args + ["-gpu", str(device_id)]
 
-    output_file, rc = run_vanitysearch_batch(
+    output_file, rc, _rotation = run_vanitysearch_batch(
         binary=binary,
         base_args=base_args,
         output_dir=str(VANITY_OUTPUT_DIR),
@@ -376,28 +450,6 @@ def _reserve_output_path(output_dir: str, prefix: str) -> Path:
     return output_path
 
 
-def _scan_output_progress(
-    output_path: Path, offset: int, lines_seen: int
-) -> Tuple[int, int, int]:
-    """Return updated (offset, lines_seen, file_size) for a growing output file."""
-    if not output_path.exists():
-        return offset, lines_seen, 0
-    file_size = output_path.stat().st_size
-    if file_size < offset:
-        offset = 0
-    if file_size == offset:
-        return offset, lines_seen, file_size
-    with output_path.open("rb") as fh:
-        fh.seek(offset)
-        while True:
-            chunk = fh.read(1024 * 1024)
-            if not chunk:
-                break
-            lines_seen += chunk.count(b"\n")
-        offset = fh.tell()
-    return offset, lines_seen, file_size
-
-
 # INFRASTRUCTURE: DO NOT MODIFY — VANITYSEARCH CONTROLS OUTPUT ROTATION
 def run_vanitysearch_batch(
     *,
@@ -413,7 +465,7 @@ def run_vanitysearch_batch(
     max_lines: Optional[int] = None,
     max_bytes: Optional[int] = None,
     max_seconds: Optional[int] = None,
-) -> Tuple[Path, int]:
+) -> Tuple[Path, int, Optional[dict]]:
     """Invoke VanitySearch using native -o file output with strict safeguards."""
     if stdout_setting not in (None, subprocess.DEVNULL):
         raise RuntimeError("VanitySearch stdout capture is forbidden.")
@@ -447,24 +499,49 @@ def run_vanitysearch_batch(
         env=env,
     )
 
+    def _stop_parser(reason: str, rotation: bool) -> None:
+        if rotation:
+            logger.info("Stopping parser for rotation")
+        else:
+            logger.info("Stopping parser (%s)", reason)
+        parser.request_stop()
+        parser.wait_for_stop()
+        logger.info("Parser detached from %s", output_path)
+
     start = time.time()
-    offset = 0
-    lines_seen = 0
+    rotation_info = None
+    parser = VanityOutputParser(output_path)
+    parser.start()
+    parser_detached = False
     while proc.poll() is None:
         if pause_event and pause_event.is_set():
+            _stop_parser("pause", rotation=False)
+            parser_detached = True
             proc.terminate()
             break
         if timeout and time.time() - start > timeout:
+            rotation_info = {
+                "reason": "timeout",
+                "timestamp": time.time(),
+                "path": str(output_path),
+            }
+            _stop_parser("timeout", rotation=True)
+            parser_detached = True
             proc.terminate()
             break
-        offset, lines_seen, file_size = _scan_output_progress(
-            output_path, offset, lines_seen
-        )
+        _, lines_seen, file_size = parser.snapshot()
         if max_lines and lines_seen >= max_lines:
             logger.info(
                 "VanitySearch batch reached %s lines; restarting for rotation.",
                 max_lines,
             )
+            rotation_info = {
+                "reason": "lines",
+                "timestamp": time.time(),
+                "path": str(output_path),
+            }
+            _stop_parser("max_lines", rotation=True)
+            parser_detached = True
             proc.terminate()
             break
         if max_bytes and file_size >= max_bytes:
@@ -472,6 +549,13 @@ def run_vanitysearch_batch(
                 "VanitySearch batch reached %s bytes; restarting for rotation.",
                 max_bytes,
             )
+            rotation_info = {
+                "reason": "bytes",
+                "timestamp": time.time(),
+                "path": str(output_path),
+            }
+            _stop_parser("max_bytes", rotation=True)
+            parser_detached = True
             proc.terminate()
             break
         time.sleep(0.5)
@@ -482,7 +566,10 @@ def run_vanitysearch_batch(
         proc.kill()
         proc.wait()
 
-    return output_path, proc.returncode or 0
+    if not parser_detached:
+        _stop_parser("complete", rotation=False)
+
+    return output_path, proc.returncode or 0, rotation_info
 
 
 def _warn_zero_matches(
@@ -581,7 +668,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                     logger.info(
                         f"🧪 VanitySearch ({mode_name}) command: {' '.join(args)}"
                     )
-                    final_path, rc = run_vanitysearch_batch(
+                    final_path, rc, _rotation = run_vanitysearch_batch(
                         binary=exe,
                         base_args=args,
                         output_dir=out_dir,

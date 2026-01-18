@@ -442,7 +442,7 @@ def run_vanitysearch_stream(
         return False
 
     try:
-        current_output_path, rc = run_vanitysearch_batch(
+        current_output_path, rc, rotation_info = run_vanitysearch_batch(
             binary=exe_path,
             base_args=base_args,
             output_dir=VANITY_OUTPUT_DIR,
@@ -526,6 +526,18 @@ def run_vanitysearch_stream(
             except Exception:
                 pass
         except Exception as e:
+            rotation_grace = 5
+            rotation_recent = False
+            if rotation_info and rotation_info.get("timestamp"):
+                rotation_recent = (time.time() - rotation_info["timestamp"]) <= rotation_grace
+
+            if rotation_recent:
+                logger.info(
+                    "ℹ️ Failed to parse %s during rotation (file inactive): %s",
+                    current_output_path,
+                    e,
+                )
+                return True
             logger.warning(f"⚠️ Failed to parse {current_output_path}: {e}")
             return False
 

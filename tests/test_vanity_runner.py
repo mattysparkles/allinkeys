@@ -129,7 +129,7 @@ def test_run_vanitysearch_batch_unique_outputs(tmp_path, monkeypatch):
     monkeypatch.setattr(vanity_runner.subprocess, "Popen", DummyProc)
 
     for _ in range(2):
-        output_path, _ = vanity_runner.run_vanitysearch_batch(
+        output_path, _, _rotation = vanity_runner.run_vanitysearch_batch(
             binary="vanity_mock",
             base_args=["-s", "0"],
             output_dir=str(output_dir),
