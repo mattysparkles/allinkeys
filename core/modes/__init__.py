@@ -1,0 +1,1 @@
+"""Mode entrypoints for AllInKeys."""
