@@ -1,0 +1,13 @@
+[Unit]
+Description=Telemetry Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/apps/allinkeys/telemetry_service/app.py
+WorkingDirectory=/opt/apps/allinkeys/telemetry_service
+EnvironmentFile=/opt/apps/allinkeys/telemetry_service/.env
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
