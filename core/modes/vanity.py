@@ -282,16 +282,21 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
         logger.debug(f"📊 Metrics updated: {stats}")
 
     failure_delay_seconds = 1
+    logger.debug("📊 Metrics updater loop starting.")
     # Use a long-lived loop with stop_event.wait(...) to avoid Timer recursion and thread buildup.
     while not stop_event.is_set():
         try:
             update()
-            if stop_event.wait(settings.METRICS_POLL_INTERVAL_SECONDS):
-                break
-        except Exception:
-            logger.exception("❌ Error in metrics updater loop")
+        except Exception as exc:
+            logger.error(
+                "metrics_updater failed",
+                extra={"exception": str(exc)},
+            )
             if stop_event.wait(failure_delay_seconds):
                 break
+        if stop_event.wait(settings.METRICS_POLL_INTERVAL_SECONDS):
+            break
+    logger.debug("📊 Metrics updater loop stopped.")
 
 
 def should_skip_download_today(download_dir):
