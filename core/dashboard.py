@@ -2,6 +2,7 @@ import time
 import json
 import os
 import tempfile
+import threading
 from datetime import datetime, timezone, timedelta
 import core.checkpoint as checkpoint
 from contextlib import nullcontext
@@ -328,14 +329,17 @@ def init_dashboard_manager():
     global manager, metrics, metrics_lock
     init_shared_metrics()
     manager, metrics, metrics_lock = _manager, _metrics, _metrics_lock
+    def _coerce_value(value):
+        if isinstance(value, dict):
+            return _manager.dict(value) if _manager else dict(value)
+        return value
     if not metrics.keys():
         default_metrics = _default_metrics()
-        metrics.update({k: (_manager.dict(v) if isinstance(v, dict) else v)
-                        for k, v in default_metrics.items()})
+        metrics.update({k: _coerce_value(v) for k, v in default_metrics.items()})
         lifetime = load_lifetime_metrics()
         for k, v in lifetime.items():
             if isinstance(v, dict):
-                metrics[k] = _manager.dict(v)
+                metrics[k] = _coerce_value(v)
             else:
                 metrics[k] = v
     return metrics
@@ -491,14 +495,19 @@ def init_shared_metrics(shared_dict=None):
     if _metrics is not None:
         return
     import multiprocessing as mp
+    use_manager = os.name != "nt"
     if shared_dict is not None:
         _manager = None
         _metrics = shared_dict
-        _metrics_lock = mp.RLock()
-    else:
+        _metrics_lock = threading.RLock() if os.name == "nt" else mp.RLock()
+    elif use_manager:
         _manager = mp.Manager()
         _metrics_lock = _manager.RLock()
         _metrics = _manager.dict()
+    else:
+        _manager = None
+        _metrics_lock = threading.RLock()
+        _metrics = {}
     manager = _manager
     metrics = _metrics
     metrics_lock = _metrics_lock

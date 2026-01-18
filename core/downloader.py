@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 from utils.file_utils import find_latest_funded_file
+from utils.thread_guard import can_spawn_threads
 from utils.network_utils import download_file
 
 from config.settings import (
@@ -301,19 +302,30 @@ def download_and_compare_address_lists(coins: list[str] | None = None) -> None:
 
     total = len(urls)
     disable = not sys.stderr.isatty()
-    with ThreadPoolExecutor(max_workers=total or 1) as executor:
-        futures = [
-            executor.submit(
-                _download_single_coin,
-                coin,
-                BTC_ADDRESS_SOURCES if coin == "btc" else [url],
-            )
-            for coin, url in urls.items()
-        ]
+    if total and can_spawn_threads(total, "downloads"):
+        with ThreadPoolExecutor(max_workers=total or 1) as executor:
+            futures = [
+                executor.submit(
+                    _download_single_coin,
+                    coin,
+                    BTC_ADDRESS_SOURCES if coin == "btc" else [url],
+                )
+                for coin, url in urls.items()
+            ]
+            with tqdm(total=total, disable=disable, desc="downloads", unit="coin") as pbar:
+                for future in as_completed(futures):
+                    # Bubble exceptions to fail fast
+                    future.result()
+                    pbar.update(1)
+    else:
+        if total:
+            log_message("⚠️ Download thread pool skipped; thread limit reached", "WARN")
         with tqdm(total=total, disable=disable, desc="downloads", unit="coin") as pbar:
-            for future in as_completed(futures):
-                # Bubble exceptions to fail fast
-                future.result()
+            for coin, url in urls.items():
+                _download_single_coin(
+                    coin,
+                    BTC_ADDRESS_SOURCES if coin == "btc" else [url],
+                )
                 pbar.update(1)
 
     generate_test_csv()

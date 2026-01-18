@@ -273,7 +273,10 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
         except Exception as e:
             log_message(f"❌ Error in metrics updater: {e}", "ERROR")
         if not stop_event.is_set():
-            threading.Timer(settings.METRICS_POLL_INTERVAL_SECONDS, update).start()
+            if can_spawn_thread("metrics_timer"):
+                threading.Timer(settings.METRICS_POLL_INTERVAL_SECONDS, update).start()
+            else:
+                logger.warning("[ThreadGuard] Metrics timer skipped; thread limit reached")
 
     update()
     stop_event.wait()

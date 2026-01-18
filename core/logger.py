@@ -15,6 +15,7 @@ from config.settings import (
     LOG_BACKUP_COUNT,
 )
 from config.directories import LOG_DIR
+from utils.thread_guard import can_spawn_thread
 
 
 console_handler = logging.StreamHandler(sys.stdout)
@@ -120,6 +121,9 @@ def start_listener():
         console_handler.setFormatter(fmt)
         handlers.append(console_handler)
 
+    if not can_spawn_thread("log_listener"):
+        logging.warning("[ThreadGuard] Log listener thread skipped; thread limit reached")
+        return None
     _listener = QueueListener(q, *handlers, respect_handler_level=True)
     _listener.start()
     return _listener
@@ -184,5 +188,3 @@ def log_message(message: str, level: str = "INFO", exc_info: bool = False) -> No
 
 # Backwards compatibility: some modules import ``_get_logger`` directly
 _get_logger = get_logger
-
-
