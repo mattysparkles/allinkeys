@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, status
@@ -60,7 +61,7 @@ def _connect() -> sqlite3.Connection:
         """
         SELECT 1
         FROM sqlite_master
-        WHERE type='index' AND name='uniq_seed_fingerprint_range_id'
+        WHERE type='index' AND name='idx_seed_range'
         """
     ).fetchone()
     if not has_unique_index:
@@ -76,7 +77,7 @@ def _connect() -> sqlite3.Connection:
         )
         conn.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS uniq_seed_fingerprint_range_id
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_seed_range
             ON seed_events(seed_fingerprint, range_id)
             """
         )
@@ -127,15 +128,11 @@ class MachineStatsResponse(BaseModel):
     machines: List[MachineInfo]
 
 
-class SeedModeCount(BaseModel):
-    mode: Optional[str] = None
-    count: int
-
-
 class SeedStatsResponse(BaseModel):
     total_seeds: int
-    unique_seeds: int
-    per_mode: List[SeedModeCount]
+    unique_seed_count: int
+    by_mode: Dict[str, int]
+    last_seen: Optional[str] = None
     since: Optional[str] = None
     mode: Optional[str] = None
 
@@ -143,8 +140,8 @@ class SeedStatsResponse(BaseModel):
 class SeedRangeInfo(BaseModel):
     range_id: Optional[str] = None
     count: int
-    last_seen: Optional[str] = None
-    used: bool
+    match_found: int
+    unique_seed_count: int
 
 
 class SeedRangeResponse(BaseModel):
@@ -238,6 +235,33 @@ def _merge_intervals(intervals: List[tuple[float, float]]) -> List[tuple[float, 
         else:
             merged.append((start, end))
     return merged
+
+
+def _parse_since(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    value = value.strip()
+    relative_match = re.fullmatch(r"(\d+)([mh])", value)
+    if relative_match:
+        amount = int(relative_match.group(1))
+        unit = relative_match.group(2)
+        delta = timedelta(minutes=amount) if unit == "m" else timedelta(hours=amount)
+        return (datetime.utcnow() - delta).isoformat() + "Z"
+    if value.endswith("Z"):
+        try:
+            datetime.fromisoformat(value[:-1])
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail="Invalid since timestamp"
+            ) from exc
+        return value
+    try:
+        datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid since timestamp"
+        ) from exc
+    return value
 
 
 @app.post(
@@ -365,15 +389,16 @@ def seed_stats(
 
     Example:
         curl -H "X-API-Key: changeme" \\
-          "http://localhost:3088/v1/seed/stats?since=2024-01-01T00:00:00Z"
+          "http://localhost:3088/v1/seed/stats?since=1h"
     """
+    parsed_since = _parse_since(since)
     conn = _connect()
     try:
         filters = []
         params: List[Any] = []
-        if since:
+        if parsed_since:
             filters.append("last_seen >= ?")
-            params.append(since)
+            params.append(parsed_since)
         if mode:
             filters.append("mode = ?")
             params.append(mode)
@@ -397,13 +422,18 @@ def seed_stats(
             """,
             params,
         ).fetchall()
-        per_mode = [{"mode": row[0], "count": row[1]} for row in per_mode_rows]
+        last_seen_row = conn.execute(
+            f"SELECT MAX(last_seen) FROM seed_events {where_clause}",
+            params,
+        ).fetchone()
+        by_mode = {row[0] or "unknown": row[1] for row in per_mode_rows}
         if limit:
-            per_mode = per_mode[:limit]
+            by_mode = dict(list(by_mode.items())[:limit])
         return SeedStatsResponse(
             total_seeds=total_seeds,
-            unique_seeds=unique_seeds,
-            per_mode=per_mode,
+            unique_seed_count=unique_seeds,
+            by_mode=by_mode,
+            last_seen=last_seen_row[0] if last_seen_row else None,
             since=since,
             mode=mode,
         )
@@ -426,15 +456,16 @@ def seed_range(
 
     Example:
         curl -H "X-API-Key: changeme" \\
-          "http://localhost:3088/v1/seed/range?limit=25"
+          "http://localhost:3088/v1/seed/range?mode=btc_only&since=24h"
     """
+    parsed_since = _parse_since(since)
     conn = _connect()
     try:
         filters = ["range_id IS NOT NULL"]
         params: List[Any] = []
-        if since:
+        if parsed_since:
             filters.append("last_seen >= ?")
-            params.append(since)
+            params.append(parsed_since)
         if mode:
             filters.append("mode = ?")
             params.append(mode)
@@ -447,12 +478,12 @@ def seed_range(
             SELECT
                 range_id,
                 COUNT(*) AS count,
-                MAX(last_seen) AS last_seen,
-                MAX(used) AS used
+                SUM(match_found) AS match_found,
+                COUNT(DISTINCT seed_fingerprint) AS unique_seed_count
             FROM seed_events
             {where_clause}
             GROUP BY range_id
-            ORDER BY last_seen DESC
+            ORDER BY count DESC
             {limit_clause}
             """,
             params,
@@ -461,8 +492,8 @@ def seed_range(
             {
                 "range_id": row[0],
                 "count": row[1],
-                "last_seen": row[2],
-                "used": bool(row[3]),
+                "match_found": row[2] or 0,
+                "unique_seed_count": row[3],
             }
             for row in rows
         ]
@@ -493,13 +524,14 @@ def range_distribution(
         curl -H "X-API-Key: changeme" \\
           "http://localhost:3088/v1/dashboard/demo/ranges/distribution"
     """
+    parsed_since = _parse_since(since)
     conn = _connect()
     try:
         filters = ["range_id IS NOT NULL"]
         params: List[Any] = []
-        if since:
+        if parsed_since:
             filters.append("last_seen >= ?")
-            params.append(since)
+            params.append(parsed_since)
         if mode:
             filters.append("mode = ?")
             params.append(mode)
