@@ -54,7 +54,7 @@ from config.telemetry import (
     TELEMETRY_SERVICE_HOST,
     TELEMETRY_SERVICE_PORT,
 )
-from core.logger import get_logger
+from core.logger import get_logger, log_with_context
 from utils.thread_guard import can_spawn_thread
 from utils.machine_identity import get_machine_id, get_machine_name
 
@@ -75,6 +75,14 @@ def _get_app_id(path: Path = INSTANCE_ID_PATH) -> str:
     app_id = str(uuid.uuid4())
     path.write_text(app_id)
     return app_id
+
+
+def _telemetry_log_context(*, mode: Optional[str] = None, range_id: Optional[str] = None, endpoint: Optional[str] = None) -> dict:
+    return {
+        "mode": mode,
+        "range_id": range_id,
+        "endpoint": endpoint,
+    }
 
 
 class TelemetryClient:
@@ -107,9 +115,12 @@ class TelemetryClient:
         if self.enabled:
             self._init_db()
             try:
-                logger.info(
+                log_with_context(
+                    logger,
+                    "INFO",
                     f"[Telemetry] Client initialized | endpoint={self.endpoint} | "
-                    f"flush={self.flush_seconds}s | batch={self.batch_size} | db={self.db_path}"
+                    f"flush={self.flush_seconds}s | batch={self.batch_size} | db={self.db_path}",
+                    **_telemetry_log_context(endpoint=self.endpoint),
                 )
             except Exception:
                 pass
@@ -327,8 +338,11 @@ class TelemetryClient:
         finally:
             conn.close()
         try:
-            logger.debug(
-                f"[Telemetry] Queued event | mode={mode} | range={range_id} | used={used} | match={match_found}"
+            log_with_context(
+                logger,
+                "DEBUG",
+                f"[Telemetry] Queued event | mode={mode} | range={range_id} | used={used} | match={match_found}",
+                **_telemetry_log_context(mode=mode, range_id=range_id),
             )
         except Exception:
             pass
@@ -371,15 +385,23 @@ class TelemetryClient:
                 return True
             ids, payloads = zip(*batch)
             try:
-                logger.info(f"[Telemetry] Flushing {len(ids)} event(s) to {self.endpoint}")
+                log_with_context(
+                    logger,
+                    "INFO",
+                    f"[Telemetry] Flushing {len(ids)} event(s) to {self.endpoint}",
+                    **_telemetry_log_context(endpoint=self.endpoint),
+                )
                 response = self._send_batch([json.loads(p) for p in payloads])
             except Exception as exc:
                 self._backoff = min(self._backoff * 2, self.max_backoff)
                 try:
-                    logger.warning(
+                    log_with_context(
+                        logger,
+                        "WARNING",
                         "[Telemetry] Flush failed; backing off to %ss | reason=%s",
                         self._backoff,
                         getattr(getattr(exc, "response", None), "status_code", exc),
+                        **_telemetry_log_context(endpoint=self.endpoint),
                     )
                 except Exception:
                     pass
@@ -392,8 +414,11 @@ class TelemetryClient:
             self._backoff = self.flush_seconds
             try:
                 status = getattr(response, "status_code", "?")
-                logger.info(
-                    f"[Telemetry] Flush succeeded | sent={len(ids)} | status={status}"
+                log_with_context(
+                    logger,
+                    "INFO",
+                    f"[Telemetry] Flush succeeded | sent={len(ids)} | status={status}",
+                    **_telemetry_log_context(endpoint=self.endpoint),
                 )
             except Exception:
                 pass
@@ -441,7 +466,12 @@ def start_telemetry(shutdown_event: threading.Event) -> None:
         _CLIENT = TelemetryClient()
     _CLIENT.start(shutdown_event)
     try:
-        logger.info("[Telemetry] Background flusher thread started")
+        log_with_context(
+            logger,
+            "INFO",
+            "[Telemetry] Background flusher thread started",
+            **_telemetry_log_context(endpoint=_CLIENT.endpoint if _CLIENT else None),
+        )
     except Exception:
         pass
 
