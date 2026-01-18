@@ -114,11 +114,13 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
         log_message(
             f"[GPU Scheduler] ⚙️ Detected GPU: {name} (vendor={vendor}) using for altcoin derive.",
             "INFO",
+            mode="gpu_scheduler",
         )
     else:
         log_message(
             "[GPU Scheduler] ⚠️ No compatible GPU detected, falling back to CPU.",
             "WARNING",
+            mode="gpu_scheduler",
         )
         vanity_flag.value = 0
         altcoin_flag.value = 0
@@ -240,6 +242,7 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                         "[GPU Scheduler] 🚦 Switching GPUs to altcoin derive "
                         f"({decision_reason}).",
                         "INFO",
+                        mode="gpu_scheduler",
                     )
                     _safe_set_metric("vanity_gpu_on", False)
                     _safe_set_metric("altcoin_gpu_on", True)
@@ -254,6 +257,7 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                         "[GPU Scheduler] ✅ Switching GPUs back to vanity "
                         f"({decision_reason}).",
                         "INFO",
+                        mode="gpu_scheduler",
                     )
                     _safe_set_metric("vanity_gpu_on", True)
                     _safe_set_metric("altcoin_gpu_on", False)
@@ -301,7 +305,11 @@ def start_scheduler(shared_metrics, shutdown_event):
     assignment_flag = ctx.Value("i", 0)
     if os.name == "nt":
         if not can_spawn_thread("gpu_scheduler"):
-            log_message("[GPU Scheduler] Thread launch skipped; thread limit reached", "WARNING")
+            log_message(
+                "[GPU Scheduler] Thread launch skipped; thread limit reached",
+                "WARNING",
+                mode="gpu_scheduler",
+            )
             return _SchedulerThreadAdapter(threading.Thread(target=lambda: None), shutdown_event), vanity_flag, altcoin_flag, assignment_flag
         thread = threading.Thread(
             target=monitor_backlog_and_reassign,

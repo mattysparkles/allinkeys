@@ -479,7 +479,7 @@ DELETE_CSV_CHECKING_LOGS = True
 
 # ===================== 📜 LOGGING ================================
 LOG_LEVEL = "INFO"  # Options include: INFO, DEBUG, TRACE,
-LOG_FORMAT = os.getenv("LOG_FORMAT", "text")
+LOG_FORMAT = os.getenv("LOG_FORMAT", "text").lower()
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
 LOGGING_ENABLED = True  # or False if you want to disable it
