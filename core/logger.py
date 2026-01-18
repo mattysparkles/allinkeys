@@ -24,7 +24,9 @@ console_handler = logging.StreamHandler(sys.stdout)
 
 CORRELATION_FIELDS = (
     "batch_id",
+    "index",
     "index_within_batch",
+    "gpu",
     "gpu_id",
     "gpu_ids",
     "mode",
@@ -227,6 +229,26 @@ def log_with_context(
         logger.log(level_value, message, *args, exc_info=exc_info, extra=extra)
     else:
         logger.log(level_value, message, *args, exc_info=exc_info)
+
+
+def log_event(
+    message: str,
+    *,
+    level: str = "INFO",
+    exc_info: bool = False,
+    logger: logging.Logger | None = None,
+    **context,
+) -> None:
+    """Log a message with structured context fields."""
+
+    target_logger = logger or get_logger("allinkeys")
+    log_with_context(
+        target_logger,
+        level,
+        message,
+        exc_info=exc_info,
+        **context,
+    )
 
 
 def log_message(

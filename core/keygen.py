@@ -3,11 +3,12 @@
 import os
 from pathlib import Path
 import time
+import hashlib
 import secrets
 import platform
 import re
 from datetime import datetime
-from collections import deque
+from collections import OrderedDict, deque
 from threading import Lock
 
 from config.settings import (
@@ -15,6 +16,7 @@ from config.settings import (
     VANITY_PATTERN,
     FILES_PER_BATCH,
 )
+from config.telemetry import TELEMETRY_CHECK_CACHE_TTL_SECONDS
 from config.directories import VANITY_OUTPUT_DIR
 from config.constants import SECP256K1_ORDER
 from core.checkpoint import (
@@ -32,7 +34,12 @@ from core.seed_tracker import (
     record_seed_range,
     get_condensed_ranges,
 )
-from core.telemetry import check_seed_seen, record_range_event, record_seed_event
+from core.telemetry import (
+    _get_app_id,
+    check_seed_seen,
+    record_range_event,
+    record_seed_event,
+)
 
 # Runtime trackers / metrics window
 total_keys_generated = 0
@@ -45,6 +52,9 @@ _SEED_QUEUE: deque[int] = deque()
 _SEED_QUEUE_LOCK = Lock()
 SEED_QUEUE_SIZE = 100
 SEED_QUEUE_MAX_ATTEMPTS = SEED_QUEUE_SIZE * 25
+TELEMETRY_SEED_CACHE_MAX_SIZE = 10_000
+telemetry_seed_cache: OrderedDict[str, tuple[bool, float]] = OrderedDict()
+_TELEMETRY_SEED_CACHE_LOCK = Lock()
 
 
 def _seed_in_ranges(seed: int, ranges) -> bool:
@@ -197,13 +207,53 @@ def _range_space() -> tuple[int, int]:
     return 0, SECP256K1_ORDER - 1
 
 
+def _get_cached_seed_check(fingerprint: str, now: float) -> bool | None:
+    with _TELEMETRY_SEED_CACHE_LOCK:
+        entry = telemetry_seed_cache.get(fingerprint)
+        if entry is None:
+            return None
+        used, expires_at = entry
+        if now >= expires_at:
+            telemetry_seed_cache.pop(fingerprint, None)
+            return None
+        telemetry_seed_cache.move_to_end(fingerprint)
+        return used
+
+
+def _set_cached_seed_check(fingerprint: str, used: bool, now: float) -> None:
+    ttl_seconds = TELEMETRY_CHECK_CACHE_TTL_SECONDS
+    if ttl_seconds <= 0:
+        return
+    expires_at = now + ttl_seconds
+    with _TELEMETRY_SEED_CACHE_LOCK:
+        telemetry_seed_cache[fingerprint] = (used, expires_at)
+        telemetry_seed_cache.move_to_end(fingerprint)
+        while len(telemetry_seed_cache) > TELEMETRY_SEED_CACHE_MAX_SIZE:
+            telemetry_seed_cache.popitem(last=False)
+
+
 def _central_seen(seed: int) -> bool:
     mode, range_id = _telemetry_context()
     if not telemetry_enabled():
         return False
     try:
         seed_bytes = int(seed).to_bytes(32, "big")
-        return check_seed_seen(seed_bytes, mode=mode, range_id=range_id)
+        fingerprint = hashlib.sha256(seed_bytes + _get_app_id().encode()).hexdigest()
+        now = time.time()
+        cached = _get_cached_seed_check(fingerprint, now)
+        if cached is not None:
+            try:
+                increment_metric("telemetry_seed_cache_hits", 1)
+            except Exception:
+                pass
+            return cached
+        try:
+            increment_metric("telemetry_seed_cache_misses", 1)
+        except Exception:
+            pass
+        used = check_seed_seen(seed_bytes, mode=mode, range_id=range_id)
+        _set_cached_seed_check(fingerprint, used, now)
+        return used
     except Exception:
         return False
 
