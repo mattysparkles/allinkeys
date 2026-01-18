@@ -298,7 +298,18 @@ class TelemetryClient:
                         event.set()
                     else:
                         event.clear()
-            except Exception:
+            except Exception as exc:
+                try:
+                    log_with_context(
+                        logger,
+                        "WARNING",
+                        "[Telemetry] Control command failed | command=%s | reason=%s",
+                        cmd,
+                        exc,
+                        **_telemetry_log_context(endpoint=self.endpoint),
+                    )
+                except Exception:
+                    pass
                 return False
             self._update_control_state(
                 {
@@ -307,6 +318,16 @@ class TelemetryClient:
                     "last_value": value,
                 }
             )
+            try:
+                log_with_context(
+                    logger,
+                    "INFO",
+                    "[Telemetry] Control command applied | command=%s",
+                    cmd,
+                    **_telemetry_log_context(endpoint=self.endpoint),
+                )
+            except Exception:
+                pass
             return True
         if cmd == "set_mode":
             self._update_control_state(
@@ -316,6 +337,17 @@ class TelemetryClient:
                     "last_value": value,
                 }
             )
+            try:
+                log_with_context(
+                    logger,
+                    "INFO",
+                    "[Telemetry] Control command applied | command=%s | value=%s",
+                    cmd,
+                    value,
+                    **_telemetry_log_context(endpoint=self.endpoint),
+                )
+            except Exception:
+                pass
             return True
         if cmd == "set_range":
             self._update_control_state(
@@ -325,7 +357,28 @@ class TelemetryClient:
                     "last_value": value,
                 }
             )
+            try:
+                log_with_context(
+                    logger,
+                    "INFO",
+                    "[Telemetry] Control command applied | command=%s | value=%s",
+                    cmd,
+                    value,
+                    **_telemetry_log_context(endpoint=self.endpoint),
+                )
+            except Exception:
+                pass
             return True
+        try:
+            log_with_context(
+                logger,
+                "WARNING",
+                "[Telemetry] Unknown control command | command=%s",
+                cmd,
+                **_telemetry_log_context(endpoint=self.endpoint),
+            )
+        except Exception:
+            pass
         return False
 
     def _poll_control_commands(self) -> List[Dict[str, Any]]:

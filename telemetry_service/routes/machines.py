@@ -24,7 +24,7 @@ from telemetry_service.models import (
     UserPublic,
 )
 
-router = APIRouter(prefix="/v1/machines", tags=["Machines"])
+router = APIRouter(tags=["Machines"])
 
 
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
@@ -238,6 +238,44 @@ def list_my_machines(
         return response
     finally:
         conn.close()
+
+
+@router.get(
+    "/{machine_id}",
+    response_model=MachineSummary,
+    summary="Fetch details for a single machine.",
+)
+def get_machine(
+    machine_id: str,
+    current_user: UserPublic = Depends(get_current_user),
+) -> MachineSummary:
+    now = datetime.utcnow()
+    machine_row = _get_machine_for_user_or_admin(machine_id, current_user)
+    machine_id, _user_id, machine_name, gpu_info, version, _status, last_seen = (
+        machine_row
+    )
+    conn = get_db_connection()
+    try:
+        cutoff = (now - timedelta(seconds=60)).isoformat() + "Z"
+        kps_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM seed_events
+            WHERE machine_id = ? AND last_seen >= ?
+            """,
+            (machine_id, cutoff),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    return MachineSummary(
+        id=machine_id,
+        machine_name=machine_name or machine_id,
+        gpu_info=gpu_info,
+        status=_status_from_last_seen(last_seen, now),
+        keys_per_sec=round(kps_count / 60, 2) if kps_count else 0,
+        last_seen=last_seen,
+        version=version,
+    )
 
 
 @router.post(

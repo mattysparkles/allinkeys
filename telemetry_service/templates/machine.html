@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Machine Control</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+        background: #0b0d12;
+        color: #f6f7fb;
+      }
+      body {
+        margin: 0;
+        padding: 32px 40px 64px;
+      }
+      header {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      h1 {
+        font-size: 28px;
+        margin: 0;
+      }
+      .subtitle {
+        color: #9fa4b4;
+        margin: 0;
+      }
+      .nav-link {
+        color: #9fa4b4;
+        text-decoration: none;
+        font-size: 14px;
+      }
+      .nav-link:hover {
+        color: #f6f7fb;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-top: 16px;
+      }
+      .controls input,
+      .controls button {
+        border-radius: 8px;
+        border: 1px solid #2d3240;
+        background: #141824;
+        color: inherit;
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+      .controls button {
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+      .controls button:hover {
+        background: #20263a;
+      }
+      .token-input {
+        min-width: 280px;
+        flex: 1;
+      }
+      .panel {
+        background: #121622;
+        border: 1px solid #20263a;
+        border-radius: 16px;
+        padding: 20px;
+        display: grid;
+        gap: 16px;
+        box-shadow: 0 12px 30px rgba(5, 8, 16, 0.35);
+      }
+      .machine-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+        color: #c6ccda;
+        font-size: 14px;
+      }
+      .meta-label {
+        color: #7d8597;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .status-pill {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        display: inline-flex;
+      }
+      .status-online {
+        background: rgba(66, 186, 150, 0.2);
+        color: #42ba96;
+      }
+      .status-stalled {
+        background: rgba(255, 183, 77, 0.2);
+        color: #ffb74d;
+      }
+      .status-offline {
+        background: rgba(239, 83, 80, 0.2);
+        color: #ef5350;
+      }
+      .control-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .control-actions button,
+      .control-form button {
+        border-radius: 8px;
+        border: 1px solid #2d3240;
+        background: #1a2133;
+        color: inherit;
+        padding: 8px 12px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .control-actions button:hover,
+      .control-form button:hover {
+        background: #232b41;
+      }
+      .control-form {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        align-items: end;
+      }
+      .control-form label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 12px;
+        text-transform: uppercase;
+        color: #9fa4b4;
+      }
+      .control-form select,
+      .control-form input {
+        border-radius: 8px;
+        border: 1px solid #2d3240;
+        background: #141824;
+        color: inherit;
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      .control-feedback {
+        font-size: 13px;
+        color: #9fa4b4;
+        min-height: 18px;
+      }
+      .command-status {
+        display: grid;
+        gap: 8px;
+      }
+      .command-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: #141a2a;
+        border: 1px solid #232b41;
+        font-size: 13px;
+      }
+      .command-item.pending {
+        border-color: rgba(255, 183, 77, 0.4);
+      }
+      .command-item.acknowledged {
+        border-color: rgba(66, 186, 150, 0.4);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a class="nav-link" href="/dashboard/machines">Back to My Machines</a>
+      <div>
+        <h1 id="machineTitle">Machine Control</h1>
+        <p class="subtitle" id="machineSubtitle">Loading machine details...</p>
+      </div>
+      <div class="controls">
+        <input
+          id="tokenInput"
+          class="token-input"
+          type="password"
+          placeholder="Paste access token for API requests"
+        />
+        <button id="saveTokenButton" type="button">Save Token</button>
+        <button id="refreshButton" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="machine-meta" id="machineMeta"></div>
+
+      <div class="control-actions">
+        <button type="button" data-command="pause">Pause</button>
+        <button type="button" data-command="resume">Resume</button>
+      </div>
+
+      <form class="control-form" id="controlForm">
+        <label>
+          Command
+          <select name="command" id="commandSelect">
+            <option value="pause">Pause</option>
+            <option value="resume">Resume</option>
+            <option value="set_mode">Set Mode</option>
+            <option value="set_range">Set Range</option>
+          </select>
+        </label>
+        <label>
+          Value
+          <input name="value" id="commandValue" type="text" placeholder="Enter value" />
+        </label>
+        <button type="submit">Send Command</button>
+      </form>
+
+      <div class="control-feedback" id="feedback"></div>
+
+      <div class="command-status">
+        <strong>Recent Commands</strong>
+        <div id="commandList">Loading...</div>
+      </div>
+    </section>
+
+    <script>
+      const machineId = "{{ machine_id }}";
+      const apiBase = "/api/machines";
+      const authTokenFromHeader = "{{ auth_token | e }}";
+
+      const tokenInput = document.getElementById("tokenInput");
+      const saveTokenButton = document.getElementById("saveTokenButton");
+      const refreshButton = document.getElementById("refreshButton");
+      const machineTitle = document.getElementById("machineTitle");
+      const machineSubtitle = document.getElementById("machineSubtitle");
+      const machineMeta = document.getElementById("machineMeta");
+      const commandList = document.getElementById("commandList");
+      const feedbackEl = document.getElementById("feedback");
+      const commandSelect = document.getElementById("commandSelect");
+      const commandValue = document.getElementById("commandValue");
+      const controlForm = document.getElementById("controlForm");
+
+      const numberFormatter = new Intl.NumberFormat(undefined, {
+        maximumFractionDigits: 2,
+      });
+
+      function getStoredToken() {
+        return authTokenFromHeader || localStorage.getItem("telemetryToken") || "";
+      }
+
+      function setStoredToken(value) {
+        if (value) {
+          localStorage.setItem("telemetryToken", value);
+        } else {
+          localStorage.removeItem("telemetryToken");
+        }
+      }
+
+      function getAuthHeaders() {
+        const token = getStoredToken();
+        if (!token) return {};
+        return { Authorization: `Bearer ${token}` };
+      }
+
+      function formatDate(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString();
+      }
+
+      function formatCommandValue(command, value) {
+        if (!value) return "";
+        if (command === "set_mode") return `Mode: ${value}`;
+        if (command === "set_range") return `Range: ${value}`;
+        return value;
+      }
+
+      function updateValueField() {
+        const needsValue = ["set_mode", "set_range"].includes(commandSelect.value);
+        commandValue.disabled = !needsValue;
+        commandValue.placeholder = needsValue
+          ? "Enter value"
+          : "Not required for this command";
+      }
+
+      async function fetchMachine() {
+        const token = getStoredToken();
+        if (!token) {
+          machineSubtitle.textContent = "Add a valid access token to load details.";
+          return;
+        }
+        try {
+          const response = await fetch(`${apiBase}/${machineId}`, {
+            headers: getAuthHeaders(),
+          });
+          if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+          }
+          const machine = await response.json();
+          const statusClass = `status-${machine.status}`;
+          machineTitle.textContent = machine.machine_name || "Unnamed machine";
+          machineSubtitle.textContent = `Machine ID: ${machine.id}`;
+          machineMeta.innerHTML = `
+            <div>
+              <div class="meta-label">Status</div>
+              <div class="status-pill ${statusClass}">${machine.status}</div>
+            </div>
+            <div>
+              <div class="meta-label">GPU</div>
+              <div>${machine.gpu_info || "Unknown"}</div>
+            </div>
+            <div>
+              <div class="meta-label">Keys/sec</div>
+              <div>${numberFormatter.format(machine.keys_per_sec || 0)}</div>
+            </div>
+            <div>
+              <div class="meta-label">Last Seen</div>
+              <div>${formatDate(machine.last_seen)}</div>
+            </div>
+            <div>
+              <div class="meta-label">Version</div>
+              <div>${machine.version || "-"}</div>
+            </div>
+          `;
+        } catch (error) {
+          machineSubtitle.textContent =
+            "Unable to load machine details. Check your token.";
+        }
+      }
+
+      async function loadCommands() {
+        try {
+          const response = await fetch(`${apiBase}/${machineId}/control?limit=10`, {
+            headers: getAuthHeaders(),
+          });
+          if (!response.ok) {
+            throw new Error("Failed to load commands");
+          }
+          const data = await response.json();
+          const commands = Array.isArray(data.commands) ? data.commands : [];
+          commandList.innerHTML = "";
+          if (!commands.length) {
+            commandList.textContent = "No commands issued yet.";
+            return;
+          }
+          commands.forEach((command) => {
+            const item = document.createElement("div");
+            item.className = `command-item ${command.status}`;
+            const valueText = formatCommandValue(command.command, command.value);
+            item.innerHTML = `
+              <div>
+                <strong>${command.command.replace("_", " ")}</strong>
+                ${valueText ? `<div>${valueText}</div>` : ""}
+                <div>${formatDate(command.issued_at)}</div>
+              </div>
+              <div>${command.status}</div>
+            `;
+            commandList.appendChild(item);
+          });
+        } catch (error) {
+          commandList.textContent = "Unable to load command history.";
+        }
+      }
+
+      async function sendControlCommand(command, value) {
+        try {
+          const response = await fetch(`${apiBase}/${machineId}/control`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify({ command, value }),
+          });
+          if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+          }
+          feedbackEl.textContent = `Sent ${command} command.`;
+          await loadCommands();
+        } catch (error) {
+          feedbackEl.textContent =
+            "Failed to send command. Check your token and try again.";
+        }
+      }
+
+      saveTokenButton.addEventListener("click", () => {
+        const value = tokenInput.value.trim();
+        setStoredToken(value);
+        fetchMachine();
+        loadCommands();
+      });
+
+      refreshButton.addEventListener("click", () => {
+        fetchMachine();
+        loadCommands();
+      });
+
+      controlForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        feedbackEl.textContent = "";
+        const value = commandValue.value.trim() || null;
+        await sendControlCommand(commandSelect.value, value);
+        commandValue.value = "";
+      });
+
+      document.querySelectorAll("[data-command]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          feedbackEl.textContent = "";
+          await sendControlCommand(button.dataset.command, null);
+        });
+      });
+
+      if (authTokenFromHeader) {
+        setStoredToken(authTokenFromHeader);
+      }
+
+      updateValueField();
+      commandSelect.addEventListener("change", updateValueField);
+      fetchMachine();
+      loadCommands();
+      setInterval(() => {
+        fetchMachine();
+        loadCommands();
+      }, 10000);
+    </script>
+  </body>
+</html>

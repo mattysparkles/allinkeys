@@ -101,7 +101,8 @@ class CheckResponse(BaseModel):
 
 
 app = FastAPI(title="AllInKeys Central Telemetry")
-app.include_router(machines_router)
+app.include_router(machines_router, prefix="/v1/machines")
+app.include_router(machines_router, prefix="/api/machines")
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.mount(
@@ -109,6 +110,15 @@ app.mount(
     StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
     name="static",
 )
+dashboard_dist = os.path.join(
+    os.path.dirname(__file__), "..", "telemetry_dashboard", "dist"
+)
+if os.path.isdir(dashboard_dist):
+    app.mount(
+        "/",
+        StaticFiles(directory=dashboard_dist, html=True),
+        name="dashboard",
+    )
 
 
 def _expected_api_key() -> Optional[str]:
@@ -479,30 +489,30 @@ def range_distribution(
     parsed_since = _parse_since(since)
     conn = get_db_connection()
     try:
-        filters = ["user_id = ?", "range_id IS NOT NULL"]
+        filters = ["se.user_id = ?", "se.range_id IS NOT NULL"]
         params: List[Any] = [current_user.id]
         if parsed_since:
-            filters.append("last_seen >= ?")
+            filters.append("se.last_seen >= ?")
             params.append(parsed_since)
         if mode:
-            filters.append("mode = ?")
+            filters.append("se.mode = ?")
             params.append(mode)
         where_clause = f"WHERE {' AND '.join(filters)}"
         counts = conn.execute(
             f"""
-            SELECT range_id, COUNT(*) AS count
-            FROM seed_events
+            SELECT se.range_id, COUNT(*) AS count
+            FROM seed_events AS se
             {where_clause}
-            GROUP BY range_id
+            GROUP BY se.range_id
             """,
             params,
         ).fetchall()
         total_submissions = sum(row[1] for row in counts) if counts else 0
         distribution_rows = conn.execute(
             f"""
-            SELECT range_distribution
-            FROM seed_events
-            {where_clause} AND range_distribution IS NOT NULL
+            SELECT se.range_distribution
+            FROM seed_events AS se
+            {where_clause} AND se.range_distribution IS NOT NULL
             """,
             params,
         ).fetchall()
