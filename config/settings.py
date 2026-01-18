@@ -342,6 +342,11 @@ GPU_STRATEGY = "vanity_priority"  # Options: "vanity_priority", "csv_priority", 
 MAX_BACKLOG_THRESHOLD = 10  # backlog size to trigger GPU reassignment
 MIN_BACKLOG_THRESHOLD = 1  # backlog size to resume vanity GPU keygen
 GPU_VENDOR = "auto"  # "nvidia", "amd", or "auto"
+GPU_SWING_TARGET_BACKLOG_ETA = int(os.getenv("GPU_SWING_TARGET_BACKLOG_ETA", "30"))
+GPU_SWING_CLEARANCE_ETA = int(os.getenv("GPU_SWING_CLEARANCE_ETA", "10"))
+GPU_SWING_MIN_INTERVAL_SECONDS = int(
+    os.getenv("GPU_SWING_MIN_INTERVAL_SECONDS", "60")
+)
 
 # ===================== ALTCOIN ==========================
 # Default to the first detected GPU for altcoin derivation. This avoids
