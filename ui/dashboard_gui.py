@@ -24,10 +24,17 @@ _ = translation.gettext
 
 import settings
 
+SPARKLINE_POINT_COUNT = 50
+SPARKLINE_HEIGHT = 30
+SPARKLINE_WIDTH = 140
+SPARKLINE_BG = "#111111"
+SPARKLINE_LINE = "#4FC3F7"
+
 from config.settings import (
     STATS_TO_DISPLAY,
     BUTTONS_ENABLED,
     DASHBOARD_REFRESH_INTERVAL,
+    DASHBOARD_SHOW_SPARKLINES,
     CONFIG_FILE_PATH,
     METRICS_LABEL_MAP,
     LOGO_ASCII,
@@ -64,6 +71,13 @@ class DashboardGUI:
         self.checkbox_vars = {}
         self.module_states = {}
         self.module_buttons = {}
+        self.sparkline_canvases = {}
+        self.sparkline_history_keys = {
+            "keys_per_sec": "keys_per_sec",
+            "backlog_eta": "backlog_eta_seconds",
+            "disk_free_gb": "disk_free_percent",
+            "telemetry_flush_rate": "telemetry_flush_rate",
+        }
         self.create_widgets()
         self.load_settings_into_checkboxes()
         # Allow other modules a moment to update metrics before syncing button states
@@ -177,6 +191,7 @@ class DashboardGUI:
             "ram_usage",
             "disk_free_gb",
             "disk_fill_eta",
+            "telemetry_flush_rate",
             "gpu_stats",
             "gpu_assignments",
             "gpu_strategy",
@@ -294,20 +309,38 @@ class DashboardGUI:
                     self.metrics[key] = txt
                 else:
                     font_opt = SMALL_FONT if key in SMALL_FONT_KEYS else FONT
+                    cell = frame
+                    if DASHBOARD_SHOW_SPARKLINES and key in self.sparkline_history_keys:
+                        cell = ttk.Frame(frame)
+                        cell.grid(row=i, column=1, sticky="w", padx=2, pady=2)
                     lbl = tk.Label(
-                        frame,
+                        cell,
                         text=_("Loading..."),
                         fg="white",
                         bg="#222222",
                         font=font_opt,
                         justify="left",
                     )
-                    lbl.grid(row=i, column=1, sticky="w", padx=2, pady=2)
+                    if cell is frame:
+                        lbl.grid(row=i, column=1, sticky="w", padx=2, pady=2)
+                    else:
+                        lbl.pack(anchor="w")
                     lbl.bind(
                         "<Configure>",
                         lambda e, l=lbl: l.config(wraplength=l.winfo_width()),
                     )
                     self.metrics[key] = lbl
+                    if cell is not frame:
+                        canvas = tk.Canvas(
+                            cell,
+                            width=SPARKLINE_WIDTH,
+                            height=SPARKLINE_HEIGHT,
+                            bg=SPARKLINE_BG,
+                            highlightthickness=1,
+                            highlightbackground="#333333",
+                        )
+                        canvas.pack(anchor="w", pady=(2, 0))
+                        self.sparkline_canvases[key] = canvas
 
             if group == "Backlog":
                 bp_row = len(keys)
@@ -642,6 +675,49 @@ class DashboardGUI:
             lines.append("   ".join(row_parts))
         return "\n".join(lines)
 
+    def _draw_sparkline(self, canvas, values):
+        canvas.delete("all")
+        width = int(canvas.cget("width"))
+        height = int(canvas.cget("height"))
+        cleaned = [v for v in values if isinstance(v, (int, float))]
+        if not cleaned:
+            canvas.create_line(0, height - 1, width, height - 1, fill="#333333")
+            canvas.create_text(
+                width / 2,
+                height / 2,
+                text=_("N/A"),
+                fill="#666666",
+                font=("Segoe UI", 7),
+            )
+            return
+        sample = cleaned[-SPARKLINE_POINT_COUNT:]
+        min_val = min(sample)
+        max_val = max(sample)
+        points = []
+        span = max_val - min_val
+        for idx, val in enumerate(sample):
+            x = 1 + (width - 2) * idx / max(1, len(sample) - 1)
+            if span == 0:
+                y = height / 2
+            else:
+                y = height - 2 - (val - min_val) * (height - 4) / span
+            points.extend([x, y])
+        canvas.create_line(points, fill=SPARKLINE_LINE, width=1.5)
+        canvas.create_line(0, height - 1, width, height - 1, fill="#333333")
+
+    def update_sparklines(self, stats):
+        if not DASHBOARD_SHOW_SPARKLINES or not self.sparkline_canvases:
+            return
+        rate_history = stats.get("rate_history", {}) or {}
+        if not isinstance(rate_history, dict):
+            return
+        for key, canvas in self.sparkline_canvases.items():
+            history_key = self.sparkline_history_keys.get(key)
+            values = rate_history.get(history_key, []) if history_key else []
+            if not isinstance(values, list):
+                values = []
+            self._draw_sparkline(canvas, values)
+
     def sync_module_states(self):
         """Synchronize button states with current metrics on startup."""
         try:
@@ -831,6 +907,7 @@ class DashboardGUI:
                         self._flash_widget(widget)
                     self.prev_values[key] = disp
                 widget.config(text=disp)
+        self.update_sparklines(stats)
 
     def open_config_file(self):
         if not os.path.exists(CONFIG_FILE_PATH):

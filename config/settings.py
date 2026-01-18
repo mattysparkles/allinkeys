@@ -654,6 +654,7 @@ STATS_TO_DISPLAY = {
     "ram_usage": SHOW_RAM_USAGE_STATS,
     "disk_free_gb": SHOW_DISK_FREE,
     "disk_fill_eta": SHOW_DISK_FREE,
+    "telemetry_flush_rate": True,
     "uptime": SHOW_UPTIME,
     "csv_checked_today": SHOW_NEW_CSV_CHECKED_TODAY_TOTAL,
     "csv_rechecked_today": SHOW_CSV_RECHECKED_TOTAL_TODAY,
@@ -703,6 +704,7 @@ STATS_TO_DISPLAY = {
 }
 # ===================== ⏱️ DASHBOARD REFRESH ==========================
 DASHBOARD_REFRESH_INTERVAL = 1.0  # seconds between dashboard UI updates
+DASHBOARD_SHOW_SPARKLINES = True
 
 # ===================== 📋 DASHBOARD METRIC LABELS ==========================
 # Human friendly names for dashboard metrics
@@ -717,6 +719,7 @@ METRICS_LABEL_MAP = {
     "ram_usage": "RAM Usage",
     "disk_free_gb": "Disk Free (GB)",
     "disk_fill_eta": "Disk Fill ETA",
+    "telemetry_flush_rate": "Telemetry Flush Rate",
     "uptime": "Uptime",
     "csv_checked_today": "Day-One Checked",
     "csv_rechecked_today": "Unique Rechecked",

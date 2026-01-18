@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import threading
+import shutil
 from datetime import datetime, timezone, timedelta
 import core.checkpoint as checkpoint
 from contextlib import nullcontext
@@ -185,7 +186,74 @@ metrics = None
 
 # Rolling history of rate-based metrics
 RATE_HISTORY: Dict[str, list[float]] = {}
-MAX_RATE_HISTORY = 20
+MAX_RATE_HISTORY = 50
+
+_SPARKLINE_HISTORY_METRICS = {
+    "keys_per_sec": "keys_per_sec",
+    "backlog_eta": "backlog_eta_seconds",
+    "disk_free_gb": "disk_free_percent",
+    "disk_free_percent": "disk_free_percent",
+    "telemetry_flush_rate": "telemetry_flush_rate",
+}
+
+
+def _coerce_float(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        text = str(value).strip()
+        if not text or text.upper() == "N/A":
+            return None
+        return float(text.replace("%", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_eta_seconds(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text or text.upper() == "N/A":
+        return None
+    parts = text.split(":")
+    if not all(p.isdigit() for p in parts):
+        return None
+    nums = [int(p) for p in parts]
+    if len(nums) == 3:
+        hours, minutes, seconds = nums
+    elif len(nums) == 2:
+        hours, minutes, seconds = 0, nums[0], nums[1]
+    else:
+        hours, minutes, seconds = 0, 0, nums[0]
+    return float(hours * 3600 + minutes * 60 + seconds)
+
+
+def _disk_free_percent():
+    try:
+        usage = shutil.disk_usage(os.path.abspath(os.sep))
+    except Exception:
+        return None
+    if usage.total == 0:
+        return None
+    return round((usage.free / usage.total) * 100, 2)
+
+
+def _record_metric_history(metric: str, value: float, history_size: int = MAX_RATE_HISTORY) -> None:
+    history = RATE_HISTORY.setdefault(metric, [])
+    history.append(value)
+    if len(history) > history_size:
+        history.pop(0)
+    if metrics is None:
+        return
+    rate_history = metrics.get("rate_history")
+    if not _is_dict_like(rate_history):
+        rate_history = manager.dict() if manager else {}
+        metrics["rate_history"] = rate_history
+    rate_history[metric] = list(history)
 
 
 def load_lifetime_metrics():
@@ -404,7 +472,9 @@ def _default_metrics():
         "avg_keygen_time": 0,
         "avg_check_time": 0,
         "disk_free_gb": 0,
+        "disk_free_percent": 0,
         "disk_fill_eta": "N/A",
+        "telemetry_flush_rate": 0,
         "cpu_usage": "0%",
         "ram_usage": "0 GB / 0 GB (0%)",
         "gpu_stats": {},
@@ -479,7 +549,8 @@ def _default_metrics():
         "pin_reset_required": False,
         "metrics_last_reset": datetime.now().isoformat(),
         "last_updated": datetime.now().isoformat(),
-        "thread_health_flags": THREAD_HEALTH.copy()
+        "thread_health_flags": THREAD_HEALTH.copy(),
+        "rate_history": {},
     }
 
 
@@ -520,7 +591,7 @@ def _ensure_inited():
         init_shared_metrics()
 
 
-def update_dashboard_stat(key, value=None, retries=5, delay=0.5):
+def update_dashboard_stat(key, value=None, retries=5, delay=0.5, skip_history=False):
     """Safely update dashboard metrics shared across processes.
 
     Parameters
@@ -548,9 +619,9 @@ def update_dashboard_stat(key, value=None, retries=5, delay=0.5):
             try:
                 if metrics_lock:
                     with metrics_lock:
-                        _update_stat_internal(key, value)
+                        _update_stat_internal(key, value, skip_history=skip_history)
                 else:
-                    _update_stat_internal(key, value)
+                    _update_stat_internal(key, value, skip_history=skip_history)
                 return
             except Exception as e:
                 logger.warning(
@@ -570,7 +641,24 @@ def _is_dict_like(obj):
     return isinstance(obj, (dict, DictProxy))
 
 
-def _update_stat_internal(key, value=None):
+def _maybe_record_history(key, value) -> None:
+    if not isinstance(key, str):
+        return
+    history_key = _SPARKLINE_HISTORY_METRICS.get(key)
+    if not history_key:
+        return
+    if key == "backlog_eta":
+        numeric = _parse_eta_seconds(value)
+    elif key == "disk_free_gb":
+        numeric = _disk_free_percent()
+    else:
+        numeric = _coerce_float(value)
+    if numeric is None:
+        return
+    _record_metric_history(history_key, numeric)
+
+
+def _update_stat_internal(key, value=None, skip_history=False):
     global metrics
     if metrics is None:
         print(f"⚠️ _update_stat_internal skipped: metrics is None (key={key})", flush=True)
@@ -578,7 +666,7 @@ def _update_stat_internal(key, value=None):
 
     if isinstance(key, dict) and value is None:
         for k, v in key.items():
-            _update_stat_internal(k, v)
+            _update_stat_internal(k, v, skip_history=skip_history)
         return
 
     if value is None:
@@ -595,6 +683,8 @@ def _update_stat_internal(key, value=None):
         top, sub = key.split(".", 1)
         if _is_dict_like(metrics.get(top)):
             metrics[top][sub] = value
+            if not skip_history:
+                _maybe_record_history(key, value)
             return
 
     existing = metrics.get(key)
@@ -613,6 +703,8 @@ def _update_stat_internal(key, value=None):
     alias = METRIC_ALIASES.get(key)
     if alias:
         metrics[alias] = value
+    if not skip_history:
+        _maybe_record_history(key, value)
 
 def increment_metric(key, amount=1):
     """Increase a metric value in a process-safe manner."""
@@ -704,13 +796,11 @@ def record_rate(metric: str, value: float, history_size: int = MAX_RATE_HISTORY)
     history_size: int
         Number of recent samples to keep when computing the average.
     """
-    history = RATE_HISTORY.setdefault(metric, [])
-    history.append(value)
-    if len(history) > history_size:
-        history.pop(0)
+    _record_metric_history(metric, value, history_size=history_size)
+    history = RATE_HISTORY.get(metric, [])
     avg = sum(history) / len(history) if history else 0.0
-    update_dashboard_stat(metric, round(value, 2))
-    update_dashboard_stat(f"{metric}_avg", round(avg, 2))
+    update_dashboard_stat(metric, round(value, 2), skip_history=True)
+    update_dashboard_stat(f"{metric}_avg", round(avg, 2), skip_history=True)
     logger.info(f"[rate] {metric}: {value:.2f}/s (avg {avg:.2f}/s)")
 
 
