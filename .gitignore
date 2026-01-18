@@ -30,3 +30,7 @@ Downloads/*
 !Downloads/.gitkeep
 # Ignore compiled translation files
 *.mo
+
+# Ignore runtime and deployment artifacts
+.env
+telemetry_dashboard/

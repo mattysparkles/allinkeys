@@ -51,6 +51,24 @@
       .controls button:hover {
         background: #20263a;
       }
+      .control-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid #2d3240;
+        color: #e1e6f0;
+        font-size: 11px;
+        font-weight: 600;
+        text-decoration: none;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        transition: background 0.2s ease;
+      }
+      .control-link:hover {
+        background: #20263a;
+      }
       .token-input {
         min-width: 280px;
         flex: 1;
@@ -225,8 +243,8 @@
       No machines are registered yet.
     </section>
     <script>
-      const apiEndpoint = "/v1/machines/me";
-      const controlEndpoint = "/v1/machines";
+      const apiEndpoint = "/api/machines/me";
+      const controlEndpoint = "/api/machines";
       const authTokenFromHeader = "{{ auth_token | e }}";
       const tokenInput = document.getElementById("tokenInput");
       const saveTokenButton = document.getElementById("saveTokenButton");
@@ -400,7 +418,12 @@
           const statusClass = `status-${machine.status}`;
           card.innerHTML = `
             <div class="machine-header">
-              <h2>${machine.machine_name || "Unnamed machine"}</h2>
+              <div>
+                <h2>${machine.machine_name || "Unnamed machine"}</h2>
+                <a class="control-link" href="/dashboard/machine/${machine.id}">
+                  Control
+                </a>
+              </div>
               <span class="status-pill ${statusClass}">${machine.status}</span>
             </div>
             <div class="machine-meta">

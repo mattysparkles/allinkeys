@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from config.telemetry import TOKEN_EXPIRY
 from telemetry_service.auth import create_access_token, hash_password, verify_password
 from telemetry_service.db import get_db_connection
-from telemetry_service.dependencies import get_current_user
+from telemetry_service.dependencies import get_current_user, get_optional_user
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
 from telemetry_service.routes.dashboard import router as dashboard_router
@@ -51,9 +51,17 @@ class MachineInfo(BaseModel):
     time_to_disk_full: Optional[str] = None
 
 
+class MachineSeriesPoint(BaseModel):
+    bucket: str
+    machines: int
+
+
 class MachineStatsResponse(BaseModel):
     slug: str
     machines: List[MachineInfo]
+    granularity: str = "hour"
+    window: int = 24
+    series: List[MachineSeriesPoint] = Field(default_factory=list)
 
 
 class SeedStatsResponse(BaseModel):
@@ -80,6 +88,8 @@ class SeedRangeResponse(BaseModel):
 
 
 class RangeDistributionEntry(BaseModel):
+    range_id: Optional[str] = None
+    submissions: int
     range_value: Optional[str] = None
     submission_count: int
     submission_percent: float
@@ -94,8 +104,43 @@ class RangeDistributionResponse(BaseModel):
     unique_ranges: int
     coverage_percent: float
     ranges: List[RangeDistributionEntry]
+    limit: Optional[int] = None
     since: Optional[str] = None
     mode: Optional[str] = None
+
+
+class MachineHealthEntry(BaseModel):
+    app_instance_id: str
+    last_seen: Optional[str] = None
+    stale: bool
+
+
+class MachineHealthResponse(BaseModel):
+    stale_minutes: int
+    machines: List[MachineHealthEntry]
+    stale_machines: List[str]
+
+
+class RecentRangeEntry(BaseModel):
+    range_id: Optional[str] = None
+    mode: Optional[str] = None
+    app_instance_id: Optional[str] = None
+    timestamp: Optional[str] = None
+
+
+class RecentRangesResponse(BaseModel):
+    limit: int
+    ranges: List[RecentRangeEntry]
+
+
+class ContributorEntry(BaseModel):
+    app_instance_id: str
+    submissions: int
+
+
+class ContributorsResponse(BaseModel):
+    limit: int
+    contributors: List[ContributorEntry]
 
 
 class CheckResponse(BaseModel):
@@ -103,7 +148,8 @@ class CheckResponse(BaseModel):
 
 
 app = FastAPI(title="AllInKeys Central Telemetry")
-app.include_router(machines_router)
+app.include_router(machines_router, prefix="/v1/machines")
+app.include_router(machines_router, prefix="/api/machines")
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(pairing_router)
@@ -124,6 +170,8 @@ def _expected_api_key() -> Optional[str]:
 async def api_key_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
     path = request.url.path
     if path.startswith("/v1"):
+        if path.startswith("/v1/dashboard"):
+            return await call_next(request)
         expected = _expected_api_key()
         if expected:
             provided = request.headers.get("X-API-Key")
@@ -267,6 +315,17 @@ def _parse_since(value: Optional[str]) -> Optional[str]:
     return value
 
 
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        if value.endswith("Z"):
+            return datetime.fromisoformat(value[:-1])
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 @app.post(
     "/v1/seed",
     response_model=IngestResponse,
@@ -304,7 +363,7 @@ def ingest(
 )
 def machine_stats(
     slug: str,
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: Optional[UserPublic] = Depends(get_optional_user),
 ) -> MachineStatsResponse:
     """Return machine telemetry for dashboard views.
 
@@ -316,7 +375,7 @@ def machine_stats(
         machines = [
             entry
             for entry in MACHINE_REGISTRY.values()
-            if entry.get("user_id") == current_user.id
+            if current_user is None or entry.get("user_id") == current_user.id
         ]
     machines.sort(
         key=lambda entry: (
@@ -324,7 +383,196 @@ def machine_stats(
             entry.get("machine_id") or "",
         )
     )
-    return MachineStatsResponse(slug=slug, machines=machines)
+    window_hours = 24
+    granularity = "hour"
+    now = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    window_start = now - timedelta(hours=window_hours - 1)
+    filters = [
+        "last_seen >= ?",
+        "COALESCE(machine_id, app_instance_id) IS NOT NULL",
+    ]
+    params: List[Any] = [window_start.isoformat() + "Z"]
+    if current_user is not None:
+        filters.append("user_id = ?")
+        params.append(current_user.id)
+    where_clause = f"WHERE {' AND '.join(filters)}"
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT
+                strftime('%Y-%m-%dT%H:00:00Z', last_seen) AS bucket,
+                COUNT(DISTINCT COALESCE(machine_id, app_instance_id)) AS machines
+            FROM seed_events
+            {where_clause}
+            GROUP BY bucket
+            ORDER BY bucket
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+    counts = {row[0]: row[1] for row in rows if row[0]}
+    series: List[MachineSeriesPoint] = []
+    for offset in range(window_hours):
+        bucket_time = window_start + timedelta(hours=offset)
+        bucket = bucket_time.isoformat(timespec="seconds") + "Z"
+        series.append(
+            MachineSeriesPoint(
+                bucket=bucket,
+                machines=int(counts.get(bucket, 0)),
+            )
+        )
+    return MachineStatsResponse(
+        slug=slug,
+        machines=machines,
+        granularity=granularity,
+        window=window_hours,
+        series=series,
+    )
+
+
+@app.get(
+    "/v1/dashboard/{slug}/machines/health",
+    response_model=MachineHealthResponse,
+    tags=["Admin"],
+    description="Report machine health and stale status for dashboards.",
+)
+def machine_health(
+    slug: str,
+    stale_minutes: int = Query(60, ge=1, le=1440),
+    current_user: Optional[UserPublic] = Depends(get_optional_user),
+) -> MachineHealthResponse:
+    del slug
+    cutoff = datetime.utcnow() - timedelta(minutes=stale_minutes)
+    conn = get_db_connection()
+    try:
+        filters: List[str] = []
+        params: List[Any] = []
+        if current_user is not None:
+            filters.append("user_id = ?")
+            params.append(current_user.id)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        rows = conn.execute(
+            f"""
+            SELECT id, last_seen
+            FROM machines
+            {where_clause}
+            ORDER BY last_seen DESC
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+    machines: List[MachineHealthEntry] = []
+    stale_ids: List[str] = []
+    for machine_id, last_seen in rows:
+        last_seen_dt = _parse_iso_datetime(last_seen)
+        stale = bool(last_seen_dt and last_seen_dt < cutoff)
+        if last_seen_dt is None:
+            stale = True
+        machines.append(
+            MachineHealthEntry(
+                app_instance_id=machine_id,
+                last_seen=last_seen,
+                stale=stale,
+            )
+        )
+        if stale:
+            stale_ids.append(machine_id)
+    return MachineHealthResponse(
+        stale_minutes=stale_minutes,
+        machines=machines,
+        stale_machines=stale_ids,
+    )
+
+
+@app.get(
+    "/v1/dashboard/{slug}/ranges/recent",
+    response_model=RecentRangesResponse,
+    tags=["Admin"],
+    description="List recently active ranges for dashboards.",
+)
+def recent_ranges(
+    slug: str,
+    limit: int = Query(50, ge=1, le=200),
+    current_user: Optional[UserPublic] = Depends(get_optional_user),
+) -> RecentRangesResponse:
+    del slug
+    filters = ["range_id IS NOT NULL"]
+    params: List[Any] = []
+    if current_user is not None:
+        filters.append("user_id = ?")
+        params.append(current_user.id)
+    params.append(limit)
+    where_clause = f"WHERE {' AND '.join(filters)}"
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT range_id, mode, COALESCE(machine_id, app_instance_id), last_seen
+            FROM seed_events
+            {where_clause}
+            ORDER BY last_seen DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+    ranges = [
+        RecentRangeEntry(
+            range_id=row[0],
+            mode=row[1],
+            app_instance_id=row[2],
+            timestamp=row[3],
+        )
+        for row in rows
+    ]
+    return RecentRangesResponse(limit=limit, ranges=ranges)
+
+
+@app.get(
+    "/v1/dashboard/{slug}/contributors/top",
+    response_model=ContributorsResponse,
+    tags=["Admin"],
+    description="Return top contributors for dashboards.",
+)
+def top_contributors(
+    slug: str,
+    limit: int = Query(20, ge=1, le=100),
+    current_user: Optional[UserPublic] = Depends(get_optional_user),
+) -> ContributorsResponse:
+    del slug
+    filters = ["COALESCE(machine_id, app_instance_id) IS NOT NULL"]
+    params: List[Any] = []
+    if current_user is not None:
+        filters.append("user_id = ?")
+        params.append(current_user.id)
+    params.append(limit)
+    where_clause = f"WHERE {' AND '.join(filters)}"
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT COALESCE(machine_id, app_instance_id) AS app_id,
+                   COUNT(*) AS submissions
+            FROM seed_events
+            {where_clause}
+            GROUP BY app_id
+            ORDER BY submissions DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+    contributors = [
+        ContributorEntry(app_instance_id=row[0], submissions=row[1])
+        for row in rows
+        if row[0]
+    ]
+    return ContributorsResponse(limit=limit, contributors=contributors)
 
 
 @app.get(
@@ -472,7 +720,8 @@ def range_distribution(
     slug: str,
     since: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
-    current_user: UserPublic = Depends(get_current_user),
+    limit: int = Query(200, ge=1, le=500),
+    current_user: Optional[UserPublic] = Depends(get_optional_user),
 ) -> RangeDistributionResponse:
     """Aggregate distribution metrics for range coverage charts.
 
@@ -483,30 +732,36 @@ def range_distribution(
     parsed_since = _parse_since(since)
     conn = get_db_connection()
     try:
-        filters = ["user_id = ?", "range_id IS NOT NULL"]
-        params: List[Any] = [current_user.id]
+        filters = ["se.range_id IS NOT NULL"]
+        params: List[Any] = []
+        if current_user is not None:
+            filters.append("se.user_id = ?")
+            params.append(current_user.id)
         if parsed_since:
-            filters.append("last_seen >= ?")
+            filters.append("se.last_seen >= ?")
             params.append(parsed_since)
         if mode:
-            filters.append("mode = ?")
+            filters.append("se.mode = ?")
             params.append(mode)
         where_clause = f"WHERE {' AND '.join(filters)}"
         counts = conn.execute(
             f"""
-            SELECT range_id, COUNT(*) AS count
-            FROM seed_events
+            SELECT se.range_id, COUNT(*) AS count
+            FROM seed_events AS se
             {where_clause}
-            GROUP BY range_id
+            GROUP BY se.range_id
             """,
             params,
         ).fetchall()
         total_submissions = sum(row[1] for row in counts) if counts else 0
+        counts = sorted(counts, key=lambda row: row[1], reverse=True)
+        if limit:
+            counts = counts[:limit]
         distribution_rows = conn.execute(
             f"""
-            SELECT range_distribution
-            FROM seed_events
-            {where_clause} AND range_distribution IS NOT NULL
+            SELECT se.range_distribution
+            FROM seed_events AS se
+            {where_clause} AND se.range_distribution IS NOT NULL
             """,
             params,
         ).fetchall()
@@ -552,6 +807,8 @@ def range_distribution(
             percent = (count / total_submissions * 100) if total_submissions else 0
             ranges.append(
                 {
+                    "range_id": range_id,
+                    "submissions": count,
                     "range_value": range_id,
                     "submission_count": count,
                     "submission_percent": percent,
@@ -574,6 +831,7 @@ def range_distribution(
             unique_ranges=len(ranges),
             coverage_percent=coverage,
             ranges=ranges,
+            limit=limit,
             since=since,
             mode=mode,
         )
@@ -639,3 +897,18 @@ def _check(seed_fp: str, user_id: int) -> CheckResponse:
         return CheckResponse(used=bool(used))
     finally:
         conn.close()
+
+
+def _mount_dashboard_ui() -> None:
+    dashboard_dist = os.path.join(
+        os.path.dirname(__file__), "..", "telemetry_dashboard", "dist"
+    )
+    if os.path.isdir(dashboard_dist):
+        app.mount(
+            "/",
+            StaticFiles(directory=dashboard_dist, html=True),
+            name="dashboard",
+        )
+
+
+_mount_dashboard_ui()
