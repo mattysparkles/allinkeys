@@ -59,3 +59,13 @@ class MachineRegisterRequest(BaseModel):
 class MachineRegisterResponse(BaseModel):
     machine_id: str
     message: str
+
+
+class MachineSummary(BaseModel):
+    id: str
+    machine_name: Optional[str] = None
+    gpu_info: Optional[str] = None
+    status: str
+    keys_per_sec: float = 0
+    last_seen: Optional[str] = None
+    version: Optional[str] = None

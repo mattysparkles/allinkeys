@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Machines</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+        background: #0b0d12;
+        color: #f6f7fb;
+      }
+      body {
+        margin: 0;
+        padding: 32px 40px 64px;
+      }
+      header {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      h1 {
+        font-size: 28px;
+        margin: 0;
+      }
+      .subtitle {
+        color: #9fa4b4;
+        margin: 0;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .controls input,
+      .controls button {
+        border-radius: 8px;
+        border: 1px solid #2d3240;
+        background: #141824;
+        color: inherit;
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+      .controls button {
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+      .controls button:hover {
+        background: #20263a;
+      }
+      .token-input {
+        min-width: 280px;
+        flex: 1;
+      }
+      .status-pill {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .status-online {
+        background: rgba(66, 186, 150, 0.2);
+        color: #42ba96;
+      }
+      .status-stalled {
+        background: rgba(255, 183, 77, 0.2);
+        color: #ffb74d;
+      }
+      .status-offline {
+        background: rgba(239, 83, 80, 0.2);
+        color: #ef5350;
+      }
+      .machine-grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      }
+      .machine-card {
+        background: #121622;
+        border: 1px solid #20263a;
+        border-radius: 16px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        box-shadow: 0 12px 30px rgba(5, 8, 16, 0.35);
+      }
+      .machine-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .machine-header h2 {
+        font-size: 18px;
+        margin: 0;
+      }
+      .machine-meta {
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
+        color: #c4c9d6;
+      }
+      .machine-meta span {
+        color: #f6f7fb;
+      }
+      .empty-state {
+        padding: 48px;
+        text-align: center;
+        border-radius: 16px;
+        border: 1px dashed #2d3240;
+        color: #9fa4b4;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>My Machines</h1>
+        <p class="subtitle">Welcome back, {{ current_user.username }}.</p>
+      </div>
+      <div class="controls">
+        <input
+          id="searchInput"
+          type="search"
+          placeholder="Search by machine name or GPU..."
+        />
+        <input
+          id="tokenInput"
+          class="token-input"
+          type="password"
+          placeholder="Paste access token for API requests"
+        />
+        <button id="saveTokenButton" type="button">Save Token</button>
+        <button id="refreshButton" type="button">Refresh</button>
+      </div>
+    </header>
+    <section id="machineContainer" class="machine-grid"></section>
+    <section id="emptyState" class="empty-state" hidden>
+      No machines are registered yet.
+    </section>
+    <script>
+      const apiEndpoint = "/v1/machines/me";
+      const authTokenFromHeader = "{{ auth_token | e }}";
+      const tokenInput = document.getElementById("tokenInput");
+      const saveTokenButton = document.getElementById("saveTokenButton");
+      const refreshButton = document.getElementById("refreshButton");
+      const searchInput = document.getElementById("searchInput");
+      const machineContainer = document.getElementById("machineContainer");
+      const emptyState = document.getElementById("emptyState");
+
+      let machines = [];
+
+      const numberFormatter = new Intl.NumberFormat(undefined, {
+        maximumFractionDigits: 2,
+      });
+
+      function getStoredToken() {
+        return authTokenFromHeader || localStorage.getItem("telemetryToken") || "";
+      }
+
+      function setStoredToken(value) {
+        if (value) {
+          localStorage.setItem("telemetryToken", value);
+        } else {
+          localStorage.removeItem("telemetryToken");
+        }
+      }
+
+      async function fetchMachines() {
+        const token = getStoredToken();
+        if (!token) {
+          machineContainer.innerHTML = "";
+          emptyState.hidden = false;
+          emptyState.textContent =
+            "Add a valid access token to load your machines.";
+          return;
+        }
+        try {
+          const response = await fetch(apiEndpoint, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+          }
+          machines = await response.json();
+          renderMachines();
+        } catch (error) {
+          machineContainer.innerHTML = "";
+          emptyState.hidden = false;
+          emptyState.textContent =
+            "Unable to load machines. Check your token and try again.";
+        }
+      }
+
+      function formatDate(value) {
+        if (!value) return "—";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString();
+      }
+
+      function formatKps(value) {
+        return numberFormatter.format(value || 0);
+      }
+
+      function renderMachines() {
+        const filterValue = searchInput.value.trim().toLowerCase();
+        const filtered = machines.filter((machine) => {
+          if (!filterValue) return true;
+          return (
+            (machine.machine_name || "").toLowerCase().includes(filterValue) ||
+            (machine.gpu_info || "").toLowerCase().includes(filterValue)
+          );
+        });
+        machineContainer.innerHTML = "";
+        if (!filtered.length) {
+          emptyState.hidden = false;
+          emptyState.textContent = filterValue
+            ? "No machines match that search."
+            : "No machines are registered yet.";
+          return;
+        }
+        emptyState.hidden = true;
+        filtered.forEach((machine) => {
+          const card = document.createElement("div");
+          card.className = "machine-card";
+          const statusClass = `status-${machine.status}`;
+          card.innerHTML = `
+            <div class="machine-header">
+              <h2>${machine.machine_name || "Unnamed machine"}</h2>
+              <span class="status-pill ${statusClass}">${machine.status}</span>
+            </div>
+            <div class="machine-meta">
+              <div>GPU: <span>${machine.gpu_info || "Unknown"}</span></div>
+              <div>Keys/sec: <span>${formatKps(machine.keys_per_sec)}</span></div>
+              <div>Last Seen: <span>${formatDate(machine.last_seen)}</span></div>
+              <div>Version: <span>${machine.version || "—"}</span></div>
+            </div>
+          `;
+          machineContainer.appendChild(card);
+        });
+      }
+
+      saveTokenButton.addEventListener("click", () => {
+        const value = tokenInput.value.trim();
+        setStoredToken(value);
+        fetchMachines();
+      });
+
+      refreshButton.addEventListener("click", fetchMachines);
+      searchInput.addEventListener("input", renderMachines);
+
+      if (authTokenFromHeader) {
+        setStoredToken(authTokenFromHeader);
+      }
+      fetchMachines();
+      setInterval(fetchMachines, 10000);
+    </script>
+  </body>
+</html>
