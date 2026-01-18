@@ -154,4 +154,24 @@ def get_db_connection() -> sqlite3.Connection:
         ON pending_control(machine_id)
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pairing_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pair_code TEXT UNIQUE NOT NULL,
+            status TEXT DEFAULT 'pending',
+            user_id INTEGER,
+            token TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            claimed_at TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_pairing_code
+        ON pairing_requests(pair_code)
+        """
+    )
     return conn

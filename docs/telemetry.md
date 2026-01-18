@@ -60,6 +60,19 @@ curl -X POST http://localhost:3088/v1/seed \
   -d '[{"seed_fingerprint":"abc123","used":true}]'
 ```
 
+## Client onboarding & pairing
+
+The telemetry client supports an onboarding wizard that can pair a machine via
+browser. Pairing endpoints:
+
+* `POST /v1/pair/init` → `{pair_code, pair_url, poll_interval_seconds}`
+* `GET /v1/pair/status?pair_code=ABC123` → `{status, token?}`
+* `POST /v1/pair/claim` with `{pair_code, username, password}` to approve pairing
+
+The pairing URL serves a small HTML page at `/pair` that lets a user approve a
+pairing code. Tokens returned from pairing are secrets and should be treated
+like passwords.
+
 ## Seed analytics endpoints
 
 ### `GET /v1/seed/stats`

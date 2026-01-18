@@ -69,7 +69,16 @@ def _seed_in_ranges(seed: int, ranges) -> bool:
 def telemetry_enabled() -> bool:
     """Return ``True`` when experimental telemetry features are active."""
 
-    return bool(getattr(settings, "SEED_TELEMETRY_ENABLED", False))
+    if not bool(getattr(settings, "SEED_TELEMETRY_ENABLED", False)):
+        return False
+    try:
+        from core.telemetry import telemetry_opted_out
+
+        if telemetry_opted_out():
+            return False
+    except Exception:
+        pass
+    return True
 
 # Batch progress
 KEYGEN_STATE = {

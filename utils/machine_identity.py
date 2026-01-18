@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import re
 import socket
 import subprocess
 import uuid
@@ -210,3 +211,41 @@ def get_machine_name(machine_id: Optional[str] = None) -> str:
     )
     _save_state(state)
     return generated
+
+
+def get_machine_name_state() -> Tuple[Optional[str], Optional[str]]:
+    """Return (machine_name, source) from the local identity state."""
+
+    state = _load_state()
+    name = state.get("machine_name")
+    source = state.get("machine_name_source")
+    return (str(name) if name else None, str(source) if source else None)
+
+
+def suggest_machine_name() -> str:
+    """Return a hostname-based default machine name suggestion."""
+
+    hostname = socket.gethostname() or "albatross"
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "-", hostname).strip("-")
+    if not cleaned:
+        cleaned = "albatross"
+    if not cleaned[-1].isdigit():
+        cleaned = f"{cleaned}-1"
+    return cleaned.upper()
+
+
+def set_machine_name(name: str) -> None:
+    """Persist a friendly machine name override to the local identity state."""
+
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return
+    state = _load_state()
+    state.update(
+        {
+            "machine_name": cleaned,
+            "machine_name_source": "user",
+            "machine_name_updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    )
+    _save_state(state)

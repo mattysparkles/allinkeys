@@ -102,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-telemetry", action="store_true", help="Disable telemetry reporting"
     )
     parser.add_argument(
+        "--telemetry-setup",
+        action="store_true",
+        help="Run the telemetry setup wizard",
+    )
+    parser.add_argument(
         "--auth-token",
         help="Bearer token used for authenticated telemetry endpoints",
     )
@@ -358,6 +363,17 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point used by ``__main__`` and tests."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "telemetry_setup", False):
+        from core.telemetry import run_telemetry_setup, _is_interactive
+
+        interactive = _is_interactive() and not getattr(args, "headless", False)
+        if not interactive:
+            print(
+                "[Telemetry] Telemetry setup requires an interactive terminal.",
+                flush=True,
+            )
+        else:
+            run_telemetry_setup(force=True)
     if getattr(args, "no_telemetry", False):
         settings.SEED_TELEMETRY_ENABLED = False
     if getattr(args, "auth_token", None):

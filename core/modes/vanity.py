@@ -515,7 +515,10 @@ def run_allinkeys(args, shared_metrics=None):
     shutdown_event = multiprocessing.Event()
     if settings.SEED_TELEMETRY_ENABLED and not getattr(args, "no_telemetry", False):
         # Start background client flusher
-        start_telemetry(shutdown_event)
+        start_telemetry(
+            shutdown_event,
+            interactive=not getattr(args, "headless", False),
+        )
         # Optionally run the embedded central service on this node
         try:
             svc_proc = start_embedded_telemetry_service()

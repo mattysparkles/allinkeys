@@ -31,10 +31,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
+import sys
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -42,7 +45,9 @@ from typing import Any, Dict, Iterable, List, Optional
 import requests
 import multiprocessing
 
-from config.directories import LOG_DIR
+import config.settings as settings
+
+from config.directories import BASE_DIR, LOG_DIR
 from config.telemetry import (
     AUTO_START_TELEMETRY_SERVICE,
     CLIENT_VERSION,
@@ -62,7 +67,13 @@ from config.telemetry import (
 from core.logger import get_logger, log_with_context
 from core.worker_bootstrap import _safe_inc_metric
 from utils.thread_guard import can_spawn_thread
-from utils.machine_identity import get_machine_id, get_machine_name
+from utils.machine_identity import (
+    get_machine_id,
+    get_machine_name,
+    get_machine_name_state,
+    set_machine_name,
+    suggest_machine_name,
+)
 
 logger = get_logger(__name__)
 
@@ -73,9 +84,349 @@ CONTROL_STATE_PATH = Path(LOG_DIR) / "control_state.json"
 RANGE_RECENT_LIMIT = 50
 CHECK_CACHE_MAX_SIZE = 10_000
 AUTH_TOKEN_ENV = "AUTH_TOKEN"
+TOKEN_STORE_PATH = Path(BASE_DIR) / "config" / ".telemetry_token"
+LOCAL_TELEMETRY_PATH = Path(BASE_DIR) / "config" / "local_telemetry.json"
+PAIR_POLL_DEFAULT_SECONDS = 3
+
+_MISSING_TOKEN_LOGGED = False
+_INVALID_TOKEN_LOGGED = False
 
 _CHECK_CACHE: Dict[tuple[str, str, Optional[str]], tuple[bool, float]] = {}
 _CHECK_CACHE_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True)
+class TelemetrySetupOutcome:
+    token: Optional[str]
+    disabled: bool = False
+
+
+def _ensure_parent(path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+
+
+def _load_local_config(path: Optional[Path] = None) -> Dict[str, Any]:
+    path = path or LOCAL_TELEMETRY_PATH
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_local_config(data: Dict[str, Any], path: Optional[Path] = None) -> None:
+    path = path or LOCAL_TELEMETRY_PATH
+    try:
+        _ensure_parent(path)
+        path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception:
+        return
+
+
+def load_persisted_auth_token(path: Optional[Path] = None) -> Optional[str]:
+    path = path or TOKEN_STORE_PATH
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+    return value or None
+
+
+def persist_auth_token(token: str, path: Optional[Path] = None) -> None:
+    path = path or TOKEN_STORE_PATH
+    cleaned = (token or "").strip()
+    if not cleaned:
+        return
+    try:
+        _ensure_parent(path)
+        path.write_text(cleaned, encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        return
+
+
+def clear_persisted_auth_token(path: Optional[Path] = None) -> None:
+    path = path or TOKEN_STORE_PATH
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception:
+        return
+
+
+def telemetry_opted_out(path: Optional[Path] = None) -> bool:
+    return bool(_load_local_config(path).get("telemetry_disabled", False))
+
+
+def set_telemetry_opt_out(disabled: bool, path: Optional[Path] = None) -> None:
+    data = _load_local_config(path)
+    data["telemetry_disabled"] = bool(disabled)
+    _save_local_config(data, path)
+
+
+def _resolve_auth_token(explicit: Optional[str] = None) -> Optional[str]:
+    if explicit:
+        return explicit
+    env_value = os.getenv(AUTH_TOKEN_ENV)
+    if env_value:
+        return env_value
+    return load_persisted_auth_token()
+
+
+def _is_interactive() -> bool:
+    try:
+        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+    except Exception:
+        return False
+
+
+def _telemetry_base_url(endpoint: str) -> str:
+    endpoint = endpoint.strip().rstrip("/")
+    if "/v1/" in endpoint:
+        return endpoint.split("/v1/")[0] + "/v1"
+    if endpoint.endswith("/v1"):
+        return endpoint
+    return endpoint
+
+
+def _telemetry_root_url(endpoint: str) -> str:
+    endpoint = endpoint.strip().rstrip("/")
+    if "/v1/" in endpoint:
+        return endpoint.split("/v1/")[0]
+    if endpoint.endswith("/v1"):
+        return endpoint[:-3]
+    return endpoint
+
+
+def _valid_token_format(token: str) -> bool:
+    cleaned = token.strip()
+    if len(cleaned) < 12:
+        return False
+    return bool(re.match(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$", cleaned))
+
+
+def _attempt_machine_registration(
+    *,
+    endpoint: str,
+    token: str,
+    machine_name: str,
+    requests_module=requests,
+) -> tuple[bool, Optional[str], str]:
+    register_url = f"{_telemetry_base_url(endpoint)}/machines/register"
+    metrics = _system_metrics_payload()
+    payload = {
+        "machine_name": machine_name,
+        "gpu_info": metrics.get("gpu_name"),
+        "version": CLIENT_VERSION,
+    }
+    try:
+        response = requests_module.post(
+            register_url,
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        status_label = f"HTTP {status}" if status else str(exc)
+        return False, None, status_label
+    machine_id = data.get("machine_id") if isinstance(data, dict) else None
+    if not machine_id:
+        return False, None, "Missing machine_id in response"
+    return True, str(machine_id), ""
+
+
+def _validate_auth_token(
+    *,
+    endpoint: str,
+    token: str,
+    requests_module=requests,
+) -> Optional[bool]:
+    root = _telemetry_root_url(endpoint)
+    if not root:
+        return None
+    try:
+        response = requests_module.get(
+            f"{root}/me",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+    except Exception:
+        return None
+    if response.status_code == 200:
+        return True
+    if response.status_code in {401, 403}:
+        return False
+    return None
+
+
+def _print_disclosure(output_func, endpoint: str) -> None:
+    output_func("[Telemetry] Telemetry is optional and helps improve AllInKeys.")
+    output_func("[Telemetry] Endpoints: telemetry.sparkleserver.site")
+    output_func(
+        "[Telemetry] Data sent: machine name/id, app version, mode, performance metrics, errors."
+    )
+    output_func(
+        "[Telemetry] Not sent: private keys, seeds, mnemonics, file contents."
+    )
+    output_func(
+        "[Telemetry] Disable anytime with --no-telemetry or local config toggle."
+    )
+
+
+def _maybe_prompt_machine_name(input_func, output_func) -> str:
+    if getattr(settings, "MACHINE_NAME", None):
+        return get_machine_name()
+    existing_name, _ = get_machine_name_state()
+    if existing_name:
+        return existing_name
+    suggestion = suggest_machine_name()
+    output_func(
+        f"[Telemetry] Friendly machine name [{suggestion}]: ",
+    )
+    try:
+        response = input_func().strip()
+    except (EOFError, KeyboardInterrupt):
+        response = ""
+    selected = response or suggestion
+    set_machine_name(selected)
+    return get_machine_name()
+
+
+def run_telemetry_setup(
+    *,
+    endpoint: str = TELEMETRY_ENDPOINT,
+    interactive: bool = True,
+    input_func=input,
+    output_func=print,
+    requests_module=requests,
+    force: bool = False,
+) -> TelemetrySetupOutcome:
+    if not interactive:
+        return TelemetrySetupOutcome(token=None, disabled=False)
+    existing_token = _resolve_auth_token(None)
+    if existing_token and not force:
+        return TelemetrySetupOutcome(token=existing_token, disabled=False)
+
+    _print_disclosure(output_func, endpoint)
+    machine_name = _maybe_prompt_machine_name(input_func, output_func)
+
+    while True:
+        output_func("")
+        output_func("[Telemetry] Setup options:")
+        output_func("  [1] Paste existing token")
+        output_func("  [2] Pair this machine via browser (recommended)")
+        output_func("  [3] Disable telemetry")
+        output_func("Select 1/2/3: ")
+        try:
+            choice = input_func().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return TelemetrySetupOutcome(token=None, disabled=False)
+
+        if choice in {"3", "disable", "d"}:
+            set_telemetry_opt_out(True)
+            output_func("[Telemetry] Telemetry disabled locally.")
+            return TelemetrySetupOutcome(token=None, disabled=True)
+
+        if choice in {"1", "token", "t"}:
+            output_func("Paste AUTH_TOKEN: ")
+            try:
+                token = input_func().strip()
+            except (EOFError, KeyboardInterrupt):
+                return TelemetrySetupOutcome(token=None, disabled=False)
+            if not _valid_token_format(token):
+                output_func("[Telemetry] Token format looks invalid. Expected JWT.")
+                continue
+            ok, machine_id, reason = _attempt_machine_registration(
+                endpoint=endpoint,
+                token=token,
+                machine_name=machine_name,
+                requests_module=requests_module,
+            )
+            if ok:
+                persist_auth_token(token)
+                set_telemetry_opt_out(False)
+                if machine_id:
+                    _save_machine_id(machine_id)
+                output_func("[Telemetry] Token saved. Telemetry ready.")
+                return TelemetrySetupOutcome(token=token, disabled=False)
+            output_func(f"[Telemetry] Registration failed: {reason}")
+            output_func("[Telemetry] Try again or choose another option.")
+            continue
+
+        if choice in {"2", "pair", "p"}:
+            init_url = f"{_telemetry_base_url(endpoint)}/pair/init"
+            try:
+                response = requests_module.post(init_url, json={}, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+            except Exception as exc:
+                output_func(f"[Telemetry] Pairing init failed: {exc}")
+                continue
+            pair_code = data.get("pair_code")
+            pair_url = data.get("pair_url")
+            poll_interval = int(
+                data.get("poll_interval_seconds") or PAIR_POLL_DEFAULT_SECONDS
+            )
+            if not pair_code or not pair_url:
+                output_func("[Telemetry] Pairing response missing code or URL.")
+                continue
+            output_func(f"Open: {pair_url} and enter code: {pair_code}")
+            status_url = f"{_telemetry_base_url(endpoint)}/pair/status"
+            started = time.time()
+            while True:
+                if time.time() - started > 300:
+                    output_func("[Telemetry] Pairing timed out. Try again.")
+                    break
+                try:
+                    status_resp = requests_module.get(
+                        status_url,
+                        params={"pair_code": pair_code},
+                        timeout=10,
+                    )
+                    status_resp.raise_for_status()
+                    status_data = status_resp.json()
+                except Exception as exc:
+                    output_func(f"[Telemetry] Pairing status error: {exc}")
+                    time.sleep(poll_interval)
+                    continue
+                status = str(status_data.get("status") or "").lower()
+                if status in {"approved", "claimed"}:
+                    token = status_data.get("token")
+                    if not token or not _valid_token_format(str(token)):
+                        output_func("[Telemetry] Pairing approved but token invalid.")
+                        break
+                    ok, machine_id, reason = _attempt_machine_registration(
+                        endpoint=endpoint,
+                        token=str(token),
+                        machine_name=machine_name,
+                        requests_module=requests_module,
+                    )
+                    if not ok:
+                        output_func(f"[Telemetry] Registration failed: {reason}")
+                        break
+                    persist_auth_token(str(token))
+                    set_telemetry_opt_out(False)
+                    if machine_id:
+                        _save_machine_id(machine_id)
+                    output_func("[Telemetry] Pairing complete. Telemetry ready.")
+                    return TelemetrySetupOutcome(token=str(token), disabled=False)
+                if status in {"denied", "expired"}:
+                    output_func("[Telemetry] Pairing denied or expired.")
+                    break
+                time.sleep(poll_interval)
+            continue
+
+        output_func("[Telemetry] Invalid selection. Please choose 1, 2, or 3.")
 
 
 def _coerce_percent(value: Any) -> Optional[float]:
@@ -183,7 +534,7 @@ class TelemetryClient:
         self.machine_id = _load_machine_id(self.machine_id_path)
         self.hardware_machine_id = get_machine_id()
         self.machine_name = get_machine_name(self.hardware_machine_id)
-        self.auth_token = auth_token or os.getenv(AUTH_TOKEN_ENV)
+        self.auth_token = _resolve_auth_token(auth_token)
         self._recent_ranges: deque[Dict[str, Any]] = deque(maxlen=RANGE_RECENT_LIMIT)
         self._range_lock = threading.Lock()
         self._backoff = flush_seconds
@@ -238,11 +589,7 @@ class TelemetryClient:
         return {"Authorization": f"Bearer {self.auth_token}"}
 
     def _machine_endpoints(self, machine_id: Optional[str] = None) -> tuple[str, str]:
-        endpoint = self.endpoint.rstrip("/")
-        if "/v1/" in endpoint:
-            base = endpoint.split("/v1/")[0] + "/v1"
-        else:
-            base = endpoint
+        base = _telemetry_base_url(self.endpoint)
         register_url = f"{base}/machines/register"
         telemetry_url = (
             f"{base}/machines/{machine_id}/telemetry" if machine_id else f"{base}/machines/telemetry"
@@ -383,15 +730,18 @@ class TelemetryClient:
         if self.machine_id:
             return True
         if not self.auth_token:
-            try:
-                log_with_context(
-                    logger,
-                    "WARNING",
-                    "[Telemetry] Missing AUTH_TOKEN; cannot register machine",
-                    **_telemetry_log_context(endpoint=self.endpoint),
-                )
-            except Exception:
-                pass
+            global _MISSING_TOKEN_LOGGED
+            if not _MISSING_TOKEN_LOGGED:
+                try:
+                    log_with_context(
+                        logger,
+                        "WARNING",
+                        "[Telemetry] Missing AUTH_TOKEN; cannot register machine",
+                        **_telemetry_log_context(endpoint=self.endpoint),
+                    )
+                except Exception:
+                    pass
+                _MISSING_TOKEN_LOGGED = True
             return False
         return self._register_machine()
 
@@ -789,15 +1139,87 @@ class TelemetryClient:
 _CLIENT: Optional[TelemetryClient] = None
 
 
-def start_telemetry(shutdown_event: threading.Event) -> None:
+def start_telemetry(
+    shutdown_event: threading.Event,
+    *,
+    interactive: Optional[bool] = None,
+    force_setup: bool = False,
+) -> None:
     """Initialize and start the global telemetry client."""
 
     if not SEED_TELEMETRY_ENABLED:
         return
+    if telemetry_opted_out() and not force_setup:
+        return
+
+    if interactive is None:
+        interactive = _is_interactive()
+    else:
+        interactive = bool(interactive) and _is_interactive()
+
+    auth_token = _resolve_auth_token(None)
+    if force_setup and interactive:
+        run_telemetry_setup(endpoint=TELEMETRY_ENDPOINT, interactive=True, force=True)
+        auth_token = _resolve_auth_token(None)
+
+    if not auth_token:
+        if interactive:
+            outcome = run_telemetry_setup(endpoint=TELEMETRY_ENDPOINT, interactive=True)
+            if outcome.disabled:
+                return
+            auth_token = _resolve_auth_token(None)
+        else:
+            global _MISSING_TOKEN_LOGGED
+            if not _MISSING_TOKEN_LOGGED:
+                try:
+                    log_with_context(
+                        logger,
+                        "WARNING",
+                        "[Telemetry] Missing AUTH_TOKEN; telemetry disabled. Run `python main.py --telemetry-setup` or set AUTH_TOKEN.",
+                        **_telemetry_log_context(endpoint=TELEMETRY_ENDPOINT),
+                    )
+                except Exception:
+                    pass
+                _MISSING_TOKEN_LOGGED = True
+            return
+    if not auth_token:
+        return
+
+    validation = _validate_auth_token(
+        endpoint=TELEMETRY_ENDPOINT,
+        token=auth_token,
+    )
+    if validation is False:
+        clear_persisted_auth_token()
+        if interactive:
+            outcome = run_telemetry_setup(
+                endpoint=TELEMETRY_ENDPOINT,
+                interactive=True,
+                force=True,
+            )
+            if outcome.disabled:
+                return
+            auth_token = _resolve_auth_token(None)
+        else:
+            global _INVALID_TOKEN_LOGGED
+            if not _INVALID_TOKEN_LOGGED:
+                try:
+                    log_with_context(
+                        logger,
+                        "WARNING",
+                        "[Telemetry] Invalid AUTH_TOKEN; telemetry disabled. Run `python main.py --telemetry-setup` or set AUTH_TOKEN.",
+                        **_telemetry_log_context(endpoint=TELEMETRY_ENDPOINT),
+                    )
+                except Exception:
+                    pass
+                _INVALID_TOKEN_LOGGED = True
+            return
+    if not auth_token:
+        return
 
     global _CLIENT
     if _CLIENT is None:
-        _CLIENT = TelemetryClient()
+        _CLIENT = TelemetryClient(auth_token=auth_token)
     _CLIENT.start(shutdown_event)
     _CLIENT.start_control_polling(shutdown_event)
     try:
@@ -923,7 +1345,7 @@ def check_seed_seen(seed_bytes: bytes, *, mode: str, range_id: Optional[str] = N
         timeout = TELEMETRY_CHECK_TIMEOUT or 1.5
         payload = {"seed_fingerprint": fp, "mode": mode, "range_id": range_id}
         headers = {}
-        auth_token = _CLIENT.auth_token if _CLIENT else os.getenv(AUTH_TOKEN_ENV)
+        auth_token = _CLIENT.auth_token if _CLIENT else _resolve_auth_token(None)
         if auth_token:
             headers["Authorization"] = f"Bearer {auth_token}"
         try:

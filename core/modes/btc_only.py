@@ -66,7 +66,10 @@ def start(shared_metrics, args):
             if settings.SEED_TELEMETRY_ENABLED and not getattr(args, "no_telemetry", False):
                 from core.telemetry import start_telemetry, start_embedded_telemetry_service
 
-                start_telemetry(shutdown_keygen)
+                start_telemetry(
+                    shutdown_keygen,
+                    interactive=not getattr(args, "headless", False),
+                )
                 try:
                     svc_proc = start_embedded_telemetry_service()
                     if svc_proc is not None:

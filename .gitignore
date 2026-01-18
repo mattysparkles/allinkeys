@@ -18,6 +18,8 @@ venv/
 *.sqlite
 *.db
 *.csv
+config/.telemetry_token
+config/local_telemetry.json
 
 # Ignore anything else you know you don’t need tracked
 

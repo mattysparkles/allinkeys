@@ -24,6 +24,8 @@ from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTR
 from telemetry_service.routes.dashboard import router as dashboard_router
 from telemetry_service.routes.admin import router as admin_router
 from telemetry_service.routes.machines import router as machines_router
+from telemetry_service.routes.pairing import router as pairing_router
+from telemetry_service.routes.pairing import ui_router as pairing_ui_router
 from telemetry_service.models import (
     IngestResponse,
     TelemetryItem,
@@ -104,6 +106,8 @@ app = FastAPI(title="AllInKeys Central Telemetry")
 app.include_router(machines_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
+app.include_router(pairing_router)
+app.include_router(pairing_ui_router)
 app.mount(
     "/static",
     StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
