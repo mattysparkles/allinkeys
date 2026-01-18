@@ -98,6 +98,46 @@ Example response:
 }
 ```
 
+## Admin dashboard endpoints
+
+Admin endpoints require a bearer token for a user with `is_admin = true`. All admin
+routes live under `/admin/*` and can be used to build a global operations view.
+
+### `GET /admin/dashboard`
+
+Serves the HTML admin dashboard (includes aggregated cards, tables, and charts).
+
+### `GET /admin/users/summary`
+
+Returns per-user machine counts, average KPS, and coverage percentage.
+
+### `GET /admin/machines/summary`
+
+Returns the global machine list with owner info and current status.
+
+### `GET /admin/keyspace/progress`
+
+Returns aggregated keyspace totals, coverage, and time window metadata.
+
+### `GET /admin/timeseries/kps`
+
+Returns KPS history for plotting. Accepts `since=24h` and `bucket_minutes=15`.
+
+### `GET /admin/timeseries/backlog`
+
+Returns backlog counts (events with `used = 0`) over time.
+
+### `GET /admin/timeseries/coverage`
+
+Returns cumulative coverage percentages over time.
+
+Example admin request:
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:3088/admin/users/summary
+```
+
 ## Security tips
 
 * Deploy behind a TLS-terminating reverse proxy (nginx, Caddy, or Traefik).

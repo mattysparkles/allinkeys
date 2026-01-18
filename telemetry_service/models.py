@@ -69,3 +69,43 @@ class MachineSummary(BaseModel):
     keys_per_sec: float = 0
     last_seen: Optional[str] = None
     version: Optional[str] = None
+
+
+class AdminUserSummary(BaseModel):
+    id: int
+    username: str
+    machine_count: int
+    avg_kps: float
+    coverage_percent: float
+
+
+class AdminMachineSummary(BaseModel):
+    id: str
+    machine_name: Optional[str] = None
+    user_id: int
+    username: str
+    gpu_info: Optional[str] = None
+    status: str
+    keys_per_sec: float = 0
+    last_seen: Optional[str] = None
+    version: Optional[str] = None
+
+
+class AdminKeyspaceProgress(BaseModel):
+    total_ranges: int
+    total_submissions: int
+    unique_seed_count: int
+    coverage_percent: float
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+
+
+class TimeSeriesPoint(BaseModel):
+    timestamp: str
+    value: float
+
+
+class TimeSeriesResponse(BaseModel):
+    metric: str
+    bucket_minutes: int
+    points: List[TimeSeriesPoint]

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from config.telemetry import TOKEN_EXPIRY
@@ -21,6 +22,7 @@ from telemetry_service.dependencies import get_current_user
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
 from telemetry_service.routes.dashboard import router as dashboard_router
+from telemetry_service.routes.admin import router as admin_router
 from telemetry_service.routes.machines import router as machines_router
 from telemetry_service.models import (
     IngestResponse,
@@ -101,6 +103,12 @@ class CheckResponse(BaseModel):
 app = FastAPI(title="AllInKeys Central Telemetry")
 app.include_router(machines_router)
 app.include_router(dashboard_router)
+app.include_router(admin_router)
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
+    name="static",
+)
 
 
 def _expected_api_key() -> Optional[str]:
