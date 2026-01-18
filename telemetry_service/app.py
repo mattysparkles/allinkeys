@@ -130,6 +130,8 @@ def _expected_api_key() -> Optional[str]:
 async def api_key_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
     path = request.url.path
     if path.startswith("/v1"):
+        if path.startswith("/v1/dashboard"):
+            return await call_next(request)
         expected = _expected_api_key()
         if expected:
             provided = request.headers.get("X-API-Key")
