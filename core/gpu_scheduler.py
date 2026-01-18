@@ -20,6 +20,16 @@ from config.settings import (
     GPU_VENDOR,
     BACKLOG_MONITOR_INTERVAL_SECONDS,
 )
+try:
+    from config.settings import (
+        GPU_SWING_TARGET_BACKLOG_ETA,
+        GPU_SWING_CLEARANCE_ETA,
+        GPU_SWING_MIN_INTERVAL_SECONDS,
+    )
+except Exception:  # pragma: no cover - fallback for missing config
+    GPU_SWING_TARGET_BACKLOG_ETA = None
+    GPU_SWING_CLEARANCE_ETA = None
+    GPU_SWING_MIN_INTERVAL_SECONDS = None
 from config.directories import VANITY_OUTPUT_DIR
 from core.logger import log_message
 from utils.thread_guard import can_spawn_thread
@@ -54,6 +64,29 @@ def _detect_gpu_vendor():
         except Exception:
             pass
     return None, None
+
+
+def _parse_eta_seconds(value):
+    if value in (None, "", "N/A"):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.endswith("s"):
+            stripped = stripped[:-1]
+        parts = stripped.split(":")
+        if len(parts) == 3:
+            try:
+                hrs, mins, secs = (int(part) for part in parts)
+            except ValueError:
+                return None
+            return float(hrs * 3600 + mins * 60 + secs)
+        try:
+            return float(stripped)
+        except ValueError:
+            return None
+    return None
 
 
 def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assignment_flag, shutdown_event=None):
@@ -98,6 +131,9 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
     stop_event = shutdown_event or threading.Event()
 
     poll_interval = max(1, int(BACKLOG_MONITOR_INTERVAL_SECONDS))
+    last_backlog_count = None
+    last_backlog_time = None
+    last_switch_time = 0.0
     while not stop_event.is_set():
         try:
             swing_mode = shared_metrics.get("swing_mode", SWING_MODE)
@@ -114,25 +150,109 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
             backlog_count = len(backlog_files)
             _safe_set_metric("backlog_files_queued", backlog_count)
 
-            if backlog_count >= 100:
+            now = time.time()
+            backlog_growth_rate = 0.0
+            if last_backlog_time is not None and last_backlog_count is not None:
+                elapsed = max(now - last_backlog_time, 0.001)
+                backlog_growth_rate = (backlog_count - last_backlog_count) / elapsed
+            last_backlog_time = now
+            last_backlog_count = backlog_count
+
+            backlog_eta_seconds = None
+            try:
+                backlog_eta_seconds = _parse_eta_seconds(shared_metrics.get("backlog_eta"))
+            except Exception:
+                backlog_eta_seconds = None
+            if backlog_eta_seconds is None:
+                try:
+                    backlog_eta_seconds = _parse_eta_seconds(
+                        shared_metrics.get("backlog_avg_time")
+                    )
+                except Exception:
+                    backlog_eta_seconds = None
+                if backlog_eta_seconds is not None:
+                    backlog_eta_seconds *= backlog_count
+
+            drain_rate = max(0.0, -backlog_growth_rate)
+            estimated_eta = None
+            if backlog_eta_seconds is not None:
+                estimated_eta = backlog_eta_seconds
+            elif drain_rate > 0:
+                estimated_eta = backlog_count / drain_rate
+
+            keys_per_sec = 0.0
+            try:
+                keys_per_sec = float(shared_metrics.get("keys_per_sec", 0.0) or 0.0)
+            except Exception:
+                keys_per_sec = 0.0
+
+            config_available = all(
+                value is not None
+                for value in (
+                    GPU_SWING_TARGET_BACKLOG_ETA,
+                    GPU_SWING_CLEARANCE_ETA,
+                    GPU_SWING_MIN_INTERVAL_SECONDS,
+                )
+            )
+
+            enable_altcoin = False
+            disable_altcoin = False
+            decision_reason = ""
+            if config_available:
+                if estimated_eta is not None:
+                    if estimated_eta > GPU_SWING_TARGET_BACKLOG_ETA:
+                        enable_altcoin = True
+                        decision_reason = (
+                            f"backlog ETA {estimated_eta:.1f}s "
+                            f"> target {GPU_SWING_TARGET_BACKLOG_ETA}s"
+                        )
+                    elif estimated_eta < GPU_SWING_CLEARANCE_ETA:
+                        disable_altcoin = True
+                        decision_reason = (
+                            f"backlog ETA {estimated_eta:.1f}s "
+                            f"< clearance {GPU_SWING_CLEARANCE_ETA}s"
+                        )
+                elif backlog_growth_rate > 0 and keys_per_sec > 0:
+                    enable_altcoin = True
+                    decision_reason = (
+                        f"backlog growing {backlog_growth_rate:+.2f}/s "
+                        f"with {keys_per_sec:.2f} keys/s"
+                    )
+            else:
+                if backlog_count >= 100:
+                    enable_altcoin = True
+                    decision_reason = "100+ backlog files (fallback threshold)"
+                else:
+                    disable_altcoin = True
+                    decision_reason = "backlog under 100 files (fallback threshold)"
+
+            can_switch = (now - last_switch_time) >= (
+                GPU_SWING_MIN_INTERVAL_SECONDS or 0
+            )
+
+            if enable_altcoin and can_switch:
                 if vanity_flag.value or not altcoin_flag.value or assignment_flag.value != 1:
                     vanity_flag.value = 0
                     altcoin_flag.value = 1
                     assignment_flag.value = 1
+                    last_switch_time = now
                     log_message(
-                        "[GPU Scheduler] 🚦 100+ backlog files — prioritizing altcoin derive on all GPUs...",
+                        "[GPU Scheduler] 🚦 Switching GPUs to altcoin derive "
+                        f"({decision_reason}).",
                         "INFO",
                     )
                     _safe_set_metric("vanity_gpu_on", False)
                     _safe_set_metric("altcoin_gpu_on", True)
                     _safe_set_metric("gpu_assignment", "altcoin")
-            else:
+            elif disable_altcoin and can_switch:
                 if not vanity_flag.value or altcoin_flag.value or assignment_flag.value != 0:
                     vanity_flag.value = 1
                     altcoin_flag.value = 0
                     assignment_flag.value = 0
+                    last_switch_time = now
                     log_message(
-                        "[GPU Scheduler] ✅ Backlog under 100 files — resuming vanity GPU usage...",
+                        "[GPU Scheduler] ✅ Switching GPUs back to vanity "
+                        f"({decision_reason}).",
                         "INFO",
                     )
                     _safe_set_metric("vanity_gpu_on", True)
