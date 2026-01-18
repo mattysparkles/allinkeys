@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
-from typing import List
+from datetime import datetime, timedelta
+from typing import List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from telemetry_service.db import get_db_connection
 from telemetry_service.dependencies import get_current_user, get_machine_for_user
@@ -15,11 +15,35 @@ from telemetry_service.models import (
     IngestResponse,
     MachineRegisterRequest,
     MachineRegisterResponse,
+    MachineSummary,
     TelemetryItem,
     UserPublic,
 )
 
 router = APIRouter(prefix="/v1/machines", tags=["Machines"])
+
+
+def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1]
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _status_from_last_seen(last_seen: Optional[str], now: datetime) -> str:
+    parsed = _parse_timestamp(last_seen)
+    if not parsed:
+        return "offline"
+    delta = now - parsed
+    if delta > timedelta(minutes=5):
+        return "offline"
+    if delta > timedelta(seconds=60):
+        return "stalled"
+    return "online"
 
 
 @router.post(
@@ -105,3 +129,66 @@ def ingest_machine_telemetry(
     finally:
         conn.close()
     return IngestResponse(status="ok", count=len(items))
+
+
+@router.get(
+    "/me",
+    response_model=List[MachineSummary],
+    summary="List machines for the authenticated user.",
+)
+def list_my_machines(
+    search: Optional[str] = Query(None, description="Filter by machine name or GPU."),
+    include_all: bool = Query(
+        False,
+        description="Admins only: include all machines in the response.",
+    ),
+    current_user: UserPublic = Depends(get_current_user),
+) -> List[MachineSummary]:
+    now = datetime.utcnow()
+    conn = get_db_connection()
+    try:
+        filters = []
+        params: List[object] = []
+        if not (current_user.is_admin and include_all):
+            filters.append("user_id = ?")
+            params.append(current_user.id)
+        if search:
+            filters.append("(LOWER(machine_name) LIKE ? OR LOWER(gpu_info) LIKE ?)")
+            like = f"%{search.lower()}%"
+            params.extend([like, like])
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        rows = conn.execute(
+            f"""
+            SELECT id, machine_name, gpu_info, version, last_seen
+            FROM machines
+            {where_clause}
+            ORDER BY machine_name, id
+            """,
+            params,
+        ).fetchall()
+        cutoff = (now - timedelta(seconds=60)).isoformat() + "Z"
+        response: List[MachineSummary] = []
+        for row in rows:
+            machine_id, machine_name, gpu_info, version, last_seen = row
+            kps_count = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM seed_events
+                WHERE machine_id = ? AND last_seen >= ?
+                """,
+                (machine_id, cutoff),
+            ).fetchone()[0]
+            response.append(
+                MachineSummary(
+                    id=machine_id,
+                    machine_name=machine_name or machine_id,
+                    gpu_info=gpu_info,
+                    status=_status_from_last_seen(last_seen, now),
+                    keys_per_sec=round(kps_count / 60, 2) if kps_count else 0,
+                    last_seen=last_seen,
+                    version=version,
+                )
+            )
+        return response
+    finally:
+        conn.close()
