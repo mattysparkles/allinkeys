@@ -513,6 +513,7 @@ def run_vanitysearch_batch(
     parser_detached = False
     first_write_size = None
     warned_rotation_before_write = False
+    rotation_before_write = False
     logger.info("Waiting for first output write...")
     while proc.poll() is None and first_write_size is None:
         try:
@@ -522,16 +523,30 @@ def run_vanitysearch_batch(
         if file_size > 0:
             first_write_size = file_size
             break
-        if (
-            max_seconds
-            and not warned_rotation_before_write
-            and time.time() - start > max_seconds
-        ):
-            logger.warning(
-                "Rotation requested before first write; skipping until first output is written."
-            )
-            warned_rotation_before_write = True
+        if max_seconds and time.time() - start > max_seconds:
+            if not warned_rotation_before_write:
+                logger.warning(
+                    "Rotation timeout hit before first output; rotating anyway to avoid stalled batches."
+                )
+                warned_rotation_before_write = True
+            rotation_info = {
+                "reason": "timeout_before_write",
+                "timestamp": time.time(),
+                "path": str(output_path),
+            }
+            rotation_before_write = True
+            proc.terminate()
+            break
         time.sleep(0.5)
+
+    if rotation_before_write:
+        logger.info("Rotation triggered before first output write; skipping parser attach.")
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        return output_path, proc.returncode or 0, rotation_info
 
     if first_write_size is not None:
         logger.info("First write detected (size=%s)", first_write_size)
