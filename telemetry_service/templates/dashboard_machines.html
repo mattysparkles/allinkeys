@@ -89,6 +89,87 @@
         gap: 10px;
         box-shadow: 0 12px 30px rgba(5, 8, 16, 0.35);
       }
+      details.control-panel {
+        border-top: 1px solid #20263a;
+        padding-top: 10px;
+      }
+      details.control-panel summary {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .control-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 12px 0;
+      }
+      .control-actions button,
+      .control-form button {
+        border-radius: 8px;
+        border: 1px solid #2d3240;
+        background: #1a2133;
+        color: inherit;
+        padding: 8px 12px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .control-actions button:hover,
+      .control-form button:hover {
+        background: #232b41;
+      }
+      .control-form {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .control-form label {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        color: #c4c9d6;
+      }
+      .control-form select,
+      .control-form input {
+        border-radius: 8px;
+        border: 1px solid #2d3240;
+        background: #141824;
+        color: inherit;
+        padding: 8px 10px;
+      }
+      .control-feedback {
+        font-size: 12px;
+        color: #9fa4b4;
+        min-height: 16px;
+      }
+      .command-status {
+        display: grid;
+        gap: 8px;
+      }
+      .command-status-header {
+        font-size: 12px;
+        color: #9fa4b4;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .command-list {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+      }
+      .command-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        border-radius: 8px;
+        padding: 6px 8px;
+        background: #151b2a;
+        border: 1px solid #20263a;
+      }
+      .command-item.acknowledged {
+        border-color: rgba(66, 186, 150, 0.6);
+        color: #42ba96;
+        background: rgba(66, 186, 150, 0.12);
+      }
       .machine-header {
         display: flex;
         justify-content: space-between;
@@ -145,6 +226,7 @@
     </section>
     <script>
       const apiEndpoint = "/v1/machines/me";
+      const controlEndpoint = "/v1/machines";
       const authTokenFromHeader = "{{ auth_token | e }}";
       const tokenInput = document.getElementById("tokenInput");
       const saveTokenButton = document.getElementById("saveTokenButton");
@@ -199,6 +281,12 @@
         }
       }
 
+      function getAuthHeaders() {
+        const token = getStoredToken();
+        if (!token) return {};
+        return { Authorization: `Bearer ${token}` };
+      }
+
       function formatDate(value) {
         if (!value) return "—";
         const date = new Date(value);
@@ -208,6 +296,84 @@
 
       function formatKps(value) {
         return numberFormatter.format(value || 0);
+      }
+
+      function formatCommandValue(command, value) {
+        if (!value) return "";
+        if (command === "set_mode") return `Mode: ${value}`;
+        if (command === "set_range") return `Range: ${value}`;
+        return value;
+      }
+
+      async function sendControlCommand(machineId, command, value, feedbackEl) {
+        try {
+          const response = await fetch(`${controlEndpoint}/${machineId}/control`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify({ command, value }),
+          });
+          if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+          }
+          if (feedbackEl) {
+            feedbackEl.textContent = `Sent ${command} command.`;
+          }
+        } catch (error) {
+          if (feedbackEl) {
+            feedbackEl.textContent =
+              "Failed to send command. Check your token and try again.";
+          }
+        }
+      }
+
+      function renderCommandList(container, commands) {
+        container.innerHTML = "";
+        if (!commands.length) {
+          container.textContent = "No commands issued yet.";
+          return;
+        }
+        commands.forEach((command) => {
+          const item = document.createElement("div");
+          item.className = `command-item ${command.status}`;
+          const valueText = formatCommandValue(command.command, command.value);
+          item.innerHTML = `
+            <div>
+              <strong>${command.command.replace("_", " ")}</strong>
+              ${valueText ? `<div>${valueText}</div>` : ""}
+              <div>${formatDate(command.issued_at)}</div>
+            </div>
+            <div>${command.status}</div>
+          `;
+          container.appendChild(item);
+        });
+      }
+
+      async function loadControlCommands(machineId, container) {
+        try {
+          const response = await fetch(
+            `${controlEndpoint}/${machineId}/control?limit=5`,
+            { headers: getAuthHeaders() }
+          );
+          if (!response.ok) {
+            throw new Error("Failed to load commands");
+          }
+          const data = await response.json();
+          const commands = Array.isArray(data.commands) ? data.commands : [];
+          renderCommandList(container, commands);
+        } catch (error) {
+          container.textContent = "Unable to load command history.";
+        }
+      }
+
+      function updateValueField(select, input) {
+        const needsValue = ["set_mode", "set_range"].includes(select.value);
+        input.disabled = !needsValue;
+        input.placeholder = needsValue
+          ? "Enter value"
+          : "Not required for this command";
       }
 
       function renderMachines() {
@@ -243,7 +409,66 @@
               <div>Last Seen: <span>${formatDate(machine.last_seen)}</span></div>
               <div>Version: <span>${machine.version || "—"}</span></div>
             </div>
+            <details class="control-panel">
+              <summary>Machine Controls</summary>
+              <div class="control-actions">
+                <button type="button" data-command="pause">Pause</button>
+                <button type="button" data-command="resume">Resume</button>
+              </div>
+              <form class="control-form">
+                <label>
+                  Command
+                  <select name="command">
+                    <option value="pause">Pause</option>
+                    <option value="resume">Resume</option>
+                    <option value="set_mode">Set Mode</option>
+                    <option value="set_range">Set Range</option>
+                  </select>
+                </label>
+                <label>
+                  Value
+                  <input name="value" type="text" placeholder="Enter value" />
+                </label>
+                <button type="submit">Send Command</button>
+              </form>
+              <div class="control-feedback" role="status"></div>
+              <div class="command-status">
+                <div class="command-status-header">Recent Commands</div>
+                <div class="command-list">Loading...</div>
+              </div>
+            </details>
           `;
+          const feedbackEl = card.querySelector(".control-feedback");
+          const commandList = card.querySelector(".command-list");
+          const form = card.querySelector(".control-form");
+          const commandSelect = card.querySelector("select[name='command']");
+          const valueInput = card.querySelector("input[name='value']");
+          updateValueField(commandSelect, valueInput);
+          commandSelect.addEventListener("change", () =>
+            updateValueField(commandSelect, valueInput)
+          );
+          card.querySelectorAll("[data-command]").forEach((button) => {
+            button.addEventListener("click", async () => {
+              feedbackEl.textContent = "";
+              await sendControlCommand(
+                machine.id,
+                button.dataset.command,
+                null,
+                feedbackEl
+              );
+              loadControlCommands(machine.id, commandList);
+            });
+          });
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const command = commandSelect.value;
+            const value = valueInput.value.trim() || null;
+            feedbackEl.textContent = "";
+            await sendControlCommand(machine.id, command, value, feedbackEl);
+            valueInput.value = "";
+            loadControlCommands(machine.id, commandList);
+          });
+          loadControlCommands(machine.id, commandList);
           machineContainer.appendChild(card);
         });
       }

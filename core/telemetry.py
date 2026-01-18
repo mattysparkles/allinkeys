@@ -47,6 +47,8 @@ from config.telemetry import (
     AUTO_START_TELEMETRY_SERVICE,
     CLIENT_VERSION,
     SEED_TELEMETRY_ENABLED,
+    CONTROL_ENDPOINT,
+    CONTROL_POLL_SECONDS,
     TELEMETRY_BATCH_SIZE,
     TELEMETRY_CHECK_ENDPOINT,
     TELEMETRY_CHECK_CACHE_TTL_SECONDS,
@@ -67,6 +69,7 @@ logger = get_logger(__name__)
 QUEUE_DB = Path(LOG_DIR) / "telemetry_queue.db"
 INSTANCE_ID_PATH = Path(LOG_DIR) / "app_instance_id"
 MACHINE_ID_PATH = Path(LOG_DIR) / ".machine_id"
+CONTROL_STATE_PATH = Path(LOG_DIR) / "control_state.json"
 RANGE_RECENT_LIMIT = 50
 CHECK_CACHE_MAX_SIZE = 10_000
 AUTH_TOKEN_ENV = "AUTH_TOKEN"
@@ -159,6 +162,7 @@ class TelemetryClient:
         *,
         enabled: bool = True,
         endpoint: str = TELEMETRY_ENDPOINT,
+        control_endpoint: Optional[str] = CONTROL_ENDPOINT,
         batch_size: int = TELEMETRY_BATCH_SIZE,
         flush_seconds: int = TELEMETRY_FLUSH_SECONDS,
         max_backoff: int = TELEMETRY_MAX_BACKOFF,
@@ -169,6 +173,7 @@ class TelemetryClient:
     ) -> None:
         self.enabled = enabled
         self.endpoint = endpoint
+        self.control_endpoint = control_endpoint or None
         self.batch_size = batch_size
         self.flush_seconds = flush_seconds
         self.max_backoff = max_backoff
@@ -183,6 +188,7 @@ class TelemetryClient:
         self._range_lock = threading.Lock()
         self._backoff = flush_seconds
         self._flusher_thread: Optional[threading.Thread] = None
+        self._control_thread: Optional[threading.Thread] = None
         if self.enabled:
             self._init_db()
             try:
@@ -242,6 +248,136 @@ class TelemetryClient:
             f"{base}/machines/{machine_id}/telemetry" if machine_id else f"{base}/machines/telemetry"
         )
         return register_url, telemetry_url
+
+    def _control_base(self) -> Optional[str]:
+        endpoint = (self.control_endpoint or self.endpoint).strip().rstrip("/")
+        if not endpoint:
+            return None
+        if "/v1/" in endpoint:
+            return endpoint.split("/v1/")[0] + "/v1"
+        if endpoint.endswith("/v1"):
+            return endpoint
+        return endpoint
+
+    def _control_urls(self, machine_id: str) -> Optional[tuple[str, str]]:
+        base = self._control_base()
+        if not base:
+            return None
+        poll_url = f"{base}/machines/{machine_id}/control/poll"
+        ack_url = f"{base}/machines/{machine_id}/control/ack"
+        return poll_url, ack_url
+
+    def _update_control_state(self, updates: Dict[str, Any]) -> None:
+        state: Dict[str, Any] = {}
+        try:
+            if CONTROL_STATE_PATH.exists():
+                state = json.loads(CONTROL_STATE_PATH.read_text())
+        except Exception:
+            state = {}
+        state.update(updates)
+        state["updated_at"] = datetime.utcnow().isoformat() + "Z"
+        try:
+            CONTROL_STATE_PATH.write_text(json.dumps(state, indent=2))
+        except Exception:
+            return
+
+    def _apply_control_command(self, command: Dict[str, Any]) -> bool:
+        cmd = str(command.get("command") or "").lower()
+        value = command.get("value")
+        if cmd in {"pause", "resume"}:
+            try:
+                from core.dashboard import get_pause_event, module_pause_events
+
+                events = [ev for ev in module_pause_events.values() if ev]
+                if not events:
+                    default_event = get_pause_event()
+                    if default_event:
+                        events = [default_event]
+                for event in events:
+                    if cmd == "pause":
+                        event.set()
+                    else:
+                        event.clear()
+            except Exception:
+                return False
+            self._update_control_state(
+                {
+                    "paused": cmd == "pause",
+                    "last_command": cmd,
+                    "last_value": value,
+                }
+            )
+            return True
+        if cmd == "set_mode":
+            self._update_control_state(
+                {
+                    "mode": value,
+                    "last_command": cmd,
+                    "last_value": value,
+                }
+            )
+            return True
+        if cmd == "set_range":
+            self._update_control_state(
+                {
+                    "range": value,
+                    "last_command": cmd,
+                    "last_value": value,
+                }
+            )
+            return True
+        return False
+
+    def _poll_control_commands(self) -> List[Dict[str, Any]]:
+        if not self._ensure_machine_registered():
+            return []
+        if not self.auth_token:
+            return []
+        urls = self._control_urls(self.machine_id or "")
+        if not urls:
+            return []
+        poll_url, _ = urls
+        try:
+            response = requests.get(
+                poll_url,
+                headers=self._authorization_headers(),
+                timeout=10,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            try:
+                log_with_context(
+                    logger,
+                    "WARNING",
+                    "[Telemetry] Control poll failed | reason=%s",
+                    getattr(getattr(exc, "response", None), "status_code", exc),
+                    **_telemetry_log_context(endpoint=poll_url),
+                )
+            except Exception:
+                pass
+            return []
+        commands = payload.get("commands") if isinstance(payload, dict) else None
+        if isinstance(commands, list):
+            return [cmd for cmd in commands if isinstance(cmd, dict)]
+        return []
+
+    def _ack_control_command(self, command_id: int) -> None:
+        if not self.machine_id:
+            return
+        urls = self._control_urls(self.machine_id)
+        if not urls:
+            return
+        _, ack_url = urls
+        try:
+            requests.post(
+                ack_url,
+                json={"command_id": command_id},
+                headers=self._authorization_headers(),
+                timeout=10,
+            )
+        except Exception:
+            return
 
     def _ensure_machine_registered(self) -> bool:
         if self.machine_id:
@@ -617,6 +753,38 @@ class TelemetryClient:
         else:
             logger.warning("[Telemetry] Skipping telemetry thread; at thread limit")
 
+    def start_control_polling(self, shutdown_event: threading.Event) -> None:
+        """Start polling for control commands if configured."""
+
+        if not self.enabled:
+            return
+        if self._control_thread is not None and self._control_thread.is_alive():
+            return
+        if not (self.control_endpoint or self.endpoint):
+            return
+
+        def _loop() -> None:
+            while not shutdown_event.is_set():
+                commands = self._poll_control_commands()
+                for command in commands:
+                    command_id = command.get("id")
+                    if not isinstance(command_id, int):
+                        continue
+                    applied = self._apply_control_command(command)
+                    if applied:
+                        self._ack_control_command(command_id)
+                shutdown_event.wait(CONTROL_POLL_SECONDS)
+
+        if can_spawn_thread("telemetry_control"):
+            self._control_thread = threading.Thread(
+                target=_loop,
+                name="telemetry_control",
+                daemon=True,
+            )
+            self._control_thread.start()
+        else:
+            logger.warning("[Telemetry] Skipping control polling thread; at thread limit")
+
 
 _CLIENT: Optional[TelemetryClient] = None
 
@@ -631,6 +799,7 @@ def start_telemetry(shutdown_event: threading.Event) -> None:
     if _CLIENT is None:
         _CLIENT = TelemetryClient()
     _CLIENT.start(shutdown_event)
+    _CLIENT.start_control_polling(shutdown_event)
     try:
         log_with_context(
             logger,

@@ -135,4 +135,23 @@ def get_db_connection() -> sqlite3.Connection:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_machine_user ON machines(user_id)"
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_control (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL,
+            command TEXT NOT NULL,
+            value TEXT,
+            issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'pending',
+            FOREIGN KEY(machine_id) REFERENCES machines(id)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_pending_control_machine
+        ON pending_control(machine_id)
+        """
+    )
     return conn
