@@ -29,6 +29,7 @@ from core.paths import LOG_DIR as LOG_DIR_P, ensure_dirs
 
 # SQLite database path and table definition
 SEED_DB_PATH = str((Path(LOG_DIR_P) / "used_seeds.db").resolve())
+MAX_SEED = (1 << 256) - 1
 
 
 def _norm(seed: int | str) -> str:
@@ -50,22 +51,61 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    _ensure_seed_ranges_schema(conn)
+    return conn
+
+
+def _ensure_seed_ranges_schema(conn: sqlite3.Connection) -> None:
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='seed_ranges'"
+    )
+    if cur.fetchone() is None:
+        _create_seed_ranges(conn)
+        return
+
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(seed_ranges)")}
+    if "start_norm" in cols and "end_norm" in cols:
+        return
+
+    with conn:
+        conn.execute("ALTER TABLE seed_ranges RENAME TO seed_ranges_old")
+        _create_seed_ranges(conn)
+        rows = conn.execute(
+            """
+            SELECT range_id, start, end, first_seen, last_seen
+            FROM seed_ranges_old
+            """
+        ).fetchall()
+        if rows:
+            conn.executemany(
+                """
+                INSERT INTO seed_ranges (range_id, start_norm, end_norm, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (range_id, _norm(start), _norm(end), first_seen, last_seen)
+                    for range_id, start, end, first_seen, last_seen in rows
+                ],
+            )
+        conn.execute("DROP TABLE seed_ranges_old")
+
+
+def _create_seed_ranges(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS seed_ranges (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             range_id   TEXT NOT NULL,
-            start      INTEGER NOT NULL,
-            end        INTEGER NOT NULL,
+            start_norm TEXT NOT NULL,
+            end_norm   TEXT NOT NULL,
             first_seen REAL NOT NULL,
             last_seen  REAL NOT NULL
         )
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_seed_ranges_range_start ON seed_ranges (range_id, start)"
+        "CREATE INDEX IF NOT EXISTS idx_seed_ranges_range_start ON seed_ranges (range_id, start_norm)"
     )
-    return conn
 
 
 def _retry(op, *args, **kwargs):
@@ -90,23 +130,24 @@ def seed_in_used_range(seed: int | str, range_id: str = "default") -> bool:
     """Return ``True`` if ``seed`` was previously recorded for ``range_id``."""
 
     seed_value = int(seed)
+    seed_norm = _norm(seed_value)
     conn = _connect()
     try:
         def _op():
             if _seed_ranges_empty(conn):
                 cur = conn.execute(
                     "SELECT 1 FROM used_seeds WHERE range_id=? AND seed_norm=? LIMIT 1",
-                    (range_id, _norm(seed_value)),
+                    (range_id, seed_norm),
                 )
                 return cur.fetchone() is not None
             cur = conn.execute(
                 """
                 SELECT 1
                 FROM seed_ranges
-                WHERE range_id=? AND start <= ? AND end >= ?
+                WHERE range_id=? AND start_norm <= ? AND end_norm >= ?
                 LIMIT 1
                 """,
-                (range_id, seed_value, seed_value),
+                (range_id, seed_norm, seed_norm),
             )
             return cur.fetchone() is not None
 
@@ -118,9 +159,13 @@ def seed_in_used_range(seed: int | str, range_id: str = "default") -> bool:
 def record_seed_range(first: int | str, last: int | str, range_id: str = "default") -> None:
     """Record the seed range ``[first, last]`` for ``range_id``."""
 
-    start, end = int(first), int(last)
-    if end < start:
-        start, end = end, start
+    start_int, end_int = int(first), int(last)
+    if end_int < start_int:
+        start_int, end_int = end_int, start_int
+    start_norm = _norm(start_int)
+    end_norm = _norm(end_int)
+    start_query_int = start_int - 1 if start_int > 0 else start_int
+    end_query_int = end_int + 1 if end_int < MAX_SEED else end_int
 
     conn = _connect()
     try:
@@ -129,17 +174,17 @@ def record_seed_range(first: int | str, last: int | str, range_id: str = "defaul
             with conn:
                 cur = conn.execute(
                     """
-                    SELECT id, start, end, first_seen, last_seen
+                    SELECT id, start_norm, end_norm, first_seen, last_seen
                     FROM seed_ranges
                     WHERE range_id=?
-                      AND NOT (end < ? OR start > ?)
-                    ORDER BY start
+                      AND NOT (end_norm < ? OR start_norm > ?)
+                    ORDER BY start_norm
                     """,
-                    (range_id, start - 1, end + 1),
+                    (range_id, _norm(start_query_int), _norm(end_query_int)),
                 )
                 rows = cur.fetchall()
 
-                merged_start, merged_end = start, end
+                merged_start, merged_end = start_norm, end_norm
                 first_seen = now
                 last_seen = now
 
@@ -155,7 +200,7 @@ def record_seed_range(first: int | str, last: int | str, range_id: str = "defaul
 
                 conn.execute(
                     """
-                    INSERT INTO seed_ranges (range_id, start, end, first_seen, last_seen)
+                    INSERT INTO seed_ranges (range_id, start_norm, end_norm, first_seen, last_seen)
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (range_id, merged_start, merged_end, first_seen, last_seen),
@@ -193,10 +238,10 @@ def _migrate_used_seeds(conn: sqlite3.Connection, range_id: str) -> List[Tuple[i
     now = time.time()
     conn.executemany(
         """
-        INSERT INTO seed_ranges (range_id, start, end, first_seen, last_seen)
+        INSERT INTO seed_ranges (range_id, start_norm, end_norm, first_seen, last_seen)
         VALUES (?, ?, ?, ?, ?)
         """,
-        [(range_id, start, end, now, now) for start, end in ranges],
+        [(range_id, _norm(start), _norm(end), now, now) for start, end in ranges],
     )
     return ranges
 
@@ -210,10 +255,10 @@ def get_condensed_ranges(range_id: str = "default") -> List[Tuple[int, int]]:
             if _seed_ranges_empty(conn):
                 return _migrate_used_seeds(conn, range_id)
             cur = conn.execute(
-                "SELECT start, end FROM seed_ranges WHERE range_id=? ORDER BY start",
+                "SELECT start_norm, end_norm FROM seed_ranges WHERE range_id=? ORDER BY start_norm",
                 (range_id,),
             )
-            return [(row[0], row[1]) for row in cur.fetchall()]
+            return [(int(row[0], 16), int(row[1], 16)) for row in cur.fetchall()]
 
         return _retry(_op)
     finally:
