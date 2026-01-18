@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>AllInKeys Admin Dashboard</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+    />
+    <style>
+      body {
+        padding: 2rem;
+        background: #0b1120;
+        color: #e2e8f0;
+      }
+      h1,
+      h2,
+      h3 {
+        color: #f8fafc;
+      }
+      .grid {
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .card {
+        background: #111827;
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.4);
+      }
+      .chart-card {
+        background: #0f172a;
+        border-radius: 16px;
+        padding: 1.5rem;
+      }
+      table {
+        width: 100%;
+        background: #111827;
+      }
+      th,
+      td {
+        color: #e2e8f0;
+      }
+      .muted {
+        color: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Global Admin Dashboard</h1>
+      <p class="muted">
+        Signed in as {{ current_user.username }} · Admin overview of the telemetry
+        system.
+      </p>
+    </header>
+
+    <section class="grid" id="summaryCards">
+      <article class="card">
+        <h3>Total Users</h3>
+        <p id="totalUsers">–</p>
+      </article>
+      <article class="card">
+        <h3>Total Machines</h3>
+        <p id="totalMachines">–</p>
+      </article>
+      <article class="card">
+        <h3>Coverage</h3>
+        <p id="coveragePercent">–</p>
+      </article>
+      <article class="card">
+        <h3>Avg KPS</h3>
+        <p id="averageKps">–</p>
+      </article>
+    </section>
+
+    <section>
+      <h2>Keyspace Progress</h2>
+      <div class="chart-card">
+        <canvas id="coverageChart" height="140"></canvas>
+      </div>
+    </section>
+
+    <section>
+      <h2>Historical Metrics</h2>
+      <div class="grid">
+        <div class="chart-card">
+          <h3>KPS Trend</h3>
+          <canvas id="kpsChart" height="160"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Backlog Trend</h3>
+          <canvas id="backlogChart" height="160"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Machines</h2>
+      <table id="machinesTable">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Owner</th>
+            <th>Name</th>
+            <th>KPS</th>
+            <th>Status</th>
+            <th>Last Seen</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Users</h2>
+      <table id="usersTable">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Machines</th>
+            <th>Avg KPS</th>
+            <th>Coverage %</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <script>
+      window.ADMIN_AUTH_TOKEN = "{{ auth_token }}";
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3"></script>
+    <script src="/static/admin_dashboard.js"></script>
+  </body>
+</html>

@@ -76,3 +76,13 @@ def get_machine_for_user(machine_id: str, current_user: UserPublic) -> dict:
         }
     finally:
         conn.close()
+
+
+def get_current_admin_user(token: str = Depends(oauth2_scheme)) -> UserPublic:
+    current_user = get_current_user(token)
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not an admin user",
+        )
+    return current_user

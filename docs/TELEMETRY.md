@@ -81,3 +81,10 @@ Events are written to a durable SQLite queue located under `logs/`.  If the
 machine is offline, events accumulate and are uploaded the next time a network
 connection is available.  The queue is capped at 100k entries and older records
 are discarded in a ring‑buffer fashion.
+
+## Admin Operations
+
+The telemetry service includes admin-only endpoints under `/admin/*` for global
+visibility. Admins can review user and machine summaries, aggregate keyspace
+progress, and time-series metrics for KPS, backlog, and coverage. Access is
+restricted to users with `is_admin = true` and requires a bearer token.
