@@ -12,6 +12,10 @@ from telemetry_service.dependencies import get_current_user, get_machine_for_use
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
 from telemetry_service.models import (
+    ControlAckRequest,
+    ControlCommand,
+    ControlCommandList,
+    ControlCommandRequest,
     IngestResponse,
     MachineRegisterRequest,
     MachineRegisterResponse,
@@ -44,6 +48,48 @@ def _status_from_last_seen(last_seen: Optional[str], now: datetime) -> str:
     if delta > timedelta(seconds=60):
         return "stalled"
     return "online"
+
+
+def _get_machine_for_user_or_admin(
+    machine_id: str,
+    current_user: UserPublic,
+) -> dict:
+    conn = get_db_connection()
+    try:
+        if current_user.is_admin:
+            row = conn.execute(
+                """
+                SELECT id, user_id, machine_name, gpu_info, version, status, last_seen
+                FROM machines
+                WHERE id = ?
+                """,
+                (machine_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT id, user_id, machine_name, gpu_info, version, status, last_seen
+                FROM machines
+                WHERE id = ? AND user_id = ?
+                """,
+                (machine_id, current_user.id),
+            ).fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Machine not found",
+            )
+        return {
+            "id": row[0],
+            "user_id": row[1],
+            "machine_name": row[2],
+            "gpu_info": row[3],
+            "version": row[4],
+            "status": row[5],
+            "last_seen": row[6],
+        }
+    finally:
+        conn.close()
 
 
 @router.post(
@@ -192,3 +238,198 @@ def list_my_machines(
         return response
     finally:
         conn.close()
+
+
+@router.post(
+    "/{machine_id}/control",
+    response_model=ControlCommand,
+    summary="Issue a control command to a machine.",
+)
+def create_control_command(
+    machine_id: str,
+    payload: ControlCommandRequest,
+    current_user: UserPublic = Depends(get_current_user),
+) -> ControlCommand:
+    _get_machine_for_user_or_admin(machine_id, current_user)
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO pending_control (machine_id, command, value)
+                VALUES (?, ?, ?)
+                """,
+                (machine_id, payload.command, payload.value),
+            )
+        row = conn.execute(
+            """
+            SELECT id, machine_id, command, value, issued_at, status
+            FROM pending_control
+            WHERE id = ?
+            """,
+            (cursor.lastrowid,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to store control command",
+        )
+    return ControlCommand(
+        id=row[0],
+        machine_id=row[1],
+        command=row[2],
+        value=row[3],
+        issued_at=row[4],
+        status=row[5],
+    )
+
+
+@router.get(
+    "/{machine_id}/control",
+    response_model=ControlCommandList,
+    summary="List recent control commands for a machine.",
+)
+def list_control_commands(
+    machine_id: str,
+    status_filter: Optional[str] = Query(
+        None, description="Filter commands by status."
+    ),
+    limit: int = Query(10, ge=1, le=100),
+    current_user: UserPublic = Depends(get_current_user),
+) -> ControlCommandList:
+    _get_machine_for_user_or_admin(machine_id, current_user)
+    conn = get_db_connection()
+    try:
+        params: List[object] = [machine_id]
+        status_clause = ""
+        if status_filter:
+            status_clause = "AND status = ?"
+            params.append(status_filter)
+        params.append(limit)
+        rows = conn.execute(
+            f"""
+            SELECT id, machine_id, command, value, issued_at, status
+            FROM pending_control
+            WHERE machine_id = ? {status_clause}
+            ORDER BY issued_at DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+    return ControlCommandList(
+        commands=[
+            ControlCommand(
+                id=row[0],
+                machine_id=row[1],
+                command=row[2],
+                value=row[3],
+                issued_at=row[4],
+                status=row[5],
+            )
+            for row in rows
+        ]
+    )
+
+
+@router.get(
+    "/{machine_id}/control/poll",
+    response_model=ControlCommandList,
+    summary="Poll pending control commands for a machine.",
+)
+def poll_control_commands(
+    machine_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    current_user: UserPublic = Depends(get_current_user),
+) -> ControlCommandList:
+    _get_machine_for_user_or_admin(machine_id, current_user)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, machine_id, command, value, issued_at, status
+            FROM pending_control
+            WHERE machine_id = ? AND status = 'pending'
+            ORDER BY issued_at ASC
+            LIMIT ?
+            """,
+            (machine_id, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    return ControlCommandList(
+        commands=[
+            ControlCommand(
+                id=row[0],
+                machine_id=row[1],
+                command=row[2],
+                value=row[3],
+                issued_at=row[4],
+                status=row[5],
+            )
+            for row in rows
+        ]
+    )
+
+
+@router.post(
+    "/{machine_id}/control/ack",
+    response_model=ControlCommand,
+    summary="Acknowledge a control command for a machine.",
+)
+def acknowledge_control_command(
+    machine_id: str,
+    payload: ControlAckRequest,
+    current_user: UserPublic = Depends(get_current_user),
+) -> ControlCommand:
+    _get_machine_for_user_or_admin(machine_id, current_user)
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT id, machine_id, command, value, issued_at, status
+            FROM pending_control
+            WHERE id = ? AND machine_id = ?
+            """,
+            (payload.command_id, machine_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Control command not found",
+            )
+        with conn:
+            conn.execute(
+                """
+                UPDATE pending_control
+                SET status = 'acknowledged'
+                WHERE id = ?
+                """,
+                (payload.command_id,),
+            )
+        updated = conn.execute(
+            """
+            SELECT id, machine_id, command, value, issued_at, status
+            FROM pending_control
+            WHERE id = ?
+            """,
+            (payload.command_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update control command",
+        )
+    return ControlCommand(
+        id=updated[0],
+        machine_id=updated[1],
+        command=updated[2],
+        value=updated[3],
+        issued_at=updated[4],
+        status=updated[5],
+    )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -98,6 +98,28 @@ class AdminKeyspaceProgress(BaseModel):
     coverage_percent: float
     window_start: Optional[str] = None
     window_end: Optional[str] = None
+
+
+class ControlCommandRequest(BaseModel):
+    command: Literal["pause", "resume", "set_mode", "set_range"]
+    value: Optional[str] = None
+
+
+class ControlCommand(BaseModel):
+    id: int
+    machine_id: str
+    command: str
+    value: Optional[str] = None
+    issued_at: str
+    status: str
+
+
+class ControlCommandList(BaseModel):
+    commands: List[ControlCommand]
+
+
+class ControlAckRequest(BaseModel):
+    command_id: int
 
 
 class TimeSeriesPoint(BaseModel):
