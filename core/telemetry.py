@@ -72,6 +72,47 @@ _CHECK_CACHE: Dict[tuple[str, str, Optional[str]], tuple[bool, float]] = {}
 _CHECK_CACHE_LOCK = threading.Lock()
 
 
+def _coerce_percent(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().rstrip("%").strip()
+        if not cleaned or cleaned.lower() in {"n/a", "na"}:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
+def _system_metrics_payload() -> Dict[str, Any]:
+    try:
+        from core.dashboard import get_current_metrics
+
+        metrics = get_current_metrics()
+    except Exception:
+        metrics = {}
+    cpu_percent = _coerce_percent(metrics.get("cpu_percent"))
+    ram_percent = _coerce_percent(metrics.get("ram_percent"))
+    disk_free_percent = _coerce_percent(metrics.get("disk_free_percent"))
+    gpu_load_percent = _coerce_percent(metrics.get("gpu_load_percent"))
+    gpu_name = metrics.get("gpu_name")
+    if not isinstance(gpu_name, str) or not gpu_name.strip() or gpu_name == "N/A":
+        gpu_name = None
+    time_to_disk_full = metrics.get("time_to_disk_full")
+    if not isinstance(time_to_disk_full, str) or time_to_disk_full == "N/A":
+        time_to_disk_full = None
+    return {
+        "cpu_percent": cpu_percent,
+        "ram_percent": ram_percent,
+        "disk_free_percent": disk_free_percent,
+        "gpu_load_percent": gpu_load_percent,
+        "gpu_name": gpu_name,
+        "time_to_disk_full": time_to_disk_full,
+    }
+
+
 def _get_app_id(path: Path = INSTANCE_ID_PATH) -> str:
     """Return a stable UUID for this installation."""
 
@@ -327,6 +368,7 @@ class TelemetryClient:
             "range_recent": recent_ranges,
             "range_distribution": self._range_distribution(recent_ranges),
             "reference_overlays": [],
+            **_system_metrics_payload(),
         }
         data = json.dumps(payload)
 

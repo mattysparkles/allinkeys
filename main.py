@@ -131,7 +131,8 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
         from core.keygen import keygen_progress
 
         now = time.time()
-        disk_free = psutil.disk_usage("/").free
+        disk_usage = psutil.disk_usage("/")
+        disk_free = disk_usage.free
         prev_t, prev_free = _last_disk_check
         _last_disk_check = (now, disk_free)
         rate = (prev_free - disk_free) / max(1, now - prev_t)
@@ -146,12 +147,24 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
 
         vm = psutil.virtual_memory()
         ram_percent = vm.percent
+        cpu_percent = cpu_sampler.sample()
+        disk_free_percent = (
+            (disk_free / disk_usage.total) * 100 if disk_usage.total else 0
+        )
+        gpu_load_percent = None
+        gpu_name = None
         stats = {
-            "cpu_usage": f"{cpu_sampler.sample():.1f}%",
+            "cpu_usage": f"{cpu_percent:.1f}%",
+            "cpu_percent": round(cpu_percent, 1),
             "ram_usage": f"{vm.used / (1024 ** 3):.1f} GB / {vm.total / (1024 ** 3):.1f} GB ({ram_percent}%)",
+            "ram_percent": round(ram_percent, 1),
             "disk_free_gb": round(disk_free / (1024**3), 2),
+            "disk_free_percent": round(disk_free_percent, 1),
             "disk_fill_eta": disk_eta,
+            "time_to_disk_full": disk_eta,
             "gpu_stats": {},
+            "gpu_load_percent": "N/A",
+            "gpu_name": "N/A",
             "gpu_assignments": get_gpu_assignments(),
         }
         vs_ids = set(get_vanitysearch_gpu_ids())
@@ -162,12 +175,19 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
                 gpus = GPUtil.getGPUs()
                 for gpu in gpus:
                     try:
-                        usage = f"{gpu.load * 100:.0f}%"
+                        load_percent = gpu.load * 100
+                        usage = f"{load_percent:.0f}%"
                         vram = f"{gpu.memoryUsed/1024:.1f}GB / {gpu.memoryTotal/1024:.1f}GB"
                     except Exception:
                         usage = "N/A"
                         vram = "Unavailable"
                     name = gpu.name
+                    if gpu_load_percent is None or (
+                        isinstance(load_percent, (int, float))
+                        and load_percent > gpu_load_percent
+                    ):
+                        gpu_load_percent = load_percent
+                        gpu_name = gpu.name
                     if gpu.id in vs_ids:
                         name += " (VS)"
                     if gpu.id in ad_ids:
@@ -217,9 +237,16 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
                             "vram": "Unavailable",
                             "temp": "N/A",
                         }
+                        if gpu_name is None:
+                            gpu_name = device.name
                         next_id += 1
             except Exception as e:
                 logger.warning(f"⚠️ OpenCL GPU read failed: {e}")
+
+        if gpu_load_percent is not None:
+            stats["gpu_load_percent"] = round(gpu_load_percent, 1)
+        if gpu_name:
+            stats["gpu_name"] = gpu_name
 
         # ----- Backlog ETA Calculation -----
         metrics_snapshot = get_current_metrics()

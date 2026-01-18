@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -87,12 +88,20 @@ class TelemetryItem(BaseModel):
     match_found: Optional[bool] = False
     machine_id: Optional[str] = None
     machine_name: Optional[str] = None
+    cpu_percent: Optional[float] = None
+    ram_percent: Optional[float] = None
+    disk_free_percent: Optional[float] = None
+    gpu_load_percent: Optional[float] = None
+    gpu_name: Optional[str] = None
+    time_to_disk_full: Optional[str] = None
     range_recent: Optional[List[Dict[str, Any]]] = None
     range_distribution: Optional[List[Dict[str, Any]]] = None
     reference_overlays: Optional[List[Dict[str, Any]]] = None
 
 
 app = FastAPI(title="AllInKeys Central Telemetry")
+MACHINE_REGISTRY: Dict[str, Dict[str, Any]] = {}
+MACHINE_REGISTRY_LOCK = threading.Lock()
 
 
 def _safe_load_json(payload: Optional[str]) -> List[Dict[str, Any]]:
@@ -131,6 +140,23 @@ def ingest(items: List[TelemetryItem]) -> Dict[str, Any]:
         with conn:
             for item in items:
                 ts = item.timestamp_iso or now
+                machine_key = item.machine_id or item.app_instance_id
+                if machine_key:
+                    with MACHINE_REGISTRY_LOCK:
+                        existing = MACHINE_REGISTRY.get(machine_key, {})
+                        MACHINE_REGISTRY[machine_key] = {
+                            "machine_id": machine_key,
+                            "machine_name": item.machine_name
+                            or existing.get("machine_name")
+                            or machine_key,
+                            "last_seen": ts,
+                            "cpu_percent": item.cpu_percent,
+                            "ram_percent": item.ram_percent,
+                            "disk_free_percent": item.disk_free_percent,
+                            "gpu_load_percent": item.gpu_load_percent,
+                            "gpu_name": item.gpu_name,
+                            "time_to_disk_full": item.time_to_disk_full,
+                        }
                 conn.execute(
                     """
                     INSERT INTO seed_events (
@@ -175,6 +201,19 @@ def ingest(items: List[TelemetryItem]) -> Dict[str, Any]:
     finally:
         conn.close()
     return {"status": "ok", "count": len(items)}
+
+
+@app.get("/v1/dashboard/{slug}/machines")
+def machine_stats(slug: str) -> Dict[str, Any]:
+    with MACHINE_REGISTRY_LOCK:
+        machines = list(MACHINE_REGISTRY.values())
+    machines.sort(
+        key=lambda entry: (
+            entry.get("machine_name") or "",
+            entry.get("machine_id") or "",
+        )
+    )
+    return {"slug": slug, "machines": machines}
 
 
 @app.get("/v1/seed/stats")
