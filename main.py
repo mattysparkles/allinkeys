@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from multiprocessing import Process
 import psutil
 from dashboard.metrics_window import CPUPercent
-from core.logger import get_logger
+from core.logger import get_logger, log_with_context
 from utils.thread_guard import can_spawn_thread
 
 # Wrap stdout once with UTF-8 encoding if not already wrapped
@@ -73,6 +73,7 @@ from core.dashboard import (
 from core.gpu_selector import assign_gpu_roles
 from core.altcoin_derive import start_altcoin_conversion_process  # <-- updated import
 from core.telemetry import start_telemetry, start_embedded_telemetry_service
+from config.telemetry import TELEMETRY_SERVICE_HOST, TELEMETRY_SERVICE_PORT
 from utils.file_utils import start_daily_cleanup, cleanup_old_files
 
 
@@ -672,9 +673,19 @@ def run_allinkeys(args):
         try:
             svc_proc = start_embedded_telemetry_service()
             if svc_proc is not None:
-                logger.info("[Started] Embedded telemetry service")
+                log_with_context(
+                    logger,
+                    "INFO",
+                    "[Started] Embedded telemetry service",
+                    endpoint=f"http://{TELEMETRY_SERVICE_HOST}:{TELEMETRY_SERVICE_PORT}",
+                )
         except Exception as e:
-            logger.warning(f"Failed to start embedded telemetry service: {e}")
+            log_with_context(
+                logger,
+                "WARNING",
+                f"Failed to start embedded telemetry service: {e}",
+                endpoint=f"http://{TELEMETRY_SERVICE_HOST}:{TELEMETRY_SERVICE_PORT}",
+            )
     shutdown_events = {
         "keygen": multiprocessing.Event(),
         "altcoin": multiprocessing.Event(),

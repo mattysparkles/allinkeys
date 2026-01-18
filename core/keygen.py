@@ -24,7 +24,7 @@ from core.checkpoint import (
 from core.gpu_selector import (
     get_vanitysearch_gpu_ids,
 )  # ✅ Correct GPU selection integration
-from core.logger import get_logger
+from core.logger import get_logger, log_with_context
 import config.settings as settings
 from core.vanity_runner import run_vanitysearch_batch
 from core.seed_tracker import (
@@ -94,7 +94,12 @@ def run_btc_only(
     global BTC_COMPRESSED
     BTC_COMPRESSED = bool(compressed)
     mode = "compressed" if BTC_COMPRESSED else "uncompressed"
-    logger.info(f"🔑 BTC-only keygen starting (format={mode})")
+    log_with_context(
+        logger,
+        "INFO",
+        f"🔑 BTC-only keygen starting (format={mode})",
+        **_keygen_log_context(mode="only_btc"),
+    )
 
     try:
         start_keygen_loop(
@@ -161,6 +166,24 @@ def _telemetry_context():
         num = getattr(settings, "PUZZLE_NUMBER", None)
         return "puzzle", (f"puzzle-{num}" if num is not None else "puzzle")
     return "vanity", "default"
+
+
+def _keygen_log_context(
+    *,
+    batch_id=None,
+    index_within_batch=None,
+    gpu_ids=None,
+    mode=None,
+    range_id=None,
+) -> dict:
+    default_mode, default_range_id = _telemetry_context()
+    return {
+        "batch_id": batch_id,
+        "index_within_batch": index_within_batch,
+        "gpu_ids": gpu_ids,
+        "mode": mode if mode is not None else default_mode,
+        "range_id": range_id if range_id is not None else default_range_id,
+    }
 
 
 def _range_space() -> tuple[int, int]:
@@ -375,11 +398,17 @@ def run_vanitysearch_stream(
         start = int(getattr(settings, "PUZZLE_START", "0"), 16)
         end = int(getattr(settings, "PUZZLE_END", "0"), 16)
         if not (start <= initial_seed_int <= end):
-            logger.debug(
+            log_with_context(
+                logger,
+                "DEBUG",
                 "Seed %x outside puzzle range [%x, %x] — skipping",
                 initial_seed_int,
                 start,
                 end,
+                **_keygen_log_context(
+                    batch_id=batch_id,
+                    index_within_batch=index_within_batch,
+                ),
             )
             increment_metric("out_of_range_skipped", 1)
             return False
@@ -415,7 +444,16 @@ def run_vanitysearch_stream(
     # Resolve VanitySearch binary and build command (all args as str)
     exe_path = str(VANITYSEARCH_PATH)
     if not exe_path or not os.path.exists(exe_path):
-        logger.error("VanitySearch binary not found: %s", exe_path)
+        log_with_context(
+            logger,
+            "ERROR",
+            "VanitySearch binary not found: %s",
+            exe_path,
+            **_keygen_log_context(
+                batch_id=batch_id,
+                index_within_batch=index_within_batch,
+            ),
+        )
         raise FileNotFoundError("VanitySearch binary not found.")
 
     # IMPORTANT: Use VanitySearch's native -o output handling with a unique
@@ -427,18 +465,43 @@ def run_vanitysearch_stream(
         base_args.append("-u")  # uncompressed WIF
 
     cmd_preview = " ".join(map(str, [exe_path] + base_args + [pattern]))
-    logger.info(
+    log_with_context(
+        logger,
+        "INFO",
         f"🧬 Starting VanitySearch:\n"
         f"   Seed: {hex_seed_full}\n"
         f"   Output prefix: {output_prefix}\n"
         f"   GPUs: {selected_gpu_ids or 'CPU'}\n"
-        f"   Pattern: {pattern}"
+        f"   Pattern: {pattern}",
+        **_keygen_log_context(
+            batch_id=batch_id,
+            index_within_batch=index_within_batch,
+            gpu_ids=selected_gpu_ids or None,
+        ),
     )
-    logger.info(f"🚀 Running command: {cmd_preview}")
+    log_with_context(
+        logger,
+        "INFO",
+        f"🚀 Running command: {cmd_preview}",
+        **_keygen_log_context(
+            batch_id=batch_id,
+            index_within_batch=index_within_batch,
+            gpu_ids=selected_gpu_ids or None,
+        ),
+    )
 
     # Respect pause before launch
     if pause_event and pause_event.is_set():
-        logger.info("⏸️ Pause detected before launch. Skipping VanitySearch run.")
+        log_with_context(
+            logger,
+            "INFO",
+            "⏸️ Pause detected before launch. Skipping VanitySearch run.",
+            **_keygen_log_context(
+                batch_id=batch_id,
+                index_within_batch=index_within_batch,
+                gpu_ids=selected_gpu_ids or None,
+            ),
+        )
         return False
 
     try:
@@ -464,7 +527,16 @@ def run_vanitysearch_stream(
     # Post-process output file: parse results and drop empty outputs. The file
     # itself must be created by VanitySearch via -o (no Python writes).
     if not os.path.exists(current_output_path):
-        logger.error(f"❌ Output file not created: {current_output_path}")
+        log_with_context(
+            logger,
+            "ERROR",
+            f"❌ Output file not created: {current_output_path}",
+            **_keygen_log_context(
+                batch_id=batch_id,
+                index_within_batch=index_within_batch,
+                gpu_ids=selected_gpu_ids or None,
+            ),
+        )
         # Returning False forces the caller to retry this part instead of
         # silently advancing the batch counter without producing a file.
         return False
@@ -472,7 +544,16 @@ def run_vanitysearch_stream(
     if os.path.exists(current_output_path):
         size = os.path.getsize(current_output_path)
         if size == 0:
-            logger.warning(f"⚠️ Output file empty: {current_output_path}")
+            log_with_context(
+                logger,
+                "WARNING",
+                f"⚠️ Output file empty: {current_output_path}",
+                **_keygen_log_context(
+                    batch_id=batch_id,
+                    index_within_batch=index_within_batch,
+                    gpu_ids=selected_gpu_ids or None,
+                ),
+            )
             os.remove(current_output_path)
             return True
 
@@ -520,7 +601,16 @@ def run_vanitysearch_stream(
                 except Exception:
                     pass
 
-            logger.info(f"📄 File complete: {lines} lines → {current_output_path}")
+            log_with_context(
+                logger,
+                "INFO",
+                f"📄 File complete: {lines} lines → {current_output_path}",
+                **_keygen_log_context(
+                    batch_id=batch_id,
+                    index_within_batch=index_within_batch,
+                    gpu_ids=selected_gpu_ids or None,
+                ),
+            )
             try:
                 set_metric("last_rotation", time.time())
             except Exception:
@@ -532,13 +622,29 @@ def run_vanitysearch_stream(
                 rotation_recent = (time.time() - rotation_info["timestamp"]) <= rotation_grace
 
             if rotation_recent:
-                logger.info(
+                log_with_context(
+                    logger,
+                    "INFO",
                     "ℹ️ Failed to parse %s during rotation (file inactive): %s",
                     current_output_path,
                     e,
+                    **_keygen_log_context(
+                        batch_id=batch_id,
+                        index_within_batch=index_within_batch,
+                        gpu_ids=selected_gpu_ids or None,
+                    ),
                 )
                 return True
-            logger.warning(f"⚠️ Failed to parse {current_output_path}: {e}")
+            log_with_context(
+                logger,
+                "WARNING",
+                f"⚠️ Failed to parse {current_output_path}: {e}",
+                **_keygen_log_context(
+                    batch_id=batch_id,
+                    index_within_batch=index_within_batch,
+                    gpu_ids=selected_gpu_ids or None,
+                ),
+            )
             return False
 
     return True
@@ -602,11 +708,24 @@ def start_keygen_loop(
     if checkpoint:
         KEYGEN_STATE["batch_id"] = checkpoint.get("batch_id", 0)
         KEYGEN_STATE["index_within_batch"] = checkpoint.get("index_within_batch", 0)
-        logger.info("✅ Checkpoint loaded successfully")
+        log_with_context(
+            logger,
+            "INFO",
+            "✅ Checkpoint loaded successfully",
+            **_keygen_log_context(batch_id=KEYGEN_STATE["batch_id"]),
+        )
     else:
         KEYGEN_STATE["batch_id"] = secrets.randbelow(1_000_000)
         KEYGEN_STATE["index_within_batch"] = secrets.randbelow(FILES_PER_BATCH)
-        logger.info("🚀 No checkpoint found. Starting with randomized batch/index.")
+        log_with_context(
+            logger,
+            "INFO",
+            "🚀 No checkpoint found. Starting with randomized batch/index.",
+            **_keygen_log_context(
+                batch_id=KEYGEN_STATE["batch_id"],
+                index_within_batch=KEYGEN_STATE["index_within_batch"],
+            ),
+        )
 
     # Initialize dashboard metrics so the GUI never shows N/A
     set_metric("keys_generated_today", 0)
@@ -642,13 +761,29 @@ def start_keygen_loop(
             if pause_evt and pause_evt.is_set():
                 # Emit a heartbeat log every 5s while paused so the user knows it's alive
                 if (not pause_logged) or (time.time() - pause_log_ts > 5):
-                    logger.info("⏸️ Keygen paused. Waiting to resume...")
+                    log_with_context(
+                        logger,
+                        "INFO",
+                        "⏸️ Keygen paused. Waiting to resume...",
+                        **_keygen_log_context(
+                            batch_id=KEYGEN_STATE["batch_id"],
+                            index_within_batch=KEYGEN_STATE["index_within_batch"],
+                        ),
+                    )
                     pause_logged = True
                     pause_log_ts = time.time()
                 time.sleep(1)
                 continue
             elif pause_logged:
-                logger.info("▶️ Keygen resumed.")
+                log_with_context(
+                    logger,
+                    "INFO",
+                    "▶️ Keygen resumed.",
+                    **_keygen_log_context(
+                        batch_id=KEYGEN_STATE["batch_id"],
+                        index_within_batch=KEYGEN_STATE["index_within_batch"],
+                    ),
+                )
                 pause_logged = False
 
             # update keys/sec using a moving window of the last 5 seconds
@@ -706,8 +841,14 @@ def start_keygen_loop(
 
                 # Save after each file so progress can resume mid-batch
                 try:
-                    logger.info(
-                        f"[Rotation] Completed part {index} of batch {KEYGEN_STATE['batch_id']}; starting next file"
+                    log_with_context(
+                        logger,
+                        "INFO",
+                        f"[Rotation] Completed part {index} of batch {KEYGEN_STATE['batch_id']}; starting next file",
+                        **_keygen_log_context(
+                            batch_id=KEYGEN_STATE["batch_id"],
+                            index_within_batch=index,
+                        ),
                     )
                 except Exception:
                     pass
@@ -724,7 +865,12 @@ def start_keygen_loop(
             total_time += batch_end - batch_start
             set_metric("batches_completed", batches_completed)
             set_metric("avg_keygen_time", round(total_time / batches_completed, 2))
-            logger.info(f"Batch {KEYGEN_STATE['batch_id']} completed")
+            log_with_context(
+                logger,
+                "INFO",
+                f"Batch {KEYGEN_STATE['batch_id']} completed",
+                **_keygen_log_context(batch_id=KEYGEN_STATE["batch_id"]),
+            )
 
             # Advance to next batch
             KEYGEN_STATE["batch_id"] += 1

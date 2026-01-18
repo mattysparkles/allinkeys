@@ -2,6 +2,7 @@
 
 import os
 import datetime
+import json
 import sys
 import logging
 import multiprocessing
@@ -9,6 +10,7 @@ from multiprocessing import queues as mp_queues
 from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
 from config.settings import (
     LOG_LEVEL,
+    LOG_FORMAT,
     LOG_TO_CONSOLE,
     LOG_TO_FILE,
     LOG_MAX_BYTES,
@@ -19,7 +21,16 @@ from utils.thread_guard import can_spawn_thread
 
 
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+
+CORRELATION_FIELDS = (
+    "batch_id",
+    "index_within_batch",
+    "gpu_id",
+    "gpu_ids",
+    "mode",
+    "range_id",
+    "endpoint",
+)
 
 # Use the actual Queue class for type hints to avoid runtime TypeError
 log_queue: mp_queues.Queue | None = None
@@ -57,7 +68,7 @@ def start_listener():
     q = _ensure_queue()
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    fmt = _get_formatter()
 
     # Individual handlers per log level
     debug_handler = RotatingFileHandler(
@@ -166,7 +177,64 @@ _LEVEL_MAP = {
     "ALERT": logging.ERROR,
 }
 
-def log_message(message: str, level: str = "INFO", exc_info: bool = False) -> None:
+class JsonLogFormatter(logging.Formatter):
+    """Emit log records as structured JSON with correlation fields."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.datetime.utcfromtimestamp(record.created).isoformat() + "Z",
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "module": record.module,
+        }
+        for field in CORRELATION_FIELDS:
+            if hasattr(record, field):
+                value = getattr(record, field)
+                if value is not None:
+                    payload[field] = value
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            payload["stack_info"] = record.stack_info
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def _normalized_log_format() -> str:
+    return str(LOG_FORMAT or "text").strip().lower()
+
+
+def _get_formatter() -> logging.Formatter:
+    if _normalized_log_format() == "json":
+        return JsonLogFormatter()
+    return logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+
+
+def _filter_context(context: dict) -> dict:
+    return {k: v for k, v in context.items() if k in CORRELATION_FIELDS and v is not None}
+
+
+def log_with_context(
+    logger: logging.Logger,
+    level: str,
+    message: str,
+    *args,
+    exc_info: bool = False,
+    **context,
+) -> None:
+    level_value = _LEVEL_MAP.get(level.upper(), logging.INFO) if isinstance(level, str) else level
+    extra = _filter_context(context)
+    if extra:
+        logger.log(level_value, message, *args, exc_info=exc_info, extra=extra)
+    else:
+        logger.log(level_value, message, *args, exc_info=exc_info)
+
+
+def log_message(
+    message: str,
+    level: str = "INFO",
+    exc_info: bool = False,
+    **context,
+) -> None:
     """Send a log message through the shared logging queue.
 
     ``exc_info=True`` will include the current exception stack trace in the
@@ -183,7 +251,10 @@ def log_message(message: str, level: str = "INFO", exc_info: bool = False) -> No
     caller = inspect.currentframe().f_back  # type: ignore[assignment]
     module = caller.f_globals.get("__name__", "allinkeys") if caller else "allinkeys"
     logger = get_logger(module)
-    logger.log(_LEVEL_MAP.get(level.upper(), logging.INFO), timestamped, exc_info=exc_info)
+    if _normalized_log_format() == "json":
+        log_with_context(logger, level, message, exc_info=exc_info, **context)
+    else:
+        log_with_context(logger, level, timestamped, exc_info=exc_info, **context)
 
 
 # Backwards compatibility: some modules import ``_get_logger`` directly
