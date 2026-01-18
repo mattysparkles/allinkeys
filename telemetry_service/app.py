@@ -49,6 +49,30 @@ def _connect() -> sqlite3.Connection:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_seed_fingerprint ON seed_events(seed_fingerprint)"
     )
+    has_unique_index = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type='index' AND name='uniq_seed_fingerprint_range_id'
+        """
+    ).fetchone()
+    if not has_unique_index:
+        conn.execute(
+            """
+            DELETE FROM seed_events
+            WHERE id NOT IN (
+                SELECT MAX(id)
+                FROM seed_events
+                GROUP BY seed_fingerprint, range_id
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_seed_fingerprint_range_id
+            ON seed_events(seed_fingerprint, range_id)
+            """
+        )
     return conn
 
 
@@ -88,6 +112,18 @@ def ingest(items: List[TelemetryItem]) -> Dict[str, Any]:
                         first_seen, last_seen, used, match_found, machine_id, machine_name,
                         range_recent, range_distribution, reference_overlays
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(seed_fingerprint, range_id) DO UPDATE SET
+                        last_seen=excluded.last_seen,
+                        used=MAX(seed_events.used, excluded.used),
+                        match_found=MAX(seed_events.match_found, excluded.match_found),
+                        app_instance_id=COALESCE(excluded.app_instance_id, seed_events.app_instance_id),
+                        client_version=COALESCE(excluded.client_version, seed_events.client_version),
+                        mode=COALESCE(excluded.mode, seed_events.mode),
+                        machine_id=COALESCE(excluded.machine_id, seed_events.machine_id),
+                        machine_name=COALESCE(excluded.machine_name, seed_events.machine_name),
+                        range_recent=COALESCE(excluded.range_recent, seed_events.range_recent),
+                        range_distribution=COALESCE(excluded.range_distribution, seed_events.range_distribution),
+                        reference_overlays=COALESCE(excluded.reference_overlays, seed_events.reference_overlays)
                     """,
                     (
                         item.seed_fingerprint,
@@ -113,6 +149,105 @@ def ingest(items: List[TelemetryItem]) -> Dict[str, Any]:
     finally:
         conn.close()
     return {"status": "ok", "count": len(items)}
+
+
+@app.get("/v1/seed/stats")
+def seed_stats(
+    since: Optional[str] = Query(None),
+    mode: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None, ge=1),
+) -> Dict[str, Any]:
+    conn = _connect()
+    try:
+        filters = []
+        params: List[Any] = []
+        if since:
+            filters.append("last_seen >= ?")
+            params.append(since)
+        if mode:
+            filters.append("mode = ?")
+            params.append(mode)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+
+        total_seeds = conn.execute(
+            f"SELECT COUNT(*) FROM seed_events {where_clause}",
+            params,
+        ).fetchone()[0]
+        unique_seeds = conn.execute(
+            f"SELECT COUNT(DISTINCT seed_fingerprint) FROM seed_events {where_clause}",
+            params,
+        ).fetchone()[0]
+        per_mode_rows = conn.execute(
+            f"""
+            SELECT mode, COUNT(*) AS count
+            FROM seed_events
+            {where_clause}
+            GROUP BY mode
+            ORDER BY count DESC
+            """,
+            params,
+        ).fetchall()
+        per_mode = [{"mode": row[0], "count": row[1]} for row in per_mode_rows]
+        if limit:
+            per_mode = per_mode[:limit]
+        return {
+            "total_seeds": total_seeds,
+            "unique_seeds": unique_seeds,
+            "per_mode": per_mode,
+            "since": since,
+            "mode": mode,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/v1/seed/range")
+def seed_range(
+    since: Optional[str] = Query(None),
+    mode: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None, ge=1),
+) -> Dict[str, Any]:
+    conn = _connect()
+    try:
+        filters = ["range_id IS NOT NULL"]
+        params: List[Any] = []
+        if since:
+            filters.append("last_seen >= ?")
+            params.append(since)
+        if mode:
+            filters.append("mode = ?")
+            params.append(mode)
+        where_clause = f"WHERE {' AND '.join(filters)}"
+        limit_clause = "LIMIT ?" if limit else ""
+        if limit:
+            params.append(limit)
+        rows = conn.execute(
+            f"""
+            SELECT
+                range_id,
+                COUNT(*) AS count,
+                MAX(last_seen) AS last_seen,
+                MAX(used) AS used
+            FROM seed_events
+            {where_clause}
+            GROUP BY range_id
+            ORDER BY last_seen DESC
+            {limit_clause}
+            """,
+            params,
+        ).fetchall()
+        ranges = [
+            {
+                "range_id": row[0],
+                "count": row[1],
+                "last_seen": row[2],
+                "used": bool(row[3]),
+            }
+            for row in rows
+        ]
+        return {"ranges": ranges, "since": since, "mode": mode, "limit": limit}
+    finally:
+        conn.close()
 
 
 @app.get("/v1/seed/check")
