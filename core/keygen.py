@@ -202,9 +202,8 @@ def _central_seen(seed: int) -> bool:
     if not telemetry_enabled():
         return False
     try:
-        return check_seed_seen(
-            int(seed).to_bytes(32, "big"), mode=mode, range_id=range_id
-        )
+        seed_bytes = int(seed).to_bytes(32, "big")
+        return check_seed_seen(seed_bytes, mode=mode, range_id=range_id)
     except Exception:
         return False
 
