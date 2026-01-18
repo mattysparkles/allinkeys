@@ -102,6 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-telemetry", action="store_true", help="Disable telemetry reporting"
     )
     parser.add_argument(
+        "--auth-token",
+        help="Bearer token used for authenticated telemetry endpoints",
+    )
+    parser.add_argument(
         "--match-test", action="store_true", help="Trigger fake match alert on startup"
     )
     parser.add_argument(
@@ -352,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if getattr(args, "no_telemetry", False):
         settings.SEED_TELEMETRY_ENABLED = False
+    if getattr(args, "auth_token", None):
+        os.environ["AUTH_TOKEN"] = args.auth_token
     # Handle retention purge early and exit
     if getattr(args, "purge", None) is not None:
         try:

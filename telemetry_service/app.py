@@ -5,7 +5,6 @@ import logging
 import os
 import re
 import sqlite3
-import threading
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -19,38 +18,20 @@ from config.telemetry import TOKEN_EXPIRY
 from telemetry_service.auth import create_access_token, hash_password, verify_password
 from telemetry_service.db import get_db_connection
 from telemetry_service.dependencies import get_current_user
-from telemetry_service.models import TokenResponse, UserCreate, UserPublic
+from telemetry_service.ingest import ingest_seed_events
+from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
+from telemetry_service.routes.machines import router as machines_router
+from telemetry_service.models import (
+    IngestResponse,
+    TelemetryItem,
+    TokenResponse,
+    UserCreate,
+    UserPublic,
+)
 
 API_KEY_ENV = "TELEMETRY_API_KEY"
 logger = logging.getLogger("telemetry")
 logging.basicConfig(level=os.getenv("TELEMETRY_LOG_LEVEL", "INFO"))
-
-
-class TelemetryItem(BaseModel):
-    app_instance_id: Optional[str] = None
-    client_version: Optional[str] = None
-    mode: Optional[str] = None
-    range_id: Optional[str] = None
-    seed_fingerprint: str
-    timestamp_iso: Optional[str] = None
-    used: Optional[bool] = False
-    match_found: Optional[bool] = False
-    machine_id: Optional[str] = None
-    machine_name: Optional[str] = None
-    cpu_percent: Optional[float] = None
-    ram_percent: Optional[float] = None
-    disk_free_percent: Optional[float] = None
-    gpu_load_percent: Optional[float] = None
-    gpu_name: Optional[str] = None
-    time_to_disk_full: Optional[str] = None
-    range_recent: Optional[List[Dict[str, Any]]] = None
-    range_distribution: Optional[List[Dict[str, Any]]] = None
-    reference_overlays: Optional[List[Dict[str, Any]]] = None
-
-
-class IngestResponse(BaseModel):
-    status: str = Field(..., examples=["ok"])
-    count: int = Field(..., examples=[1])
 
 
 class MachineInfo(BaseModel):
@@ -117,8 +98,7 @@ class CheckResponse(BaseModel):
 
 
 app = FastAPI(title="AllInKeys Central Telemetry")
-MACHINE_REGISTRY: Dict[tuple[int, str], Dict[str, Any]] = {}
-MACHINE_REGISTRY_LOCK = threading.Lock()
+app.include_router(machines_router)
 
 
 def _expected_api_key() -> Optional[str]:
@@ -293,89 +273,10 @@ def ingest(
     """
     if not isinstance(items, list) or not items:
         raise HTTPException(status_code=400, detail="Expected non-empty list body")
-    now = datetime.utcnow().isoformat() + "Z"
     conn = get_db_connection()
     try:
         with conn:
-            for item in items:
-                ts = item.timestamp_iso or now
-                machine_key = item.machine_id or item.app_instance_id
-                machine_name = item.machine_name
-                if machine_key:
-                    with MACHINE_REGISTRY_LOCK:
-                        registry_key = (current_user.id, machine_key)
-                        existing = MACHINE_REGISTRY.get(registry_key, {})
-                        machine_name = (
-                            item.machine_name
-                            or existing.get("machine_name")
-                            or machine_key
-                        )
-                        MACHINE_REGISTRY[registry_key] = {
-                            "user_id": current_user.id,
-                            "machine_id": machine_key,
-                            "machine_name": machine_name,
-                            "last_seen": ts,
-                            "cpu_percent": item.cpu_percent,
-                            "ram_percent": item.ram_percent,
-                            "disk_free_percent": item.disk_free_percent,
-                            "gpu_load_percent": item.gpu_load_percent,
-                            "gpu_name": item.gpu_name,
-                            "time_to_disk_full": item.time_to_disk_full,
-                        }
-                    conn.execute(
-                        """
-                        INSERT INTO machines (
-                            user_id, machine_name, gpu_info, status, last_seen
-                        ) VALUES (?, ?, ?, 'online', ?)
-                        ON CONFLICT(user_id, machine_name) DO UPDATE SET
-                            gpu_info=COALESCE(excluded.gpu_info, machines.gpu_info),
-                            status='online',
-                            last_seen=excluded.last_seen
-                        """,
-                        (current_user.id, machine_name, item.gpu_name, ts),
-                    )
-                conn.execute(
-                    """
-                    INSERT INTO seed_events (
-                        user_id, seed_fingerprint, app_instance_id, client_version, mode, range_id,
-                        first_seen, last_seen, used, match_found, machine_id, machine_name,
-                        range_recent, range_distribution, reference_overlays
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(seed_fingerprint, range_id, user_id) DO UPDATE SET
-                        last_seen=excluded.last_seen,
-                        used=MAX(seed_events.used, excluded.used),
-                        match_found=MAX(seed_events.match_found, excluded.match_found),
-                        app_instance_id=COALESCE(excluded.app_instance_id, seed_events.app_instance_id),
-                        client_version=COALESCE(excluded.client_version, seed_events.client_version),
-                        mode=COALESCE(excluded.mode, seed_events.mode),
-                        machine_id=COALESCE(excluded.machine_id, seed_events.machine_id),
-                        machine_name=COALESCE(excluded.machine_name, seed_events.machine_name),
-                        range_recent=COALESCE(excluded.range_recent, seed_events.range_recent),
-                        range_distribution=COALESCE(excluded.range_distribution, seed_events.range_distribution),
-                        reference_overlays=COALESCE(excluded.reference_overlays, seed_events.reference_overlays)
-                    """,
-                    (
-                        current_user.id,
-                        item.seed_fingerprint,
-                        item.app_instance_id,
-                        item.client_version,
-                        item.mode,
-                        item.range_id,
-                        ts,
-                        ts,
-                        1 if item.used else 0,
-                        1 if item.match_found else 0,
-                        item.machine_id,
-                        machine_name,
-                        json.dumps(item.range_recent) if item.range_recent else None,
-                        json.dumps(item.range_distribution)
-                        if item.range_distribution
-                        else None,
-                        json.dumps(item.reference_overlays)
-                        if item.reference_overlays
-                        else None,
-                    ),
-                )
+            ingest_seed_events(items, current_user=current_user, conn=conn)
     finally:
         conn.close()
     return IngestResponse(status="ok", count=len(items))

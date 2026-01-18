@@ -72,20 +72,67 @@ def get_db_connection() -> sqlite3.Connection:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS machines (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
             machine_name TEXT,
             gpu_info TEXT,
+            version TEXT,
             status TEXT DEFAULT 'online',
             last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(user_id) REFERENCES users(id)
         );
         """
     )
+    machine_info = conn.execute("PRAGMA table_info(machines)").fetchall()
+    machine_columns = {row[1]: row[2].upper() for row in machine_info}
+    if machine_columns and machine_columns.get("id") != "TEXT":
+        conn.execute("ALTER TABLE machines RENAME TO machines_old")
+        conn.execute(
+            """
+            CREATE TABLE machines (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                machine_name TEXT,
+                gpu_info TEXT,
+                version TEXT,
+                status TEXT DEFAULT 'online',
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO machines (
+                id, user_id, machine_name, gpu_info, version, status, last_seen
+            )
+            SELECT
+                CAST(id AS TEXT),
+                user_id,
+                machine_name,
+                gpu_info,
+                NULL,
+                status,
+                last_seen
+            FROM machines_old
+            """
+        )
+        conn.execute("DROP TABLE machines_old")
+        machine_columns = {
+            row[1]: row[2].upper()
+            for row in conn.execute("PRAGMA table_info(machines)").fetchall()
+        }
+    optional_machine_columns = {
+        "gpu_info": "TEXT",
+        "version": "TEXT",
+        "status": "TEXT",
+        "last_seen": "TIMESTAMP",
+    }
+    for name, col_type in optional_machine_columns.items():
+        if name not in machine_columns:
+            conn.execute(f"ALTER TABLE machines ADD COLUMN {name} {col_type}")
+    conn.execute("DROP INDEX IF EXISTS idx_machine_user_name")
     conn.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_machine_user_name
-        ON machines(user_id, machine_name)
-        """
+        "CREATE INDEX IF NOT EXISTS idx_machine_user ON machines(user_id)"
     )
     return conn
