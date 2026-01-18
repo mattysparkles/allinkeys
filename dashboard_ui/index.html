@@ -53,6 +53,50 @@
         font-size: 14px;
         margin-top: 8px;
       }
+      .machine-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        margin-top: 16px;
+      }
+      .machine-card {
+        background: #1f2430;
+        border-radius: 14px;
+        padding: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      .machine-card h3 {
+        margin: 0 0 4px;
+        font-size: 16px;
+      }
+      .machine-meta {
+        color: #9aa4b2;
+        font-size: 12px;
+        margin-bottom: 12px;
+      }
+      .metric-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        margin: 6px 0;
+      }
+      .metric-bar {
+        width: 100%;
+        height: 6px;
+        background: #2a3140;
+        border-radius: 999px;
+        overflow: hidden;
+        margin-top: 6px;
+      }
+      .metric-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #4fd1c5, #82aaff);
+        width: 0;
+      }
+      .metric-na {
+        color: #6b7280;
+      }
     </style>
   </head>
   <body>
@@ -76,6 +120,12 @@
       </div>
       <canvas id="rangeDistributionChart"></canvas>
       <div class="status" id="rangeDistributionStatus"></div>
+    </section>
+
+    <section class="section">
+      <h2>Machine System Usage</h2>
+      <div class="status" id="machineStatus">Loading machines...</div>
+      <div class="machine-grid" id="machineGrid"></div>
     </section>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
