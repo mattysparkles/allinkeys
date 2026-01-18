@@ -11,6 +11,29 @@ class TokenResponse(BaseModel):
     expires_in: int
 
 
+class PairInitResponse(BaseModel):
+    pair_code: str
+    pair_url: str
+    poll_interval_seconds: int
+
+
+class PairStatusResponse(BaseModel):
+    status: str
+    token: Optional[str] = None
+
+
+class PairClaimRequest(BaseModel):
+    pair_code: str
+    username: str
+    password: str
+
+
+class PairClaimResponse(BaseModel):
+    status: str
+    token: Optional[str] = None
+    message: Optional[str] = None
+
+
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=150)
     password: str = Field(..., min_length=8)

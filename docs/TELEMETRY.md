@@ -4,6 +4,39 @@ AllInKeys includes a small, privacy‑preserving telemetry system that helps the
 maintainers understand how the software is used.  The data guides feature
 development and is never shared or sold.
 
+## Quick Start: telemetry setup
+
+On first run (or when the token is missing/invalid), AllInKeys will guide you
+through a quick setup wizard in an interactive terminal. You can also run it
+manually:
+
+```bash
+python main.py --telemetry-setup
+```
+
+The wizard will:
+
+1. Show a concise privacy disclosure (what is sent and what is not).
+2. Let you paste an existing token, pair via browser, or disable telemetry.
+3. Store your token locally so future runs “just work.”
+
+## Token storage (local-only)
+
+Telemetry tokens are stored locally at:
+
+```
+config/.telemetry_token
+```
+
+This file is git‑ignored. Tokens are secrets—do not share them. Rotate tokens
+immediately if they are exposed.
+
+Telemetry opt‑out is stored locally at:
+
+```
+config/local_telemetry.json
+```
+
 ## Collected Fields
 
 Only minimal metadata is transmitted and **never** any seeds, WIFs or derived
@@ -58,6 +91,18 @@ python main.py --no-telemetry
 ```
 
 When disabled, no events are recorded and the queue remains empty.
+
+You can also disable telemetry during setup, which writes a local opt‑out flag
+to `config/local_telemetry.json`.
+
+## Pairing flow (browser)
+
+If you choose “Pair this machine via browser” in the wizard:
+
+1. The client requests a pairing code from `/v1/pair/init`.
+2. You open the provided pairing URL and enter the code.
+3. The client polls `/v1/pair/status` until approved and receives a token.
+4. The token is stored locally and the machine is registered automatically.
 
 ## Central "Seen" Check
 
