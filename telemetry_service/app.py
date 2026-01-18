@@ -10,78 +10,20 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 
+from config.telemetry import TOKEN_EXPIRY
+from telemetry_service.auth import create_access_token, hash_password, verify_password
+from telemetry_service.db import get_db_connection
+from telemetry_service.dependencies import get_current_user
+from telemetry_service.models import TokenResponse, UserCreate, UserPublic
 
-DB_PATH = os.getenv("CENTRAL_TELEMETRY_DB", os.path.abspath(os.path.join(os.path.dirname(__file__), "../logs/central_telemetry.db")))
 API_KEY_ENV = "TELEMETRY_API_KEY"
 logger = logging.getLogger("telemetry")
 logging.basicConfig(level=os.getenv("TELEMETRY_LOG_LEVEL", "INFO"))
-
-
-def _connect() -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS seed_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            seed_fingerprint TEXT NOT NULL,
-            app_instance_id TEXT,
-            client_version TEXT,
-            mode TEXT,
-            range_id TEXT,
-            first_seen TEXT,
-            last_seen TEXT,
-            used INTEGER DEFAULT 0,
-            match_found INTEGER DEFAULT 0
-        );
-        """
-    )
-    existing_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(seed_events)").fetchall()
-    }
-    optional_columns = {
-        "machine_id": "TEXT",
-        "machine_name": "TEXT",
-        "range_recent": "TEXT",
-        "range_distribution": "TEXT",
-        "reference_overlays": "TEXT",
-    }
-    for name, col_type in optional_columns.items():
-        if name not in existing_cols:
-            conn.execute(f"ALTER TABLE seed_events ADD COLUMN {name} {col_type}")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_seed_fingerprint ON seed_events(seed_fingerprint)"
-    )
-    has_unique_index = conn.execute(
-        """
-        SELECT 1
-        FROM sqlite_master
-        WHERE type='index' AND name='idx_seed_range'
-        """
-    ).fetchone()
-    if not has_unique_index:
-        conn.execute(
-            """
-            DELETE FROM seed_events
-            WHERE id NOT IN (
-                SELECT MAX(id)
-                FROM seed_events
-                GROUP BY seed_fingerprint, range_id
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_seed_range
-            ON seed_events(seed_fingerprint, range_id)
-            """
-        )
-    return conn
 
 
 class TelemetryItem(BaseModel):
@@ -175,7 +117,7 @@ class CheckResponse(BaseModel):
 
 
 app = FastAPI(title="AllInKeys Central Telemetry")
-MACHINE_REGISTRY: Dict[str, Dict[str, Any]] = {}
+MACHINE_REGISTRY: Dict[tuple[int, str], Dict[str, Any]] = {}
 MACHINE_REGISTRY_LOCK = threading.Lock()
 
 
@@ -209,6 +151,73 @@ async def api_key_middleware(request: Request, call_next):  # type: ignore[no-un
             duration_ms,
         )
     return response
+
+
+@app.post(
+    "/auth/register",
+    response_model=TokenResponse,
+    tags=["Auth"],
+    description="Register a new user account and return an access token.",
+)
+def register_user(payload: UserCreate) -> TokenResponse:
+    conn = get_db_connection()
+    try:
+        password_hash = hash_password(payload.password)
+        try:
+            conn.execute(
+                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                (payload.username, password_hash),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already exists",
+            ) from exc
+    finally:
+        conn.close()
+    token = create_access_token(subject=payload.username)
+    return TokenResponse(access_token=token, expires_in=TOKEN_EXPIRY * 60)
+
+
+@app.post(
+    "/auth/login",
+    response_model=TokenResponse,
+    tags=["Auth"],
+    description="Authenticate and receive an access token.",
+)
+def login_user(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+) -> TokenResponse:
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT username, password_hash
+            FROM users
+            WHERE username = ?
+            """,
+            (form_data.username,),
+        ).fetchone()
+        if not row or not verify_password(form_data.password, row[1]):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+            )
+    finally:
+        conn.close()
+    token = create_access_token(subject=form_data.username)
+    return TokenResponse(access_token=token, expires_in=TOKEN_EXPIRY * 60)
+
+
+@app.get(
+    "/me",
+    response_model=UserPublic,
+    tags=["Auth"],
+    description="Return the currently authenticated user.",
+)
+def get_me(current_user: UserPublic = Depends(get_current_user)) -> UserPublic:
+    return current_user
 
 
 def _safe_load_json(payload: Optional[str]) -> List[Dict[str, Any]]:
@@ -270,7 +279,10 @@ def _parse_since(value: Optional[str]) -> Optional[str]:
     tags=["Telemetry"],
     description="Ingest a batch of seed telemetry events.",
 )
-def ingest(items: List[TelemetryItem]) -> IngestResponse:
+def ingest(
+    items: List[TelemetryItem],
+    current_user: UserPublic = Depends(get_current_user),
+) -> IngestResponse:
     """Ingest seed telemetry events.
 
     Example:
@@ -282,20 +294,26 @@ def ingest(items: List[TelemetryItem]) -> IngestResponse:
     if not isinstance(items, list) or not items:
         raise HTTPException(status_code=400, detail="Expected non-empty list body")
     now = datetime.utcnow().isoformat() + "Z"
-    conn = _connect()
+    conn = get_db_connection()
     try:
         with conn:
             for item in items:
                 ts = item.timestamp_iso or now
                 machine_key = item.machine_id or item.app_instance_id
+                machine_name = item.machine_name
                 if machine_key:
                     with MACHINE_REGISTRY_LOCK:
-                        existing = MACHINE_REGISTRY.get(machine_key, {})
-                        MACHINE_REGISTRY[machine_key] = {
-                            "machine_id": machine_key,
-                            "machine_name": item.machine_name
+                        registry_key = (current_user.id, machine_key)
+                        existing = MACHINE_REGISTRY.get(registry_key, {})
+                        machine_name = (
+                            item.machine_name
                             or existing.get("machine_name")
-                            or machine_key,
+                            or machine_key
+                        )
+                        MACHINE_REGISTRY[registry_key] = {
+                            "user_id": current_user.id,
+                            "machine_id": machine_key,
+                            "machine_name": machine_name,
                             "last_seen": ts,
                             "cpu_percent": item.cpu_percent,
                             "ram_percent": item.ram_percent,
@@ -304,14 +322,26 @@ def ingest(items: List[TelemetryItem]) -> IngestResponse:
                             "gpu_name": item.gpu_name,
                             "time_to_disk_full": item.time_to_disk_full,
                         }
+                    conn.execute(
+                        """
+                        INSERT INTO machines (
+                            user_id, machine_name, gpu_info, status, last_seen
+                        ) VALUES (?, ?, ?, 'online', ?)
+                        ON CONFLICT(user_id, machine_name) DO UPDATE SET
+                            gpu_info=COALESCE(excluded.gpu_info, machines.gpu_info),
+                            status='online',
+                            last_seen=excluded.last_seen
+                        """,
+                        (current_user.id, machine_name, item.gpu_name, ts),
+                    )
                 conn.execute(
                     """
                     INSERT INTO seed_events (
-                        seed_fingerprint, app_instance_id, client_version, mode, range_id,
+                        user_id, seed_fingerprint, app_instance_id, client_version, mode, range_id,
                         first_seen, last_seen, used, match_found, machine_id, machine_name,
                         range_recent, range_distribution, reference_overlays
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(seed_fingerprint, range_id) DO UPDATE SET
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(seed_fingerprint, range_id, user_id) DO UPDATE SET
                         last_seen=excluded.last_seen,
                         used=MAX(seed_events.used, excluded.used),
                         match_found=MAX(seed_events.match_found, excluded.match_found),
@@ -325,6 +355,7 @@ def ingest(items: List[TelemetryItem]) -> IngestResponse:
                         reference_overlays=COALESCE(excluded.reference_overlays, seed_events.reference_overlays)
                     """,
                     (
+                        current_user.id,
                         item.seed_fingerprint,
                         item.app_instance_id,
                         item.client_version,
@@ -335,7 +366,7 @@ def ingest(items: List[TelemetryItem]) -> IngestResponse:
                         1 if item.used else 0,
                         1 if item.match_found else 0,
                         item.machine_id,
-                        item.machine_name,
+                        machine_name,
                         json.dumps(item.range_recent) if item.range_recent else None,
                         json.dumps(item.range_distribution)
                         if item.range_distribution
@@ -356,7 +387,10 @@ def ingest(items: List[TelemetryItem]) -> IngestResponse:
     tags=["Admin"],
     description="List live machine telemetry currently cached in memory.",
 )
-def machine_stats(slug: str) -> MachineStatsResponse:
+def machine_stats(
+    slug: str,
+    current_user: UserPublic = Depends(get_current_user),
+) -> MachineStatsResponse:
     """Return machine telemetry for dashboard views.
 
     Example:
@@ -364,7 +398,11 @@ def machine_stats(slug: str) -> MachineStatsResponse:
           http://localhost:3088/v1/dashboard/demo/machines
     """
     with MACHINE_REGISTRY_LOCK:
-        machines = list(MACHINE_REGISTRY.values())
+        machines = [
+            entry
+            for entry in MACHINE_REGISTRY.values()
+            if entry.get("user_id") == current_user.id
+        ]
     machines.sort(
         key=lambda entry: (
             entry.get("machine_name") or "",
@@ -384,6 +422,7 @@ def seed_stats(
     since: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
     limit: Optional[int] = Query(None, ge=1),
+    current_user: UserPublic = Depends(get_current_user),
 ) -> SeedStatsResponse:
     """Summarize seed usage totals and per-mode counts.
 
@@ -392,10 +431,10 @@ def seed_stats(
           "http://localhost:3088/v1/seed/stats?since=1h"
     """
     parsed_since = _parse_since(since)
-    conn = _connect()
+    conn = get_db_connection()
     try:
-        filters = []
-        params: List[Any] = []
+        filters = ["user_id = ?"]
+        params: List[Any] = [current_user.id]
         if parsed_since:
             filters.append("last_seen >= ?")
             params.append(parsed_since)
@@ -451,6 +490,7 @@ def seed_range(
     since: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
     limit: Optional[int] = Query(None, ge=1),
+    current_user: UserPublic = Depends(get_current_user),
 ) -> SeedRangeResponse:
     """Summarize range submissions by range ID.
 
@@ -459,10 +499,10 @@ def seed_range(
           "http://localhost:3088/v1/seed/range?mode=btc_only&since=24h"
     """
     parsed_since = _parse_since(since)
-    conn = _connect()
+    conn = get_db_connection()
     try:
-        filters = ["range_id IS NOT NULL"]
-        params: List[Any] = []
+        filters = ["user_id = ?", "range_id IS NOT NULL"]
+        params: List[Any] = [current_user.id]
         if parsed_since:
             filters.append("last_seen >= ?")
             params.append(parsed_since)
@@ -517,6 +557,7 @@ def range_distribution(
     slug: str,
     since: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
+    current_user: UserPublic = Depends(get_current_user),
 ) -> RangeDistributionResponse:
     """Aggregate distribution metrics for range coverage charts.
 
@@ -525,10 +566,10 @@ def range_distribution(
           "http://localhost:3088/v1/dashboard/demo/ranges/distribution"
     """
     parsed_since = _parse_since(since)
-    conn = _connect()
+    conn = get_db_connection()
     try:
-        filters = ["range_id IS NOT NULL"]
-        params: List[Any] = []
+        filters = ["user_id = ?", "range_id IS NOT NULL"]
+        params: List[Any] = [current_user.id]
         if parsed_since:
             filters.append("last_seen >= ?")
             params.append(parsed_since)
@@ -635,6 +676,7 @@ def check_get(
     seed_fingerprint: str = Query(...),
     mode: Optional[str] = None,
     range_id: Optional[str] = None,
+    current_user: UserPublic = Depends(get_current_user),
 ) -> CheckResponse:
     """Check whether a seed fingerprint exists in the telemetry store.
 
@@ -642,7 +684,7 @@ def check_get(
         curl -H "X-API-Key: changeme" \\
           "http://localhost:3088/v1/seed/check?seed_fingerprint=abc123"
     """
-    return _check(seed_fingerprint)
+    return _check(seed_fingerprint, current_user.id)
 
 
 class CheckBody(BaseModel):
@@ -657,7 +699,9 @@ class CheckBody(BaseModel):
     tags=["Seeds"],
     description="Check if a seed fingerprint has been seen before via POST.",
 )
-def check_post(body: CheckBody) -> CheckResponse:
+def check_post(
+    body: CheckBody, current_user: UserPublic = Depends(get_current_user)
+) -> CheckResponse:
     """Check whether a seed fingerprint exists in the telemetry store.
 
     Example:
@@ -666,15 +710,15 @@ def check_post(body: CheckBody) -> CheckResponse:
           -H "X-API-Key: changeme" \\
           -d '{"seed_fingerprint":"abc123"}'
     """
-    return _check(body.seed_fingerprint)
+    return _check(body.seed_fingerprint, current_user.id)
 
 
-def _check(seed_fp: str) -> CheckResponse:
-    conn = _connect()
+def _check(seed_fp: str, user_id: int) -> CheckResponse:
+    conn = get_db_connection()
     try:
         cur = conn.execute(
-            "SELECT 1 FROM seed_events WHERE seed_fingerprint=? LIMIT 1",
-            (seed_fp,),
+            "SELECT 1 FROM seed_events WHERE seed_fingerprint=? AND user_id=? LIMIT 1",
+            (seed_fp, user_id),
         )
         used = cur.fetchone() is not None
         return CheckResponse(used=bool(used))
