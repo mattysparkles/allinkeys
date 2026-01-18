@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import threading
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 
 DB_PATH = os.getenv("CENTRAL_TELEMETRY_DB", os.path.abspath(os.path.join(os.path.dirname(__file__), "../logs/central_telemetry.db")))
+API_KEY_ENV = "TELEMETRY_API_KEY"
+logger = logging.getLogger("telemetry")
+logging.basicConfig(level=os.getenv("TELEMETRY_LOG_LEVEL", "INFO"))
 
 
 def _connect() -> sqlite3.Connection:
@@ -99,9 +105,113 @@ class TelemetryItem(BaseModel):
     reference_overlays: Optional[List[Dict[str, Any]]] = None
 
 
+class IngestResponse(BaseModel):
+    status: str = Field(..., examples=["ok"])
+    count: int = Field(..., examples=[1])
+
+
+class MachineInfo(BaseModel):
+    machine_id: Optional[str] = None
+    machine_name: Optional[str] = None
+    last_seen: Optional[str] = None
+    cpu_percent: Optional[float] = None
+    ram_percent: Optional[float] = None
+    disk_free_percent: Optional[float] = None
+    gpu_load_percent: Optional[float] = None
+    gpu_name: Optional[str] = None
+    time_to_disk_full: Optional[str] = None
+
+
+class MachineStatsResponse(BaseModel):
+    slug: str
+    machines: List[MachineInfo]
+
+
+class SeedModeCount(BaseModel):
+    mode: Optional[str] = None
+    count: int
+
+
+class SeedStatsResponse(BaseModel):
+    total_seeds: int
+    unique_seeds: int
+    per_mode: List[SeedModeCount]
+    since: Optional[str] = None
+    mode: Optional[str] = None
+
+
+class SeedRangeInfo(BaseModel):
+    range_id: Optional[str] = None
+    count: int
+    last_seen: Optional[str] = None
+    used: bool
+
+
+class SeedRangeResponse(BaseModel):
+    ranges: List[SeedRangeInfo]
+    since: Optional[str] = None
+    mode: Optional[str] = None
+    limit: Optional[int] = None
+
+
+class RangeDistributionEntry(BaseModel):
+    range_value: Optional[str] = None
+    submission_count: int
+    submission_percent: float
+    position: Optional[float] = None
+    normalized_min: Optional[float] = None
+    normalized_max: Optional[float] = None
+
+
+class RangeDistributionResponse(BaseModel):
+    slug: str
+    total_submissions: int
+    unique_ranges: int
+    coverage_percent: float
+    ranges: List[RangeDistributionEntry]
+    since: Optional[str] = None
+    mode: Optional[str] = None
+
+
+class CheckResponse(BaseModel):
+    used: bool
+
+
 app = FastAPI(title="AllInKeys Central Telemetry")
 MACHINE_REGISTRY: Dict[str, Dict[str, Any]] = {}
 MACHINE_REGISTRY_LOCK = threading.Lock()
+
+
+def _expected_api_key() -> Optional[str]:
+    value = os.getenv(API_KEY_ENV, "").strip()
+    return value or None
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+    path = request.url.path
+    if path.startswith("/v1"):
+        expected = _expected_api_key()
+        if expected:
+            provided = request.headers.get("X-API-Key")
+            if provided != expected:
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Unauthorized"},
+                )
+    start = time.perf_counter()
+    response = await call_next(request)
+    if path.startswith("/v1"):
+        duration_ms = (time.perf_counter() - start) * 1000
+        client_host = request.client.host if request.client else "unknown"
+        logger.info(
+            "telemetry_request path=%s status=%s ip=%s duration_ms=%.2f",
+            path,
+            response.status_code,
+            client_host,
+            duration_ms,
+        )
+    return response
 
 
 def _safe_load_json(payload: Optional[str]) -> List[Dict[str, Any]]:
@@ -130,8 +240,21 @@ def _merge_intervals(intervals: List[tuple[float, float]]) -> List[tuple[float, 
     return merged
 
 
-@app.post("/v1/seed")
-def ingest(items: List[TelemetryItem]) -> Dict[str, Any]:
+@app.post(
+    "/v1/seed",
+    response_model=IngestResponse,
+    tags=["Telemetry"],
+    description="Ingest a batch of seed telemetry events.",
+)
+def ingest(items: List[TelemetryItem]) -> IngestResponse:
+    """Ingest seed telemetry events.
+
+    Example:
+        curl -X POST http://localhost:3088/v1/seed \\
+          -H "Content-Type: application/json" \\
+          -H "X-API-Key: changeme" \\
+          -d '[{"seed_fingerprint":"abc123","used":true,"match_found":false}]'
+    """
     if not isinstance(items, list) or not items:
         raise HTTPException(status_code=400, detail="Expected non-empty list body")
     now = datetime.utcnow().isoformat() + "Z"
@@ -200,11 +323,22 @@ def ingest(items: List[TelemetryItem]) -> Dict[str, Any]:
                 )
     finally:
         conn.close()
-    return {"status": "ok", "count": len(items)}
+    return IngestResponse(status="ok", count=len(items))
 
 
-@app.get("/v1/dashboard/{slug}/machines")
-def machine_stats(slug: str) -> Dict[str, Any]:
+@app.get(
+    "/v1/dashboard/{slug}/machines",
+    response_model=MachineStatsResponse,
+    tags=["Admin"],
+    description="List live machine telemetry currently cached in memory.",
+)
+def machine_stats(slug: str) -> MachineStatsResponse:
+    """Return machine telemetry for dashboard views.
+
+    Example:
+        curl -H "X-API-Key: changeme" \\
+          http://localhost:3088/v1/dashboard/demo/machines
+    """
     with MACHINE_REGISTRY_LOCK:
         machines = list(MACHINE_REGISTRY.values())
     machines.sort(
@@ -213,15 +347,26 @@ def machine_stats(slug: str) -> Dict[str, Any]:
             entry.get("machine_id") or "",
         )
     )
-    return {"slug": slug, "machines": machines}
+    return MachineStatsResponse(slug=slug, machines=machines)
 
 
-@app.get("/v1/seed/stats")
+@app.get(
+    "/v1/seed/stats",
+    response_model=SeedStatsResponse,
+    tags=["Seeds"],
+    description="Return aggregate seed stats with optional filters.",
+)
 def seed_stats(
     since: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
     limit: Optional[int] = Query(None, ge=1),
-) -> Dict[str, Any]:
+) -> SeedStatsResponse:
+    """Summarize seed usage totals and per-mode counts.
+
+    Example:
+        curl -H "X-API-Key: changeme" \\
+          "http://localhost:3088/v1/seed/stats?since=2024-01-01T00:00:00Z"
+    """
     conn = _connect()
     try:
         filters = []
@@ -255,23 +400,34 @@ def seed_stats(
         per_mode = [{"mode": row[0], "count": row[1]} for row in per_mode_rows]
         if limit:
             per_mode = per_mode[:limit]
-        return {
-            "total_seeds": total_seeds,
-            "unique_seeds": unique_seeds,
-            "per_mode": per_mode,
-            "since": since,
-            "mode": mode,
-        }
+        return SeedStatsResponse(
+            total_seeds=total_seeds,
+            unique_seeds=unique_seeds,
+            per_mode=per_mode,
+            since=since,
+            mode=mode,
+        )
     finally:
         conn.close()
 
 
-@app.get("/v1/seed/range")
+@app.get(
+    "/v1/seed/range",
+    response_model=SeedRangeResponse,
+    tags=["Seeds"],
+    description="Return recent range usage grouped by range_id.",
+)
 def seed_range(
     since: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
     limit: Optional[int] = Query(None, ge=1),
-) -> Dict[str, Any]:
+) -> SeedRangeResponse:
+    """Summarize range submissions by range ID.
+
+    Example:
+        curl -H "X-API-Key: changeme" \\
+          "http://localhost:3088/v1/seed/range?limit=25"
+    """
     conn = _connect()
     try:
         filters = ["range_id IS NOT NULL"]
@@ -310,17 +466,33 @@ def seed_range(
             }
             for row in rows
         ]
-        return {"ranges": ranges, "since": since, "mode": mode, "limit": limit}
+        return SeedRangeResponse(
+            ranges=ranges,
+            since=since,
+            mode=mode,
+            limit=limit,
+        )
     finally:
         conn.close()
 
 
-@app.get("/v1/dashboard/{slug}/ranges/distribution")
+@app.get(
+    "/v1/dashboard/{slug}/ranges/distribution",
+    response_model=RangeDistributionResponse,
+    tags=["Admin"],
+    description="Compute range distribution coverage for dashboards.",
+)
 def range_distribution(
     slug: str,
     since: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
-) -> Dict[str, Any]:
+) -> RangeDistributionResponse:
+    """Aggregate distribution metrics for range coverage charts.
+
+    Example:
+        curl -H "X-API-Key: changeme" \\
+          "http://localhost:3088/v1/dashboard/demo/ranges/distribution"
+    """
     conn = _connect()
     try:
         filters = ["range_id IS NOT NULL"]
@@ -408,25 +580,36 @@ def range_distribution(
         ]
         merged = _merge_intervals(intervals)
         coverage = sum(end - start for start, end in merged) * 100 if merged else 0
-        return {
-            "slug": slug,
-            "total_submissions": total_submissions,
-            "unique_ranges": len(ranges),
-            "coverage_percent": coverage,
-            "ranges": ranges,
-            "since": since,
-            "mode": mode,
-        }
+        return RangeDistributionResponse(
+            slug=slug,
+            total_submissions=total_submissions,
+            unique_ranges=len(ranges),
+            coverage_percent=coverage,
+            ranges=ranges,
+            since=since,
+            mode=mode,
+        )
     finally:
         conn.close()
 
 
-@app.get("/v1/seed/check")
+@app.get(
+    "/v1/seed/check",
+    response_model=CheckResponse,
+    tags=["Seeds"],
+    description="Check if a seed fingerprint has been seen before.",
+)
 def check_get(
     seed_fingerprint: str = Query(...),
     mode: Optional[str] = None,
     range_id: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> CheckResponse:
+    """Check whether a seed fingerprint exists in the telemetry store.
+
+    Example:
+        curl -H "X-API-Key: changeme" \\
+          "http://localhost:3088/v1/seed/check?seed_fingerprint=abc123"
+    """
     return _check(seed_fingerprint)
 
 
@@ -436,12 +619,25 @@ class CheckBody(BaseModel):
     range_id: Optional[str] = None
 
 
-@app.post("/v1/seed/check")
-def check_post(body: CheckBody) -> Dict[str, Any]:
+@app.post(
+    "/v1/seed/check",
+    response_model=CheckResponse,
+    tags=["Seeds"],
+    description="Check if a seed fingerprint has been seen before via POST.",
+)
+def check_post(body: CheckBody) -> CheckResponse:
+    """Check whether a seed fingerprint exists in the telemetry store.
+
+    Example:
+        curl -X POST http://localhost:3088/v1/seed/check \\
+          -H "Content-Type: application/json" \\
+          -H "X-API-Key: changeme" \\
+          -d '{"seed_fingerprint":"abc123"}'
+    """
     return _check(body.seed_fingerprint)
 
 
-def _check(seed_fp: str) -> Dict[str, Any]:
+def _check(seed_fp: str) -> CheckResponse:
     conn = _connect()
     try:
         cur = conn.execute(
@@ -449,6 +645,6 @@ def _check(seed_fp: str) -> Dict[str, Any]:
             (seed_fp,),
         )
         used = cur.fetchone() is not None
-        return {"used": bool(used)}
+        return CheckResponse(used=bool(used))
     finally:
         conn.close()
