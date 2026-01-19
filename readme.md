@@ -35,7 +35,7 @@ Copy `.env.example` to `.env` and fill in any credentials needed for alert chann
 
 ## 🚀 Quick Start
 
-1. **Start the full pipeline (default btc-only mode)**
+1. **Start the full pipeline (default vanity mode)**
 
    ```bash
    python main.py
@@ -223,7 +223,7 @@ The default run will:
 
 | Flag | Description |
 |------|-------------|
-| `--mode {btc_only,vanity,mnemonic}` | Select execution mode (default: `btc_only`) |
+| `--mode {btc_only,vanity,mnemonic}` | Select execution mode (default: `vanity`) |
 | `--skip-backlog` | Start without backlog conversion |
 | `--no-dashboard` | Do not launch the GUI dashboard |
 | `--dashboard-password <pw>` | Protect dashboard with password `pw` |
