@@ -1,110 +1,19 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Telemetry Pairing</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        background: #0b0f19;
-        color: #f5f7ff;
-        display: flex;
-        justify-content: center;
-        padding: 48px 16px;
-      }
-      .card {
-        background: #141a2b;
-        border-radius: 12px;
-        padding: 24px;
-        width: 420px;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
-      }
-      h1 {
-        margin-top: 0;
-        font-size: 22px;
-      }
-      label {
-        display: block;
-        margin-top: 14px;
-        font-size: 13px;
-        color: #c7d2fe;
-      }
-      input {
-        width: 100%;
-        margin-top: 6px;
-        padding: 10px 12px;
-        border-radius: 8px;
-        border: 1px solid #2a3250;
-        background: #0f1424;
-        color: #f5f7ff;
-      }
-      button {
-        margin-top: 18px;
-        width: 100%;
-        padding: 10px 12px;
-        border: none;
-        border-radius: 8px;
-        background: #4f46e5;
-        color: white;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .message {
-        margin-top: 16px;
-        font-size: 13px;
-        color: #93c5fd;
-        white-space: pre-wrap;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>Pair this machine</h1>
-      <p>Enter the pairing code shown in the CLI and your telemetry account.</p>
-      <label for="pair_code">Pairing Code</label>
-      <input id="pair_code" placeholder="ABC123" />
-      <label for="username">Username</label>
-      <input id="username" autocomplete="username" />
-      <label for="password">Password</label>
-      <input id="password" type="password" autocomplete="current-password" />
-      <button id="claim">Approve Pairing</button>
-      <div class="message" id="message"></div>
-    </div>
-    <script>
-      const claimBtn = document.getElementById("claim");
-      const message = document.getElementById("message");
-
-      claimBtn.addEventListener("click", async () => {
-        claimBtn.disabled = true;
-        message.textContent = "Submitting pairing request...";
-        const payload = {
-          pair_code: document.getElementById("pair_code").value.trim(),
-          username: document.getElementById("username").value.trim(),
-          password: document.getElementById("password").value,
-        };
-        try {
-          const resp = await fetch("/v1/pair/claim", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          const data = await resp.json();
-          if (!resp.ok) {
-            message.textContent = data.detail || "Pairing failed.";
-          } else {
-            message.textContent =
-              "Pairing approved. You can return to the CLI.";
-          }
-        } catch (err) {
-          message.textContent = `Error: ${err}`;
-        } finally {
-          claimBtn.disabled = false;
-        }
-      });
-    </script>
-  </body>
-</html>
+{% extends "base.html" %}
+{% block title %}Telemetry Pairing{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Approve this machine</h1>
+  <p>Enter the pairing code shown in the CLI to approve the request.</p>
+  <form method="post" action="/pair/approve">
+    <label for="pair_code">Pairing Code</label>
+    <input
+      id="pair_code"
+      name="pair_code"
+      placeholder="ABC123"
+      value="{{ pair_code }}"
+      required
+    />
+    <button class="primary" type="submit">Approve this machine</button>
+  </form>
+</div>
+{% endblock %}

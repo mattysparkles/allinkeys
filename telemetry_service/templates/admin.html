@@ -1,21 +1,18 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0"
-    />
-    <title>AllInKeys Admin Dashboard</title>
+{% extends "base.html" %}
+{% block title %}AllInKeys Admin Dashboard{% endblock %}
+{% block head_extra %}
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
     />
     <style>
       body {
-        padding: 2rem;
         background: #0b1120;
         color: #e2e8f0;
+      }
+      main {
+        padding: 2rem;
+        display: block;
       }
       h1,
       h2,
@@ -50,8 +47,8 @@
         color: #94a3b8;
       }
     </style>
-  </head>
-  <body>
+{% endblock %}
+{% block content %}
     <header>
       <h1>Global Admin Dashboard</h1>
       <p class="muted">
@@ -132,10 +129,11 @@
       </table>
     </section>
 
+{% endblock %}
+{% block scripts %}
     <script>
       window.ADMIN_AUTH_TOKEN = "{{ auth_token }}";
     </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3"></script>
     <script src="/static/admin_dashboard.js"></script>
-  </body>
-</html>
+{% endblock %}

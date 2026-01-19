@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
 from telemetry_service.auth import decode_access_token
@@ -12,6 +12,7 @@ optional_oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/auth/login",
     auto_error=False,
 )
+AUTH_COOKIE_NAME = "telemetry_token"
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> UserPublic:
@@ -94,6 +95,34 @@ def get_optional_user(
         )
     finally:
         conn.close()
+
+
+def _extract_request_token(request: Request) -> str | None:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header.split(" ", 1)[1].strip()
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    return cookie_token.strip() if cookie_token else None
+
+
+def get_ui_current_user(request: Request) -> UserPublic:
+    token = _extract_request_token(request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    return get_current_user(token)
+
+
+def get_ui_optional_user(request: Request) -> UserPublic | None:
+    token = _extract_request_token(request)
+    if not token:
+        return None
+    try:
+        return get_current_user(token)
+    except HTTPException:
+        return None
 
 
 def get_machine_for_user(machine_id: str, current_user: UserPublic) -> dict:

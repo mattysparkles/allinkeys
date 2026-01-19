@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Machines</title>
+{% extends "base.html" %}
+{% block title %}My Machines{% endblock %}
+{% block head_extra %}
     <style>
       :root {
         color-scheme: dark;
@@ -11,9 +8,9 @@
         background: #0b0d12;
         color: #f6f7fb;
       }
-      body {
-        margin: 0;
+      main {
         padding: 32px 40px 64px;
+        display: block;
       }
       header {
         display: flex;
@@ -215,8 +212,8 @@
         color: #9fa4b4;
       }
     </style>
-  </head>
-  <body>
+{% endblock %}
+{% block content %}
     <header>
       <div>
         <h1>My Machines</h1>
@@ -242,6 +239,8 @@
     <section id="emptyState" class="empty-state" hidden>
       No machines are registered yet.
     </section>
+{% endblock %}
+{% block scripts %}
     <script>
       const apiEndpoint = "/api/machines/me";
       const controlEndpoint = "/api/machines";
@@ -511,5 +510,4 @@
       fetchMachines();
       setInterval(fetchMachines, 10000);
     </script>
-  </body>
-</html>
+{% endblock %}

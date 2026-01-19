@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Machine Control</title>
+{% extends "base.html" %}
+{% block title %}Machine Control{% endblock %}
+{% block head_extra %}
     <style>
       :root {
         color-scheme: dark;
@@ -11,9 +8,9 @@
         background: #0b0d12;
         color: #f6f7fb;
       }
-      body {
-        margin: 0;
+      main {
         padding: 32px 40px 64px;
+        display: block;
       }
       header {
         display: flex;
@@ -174,8 +171,8 @@
         border-color: rgba(66, 186, 150, 0.4);
       }
     </style>
-  </head>
-  <body>
+{% endblock %}
+{% block content %}
     <header>
       <a class="nav-link" href="/dashboard/machines">Back to My Machines</a>
       <div>
@@ -227,6 +224,8 @@
       </div>
     </section>
 
+{% endblock %}
+{% block scripts %}
     <script>
       const machineId = "{{ machine_id }}";
       const apiBase = "/api/machines";
@@ -428,5 +427,4 @@
         loadCommands();
       }, 10000);
     </script>
-  </body>
-</html>
+{% endblock %}
