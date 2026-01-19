@@ -24,8 +24,6 @@ class PairStatusResponse(BaseModel):
 
 class PairClaimRequest(BaseModel):
     pair_code: str
-    username: str
-    password: str
 
 
 class PairClaimResponse(BaseModel):

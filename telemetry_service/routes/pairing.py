@@ -6,17 +6,19 @@ from datetime import datetime
 from pathlib import Path
 from secrets import choice
 
-from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from telemetry_service.auth import create_access_token, verify_password
+from telemetry_service.auth import create_access_token
 from telemetry_service.db import get_db_connection
+from telemetry_service.dependencies import get_current_user, resolve_user_from_token
 from telemetry_service.models import (
     PairClaimRequest,
     PairClaimResponse,
     PairInitResponse,
     PairStatusResponse,
+    UserPublic,
 )
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -62,7 +64,9 @@ def init_pairing(request: Request) -> PairInitResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to allocate pair code",
         )
-    pair_url = str(request.base_url).rstrip("/") + "/pair"
+    pair_url = (
+        str(request.base_url).rstrip("/") + f"/pair?code={pair_code}"
+    )
     return PairInitResponse(
         pair_code=pair_code,
         pair_url=pair_url,
@@ -100,12 +104,8 @@ def pairing_status(pair_code: str) -> PairStatusResponse:
     )
 
 
-@router.post(
-    "/claim",
-    response_model=PairClaimResponse,
-    summary="Claim a pairing request with user credentials.",
-)
-def claim_pairing(payload: PairClaimRequest) -> PairClaimResponse:
+def _approve_pairing(pair_code: str, current_user: UserPublic) -> str:
+    pair_code = pair_code.strip().upper()
     conn = get_db_connection()
     try:
         row = conn.execute(
@@ -114,7 +114,7 @@ def claim_pairing(payload: PairClaimRequest) -> PairClaimResponse:
             FROM pairing_requests
             WHERE pair_code = ?
             """,
-            (payload.pair_code,),
+            (pair_code,),
         ).fetchone()
         if not row:
             raise HTTPException(
@@ -127,21 +127,8 @@ def claim_pairing(payload: PairClaimRequest) -> PairClaimResponse:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Pair code already claimed",
             )
-        user_row = conn.execute(
-            """
-            SELECT id, password_hash
-            FROM users
-            WHERE username = ?
-            """,
-            (payload.username,),
-        ).fetchone()
-        if not user_row or not verify_password(payload.password, user_row[1]):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid username or password",
-            )
-        user_id = int(user_row[0])
-        token = create_access_token(subject=payload.username)
+        user_id = current_user.id
+        token = create_access_token(subject=current_user.username)
         conn.execute(
             """
             UPDATE pairing_requests
@@ -156,9 +143,82 @@ def claim_pairing(payload: PairClaimRequest) -> PairClaimResponse:
         conn.commit()
     finally:
         conn.close()
-    return PairClaimResponse(status="approved", token=token, message="Pairing approved")
+    return token
+
+
+@router.post(
+    "/claim",
+    response_model=PairClaimResponse,
+    summary="Claim a pairing request with an authenticated user.",
+)
+def claim_pairing(
+    payload: PairClaimRequest,
+    current_user: UserPublic = Depends(get_current_user),
+) -> PairClaimResponse:
+    _approve_pairing(payload.pair_code, current_user)
+    return PairClaimResponse(status="approved", message="Pairing approved")
 
 
 @ui_router.get("/pair", response_class=HTMLResponse, include_in_schema=False)
 def pairing_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("pair.html", {"request": request})
+    pair_code = request.query_params.get("code") or ""
+    token = request.cookies.get("telemetry_session")
+    current_user = None
+    if token:
+        try:
+            current_user = resolve_user_from_token(token)
+        except HTTPException:
+            current_user = None
+    if not current_user:
+        redirect_url = f"/login?next=/pair"
+        if pair_code:
+            redirect_url += f"&code={pair_code}"
+        return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    return templates.TemplateResponse(
+        "pair.html",
+        {
+            "request": request,
+            "pair_code": pair_code,
+            "current_user": current_user,
+        },
+    )
+
+
+@ui_router.post("/pair/approve", response_class=HTMLResponse, include_in_schema=False)
+def approve_pairing(
+    request: Request,
+    pair_code: str = Form(""),
+) -> HTMLResponse:
+    pair_code = pair_code.strip().upper()
+    token = request.cookies.get("telemetry_session")
+    current_user = None
+    if token:
+        try:
+            current_user = resolve_user_from_token(token)
+        except HTTPException:
+            current_user = None
+    if not current_user:
+        redirect_url = f"/login?next=/pair"
+        if pair_code:
+            redirect_url += f"&code={pair_code}"
+        return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    error = None
+    approved = False
+    if not pair_code:
+        error = "Missing pairing code."
+    else:
+        try:
+            _approve_pairing(pair_code, current_user)
+            approved = True
+        except HTTPException as exc:
+            error = exc.detail
+    return templates.TemplateResponse(
+        "pair.html",
+        {
+            "request": request,
+            "pair_code": pair_code,
+            "current_user": current_user,
+            "approved": approved,
+            "error": error,
+        },
+    )

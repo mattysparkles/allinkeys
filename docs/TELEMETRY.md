@@ -37,6 +37,13 @@ Telemetry opt‑out is stored locally at:
 config/local_telemetry.json
 ```
 
+## Account signup & login
+
+The telemetry dashboard supports multiple users. You can create an account at
+`/signup` and sign in at `/login`. After signing in, the browser stores a
+session cookie so your dashboard and pairing approvals stay authenticated
+across page loads.
+
 ## Collected Fields
 
 Only minimal metadata is transmitted and **never** any seeds, WIFs or derived
@@ -100,9 +107,20 @@ to `config/local_telemetry.json`.
 If you choose “Pair this machine via browser” in the wizard:
 
 1. The client requests a pairing code from `/v1/pair/init`.
-2. You open the provided pairing URL and enter the code.
-3. The client polls `/v1/pair/status` until approved and receives a token.
+2. You open the provided pairing URL. If you are not signed in, you are
+   redirected to `/login` or `/signup`.
+3. Approve the pairing request. The machine polls `/v1/pair/status` until
+   approved and receives a token.
 4. The token is stored locally and the machine is registered automatically.
+
+## Token lifecycle
+
+- Telemetry access tokens are short-lived JWTs issued when you log in, sign up,
+  or approve a pairing request.
+- Tokens are stored locally in `config/.telemetry_token` and expire after the
+  configured `TOKEN_EXPIRY` window.
+- To revoke access, delete the local token file or run with `--no-telemetry`
+  and re-run the setup wizard to pair again.
 
 ## Central "Seen" Check
 

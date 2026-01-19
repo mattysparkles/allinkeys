@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Telemetry Pairing</title>
+    <title>Telemetry Signup</title>
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -23,19 +23,20 @@
         margin-top: 0;
         font-size: 22px;
       }
-      .meta {
+      label {
+        display: block;
+        margin-top: 14px;
         font-size: 13px;
         color: #c7d2fe;
-        margin-bottom: 16px;
       }
-      .pair-code {
-        display: inline-block;
-        font-size: 20px;
-        letter-spacing: 3px;
-        padding: 8px 12px;
+      input {
+        width: 100%;
+        margin-top: 6px;
+        padding: 10px 12px;
         border-radius: 8px;
-        background: #0f1424;
         border: 1px solid #2a3250;
+        background: #0f1424;
+        color: #f5f7ff;
       }
       button {
         margin-top: 18px;
@@ -74,30 +75,38 @@
       .disclosure li {
         margin-bottom: 6px;
       }
+      .link {
+        margin-top: 14px;
+        font-size: 13px;
+      }
+      a {
+        color: #93c5fd;
+      }
     </style>
   </head>
   <body>
     <div class="card">
-      <h1>Approve telemetry pairing</h1>
-      <p class="meta">
-        Telemetry helps the AllInKeys maintainers understand aggregate usage so
-        we can improve performance and safety.
+      <h1>Create a telemetry account</h1>
+      <p class="message">
+        Telemetry lets you view your own multi-machine dashboard and pair new
+        machines securely using a browser.
       </p>
-      {% if pair_code %}
-      <p class="meta">Pairing code</p>
-      <div class="pair-code">{{ pair_code }}</div>
-      {% else %}
-      <p class="meta error">Missing pairing code. Return to the CLI and open the pairing URL again.</p>
-      {% endif %}
-      <form method="post" action="/pair/approve">
-        <input type="hidden" name="pair_code" value="{{ pair_code }}" />
-        <button type="submit" {% if not pair_code %}disabled{% endif %}>Approve Pairing</button>
+      <form method="post" action="/signup">
+        <input type="hidden" name="next" value="{{ next }}" />
+        <input type="hidden" name="code" value="{{ code or '' }}" />
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" value="{{ username or '' }}" />
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" />
+        <button type="submit">Create account</button>
       </form>
-      {% if approved %}
-      <div class="message">Pairing approved. You can return to the CLI.</div>
-      {% elif error %}
+      {% if error %}
       <div class="message error">{{ error }}</div>
       {% endif %}
+      <div class="link">
+        Already have an account?
+        <a href="/login?next={{ next }}{% if code %}&code={{ code }}{% endif %}">Log in</a>
+      </div>
       <div class="disclosure">
         <strong>Telemetry disclosure</strong>
         <ul>
