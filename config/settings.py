@@ -53,27 +53,27 @@ from config.telemetry import (
 # Human-friendly machine name override for telemetry display.
 MACHINE_NAME = None
 
-# 🔐 API KEY INITIALIZER (FIX)
-# ================================================================
-def _init_api_key(name: str) -> str:
-    """
-    Centralized API key loader.
+_MISSING_OPTIONAL_INTEGRATIONS: list[str] = []
+_OPTIONAL_INTEGRATION_BY_ENV = {
+    "TELEGRAM_BOT_TOKEN": "Telegram",
+    "TWILIO_SID": "Twilio",
+    "TWILIO_AUTH_TOKEN": "Twilio",
+    "DISCORD_WEBHOOK_URL": "Discord",
+    "HOME_ASSISTANT_TOKEN": "Home Assistant",
+}
 
-    - Uses environment variables
-    - Warns (does NOT crash) if missing
-    - Allows non-fatal startup for dev/test
-    """
-    value = os.getenv(name)
-    if not value:
-        warnings.warn(
-            f"[CONFIG WARNING] API key '{name}' not set. "
-            "Related features may be disabled.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return ""
-    return value
-# ================================================================
+
+def _register_missing_optional_integration(env_var: str) -> None:
+    integration = _OPTIONAL_INTEGRATION_BY_ENV.get(env_var)
+    if not integration:
+        return
+    if integration in _MISSING_OPTIONAL_INTEGRATIONS:
+        return
+    _MISSING_OPTIONAL_INTEGRATIONS.append(integration)
+
+
+def get_missing_optional_integrations() -> list[str]:
+    return list(_MISSING_OPTIONAL_INTEGRATIONS)
 
 # Number of days to keep downloaded files before purging
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
@@ -117,16 +117,13 @@ VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts
 
 
 def _init_api_key(var: str) -> str:
-    """Return API key from environment and warn when missing."""
+    """Return API key from environment and track missing optional integrations."""
 
     value = os.getenv(var, "")
     if value:
         return value
 
-    warnings.warn(
-        f"Environment variable {var} is not set; related alerts will be disabled.",
-        stacklevel=2,
-    )
+    _register_missing_optional_integration(var)
     return ""
 
 
