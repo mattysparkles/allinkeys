@@ -149,13 +149,13 @@ class CheckResponse(BaseModel):
 
 
 app = FastAPI(title="AllInKeys Central Telemetry")
-app.include_router(machines_router, prefix="/v1/machines")
-app.include_router(machines_router, prefix="/api/machines")
+app.include_router(auth_ui_router)
+app.include_router(pairing_ui_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(pairing_router)
-app.include_router(pairing_ui_router)
-app.include_router(auth_ui_router)
+app.include_router(machines_router, prefix="/v1/machines")
+app.include_router(machines_router, prefix="/api/machines")
 app.mount(
     "/static",
     StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
@@ -173,6 +173,8 @@ async def api_key_middleware(request: Request, call_next):  # type: ignore[no-un
     path = request.url.path
     if path.startswith("/v1"):
         if path.startswith("/v1/dashboard"):
+            return await call_next(request)
+        if path in {"/v1/pair/init", "/v1/pair/status", "/v1/pair/claim"}:
             return await call_next(request)
         expected = _expected_api_key()
         if expected:
