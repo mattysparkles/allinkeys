@@ -46,7 +46,31 @@ def _secure_cookie(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
-@router.get("/login", response_class=HTMLResponse, include_in_schema=False)
+@router.api_route(
+    "/",
+    methods=["GET", "HEAD"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def landing_page(
+    request: Request,
+    current_user: UserPublic | None = Depends(get_ui_optional_user),
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "landing.html",
+        {
+            "request": request,
+            "current_user": current_user,
+        },
+    )
+
+
+@router.api_route(
+    "/login",
+    methods=["GET", "HEAD"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
 def login_page(
     request: Request,
     next: str | None = None,
@@ -77,7 +101,7 @@ def login_action(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    next: str = Form("/"),
+    next: str = Form("/dashboard/machines"),
     code: str = Form(""),
 ) -> HTMLResponse:
     safe_next = _sanitize_next(next)
@@ -93,7 +117,11 @@ def login_action(
         ).fetchone()
     finally:
         conn.close()
-    if not row or not verify_password(password, row[1]):
+    try:
+        valid = bool(row and verify_password(password, row[1]))
+    except Exception:
+        valid = False
+    if not valid:
         return templates.TemplateResponse(
             "login.html",
             {
@@ -120,7 +148,12 @@ def login_action(
     return response
 
 
-@router.get("/signup", response_class=HTMLResponse, include_in_schema=False)
+@router.api_route(
+    "/signup",
+    methods=["GET", "HEAD"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
 def signup_page(
     request: Request,
     next: str | None = None,
@@ -151,7 +184,7 @@ def signup_action(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    next: str = Form("/"),
+    next: str = Form("/dashboard/machines"),
     code: str = Form(""),
 ) -> HTMLResponse:
     safe_next = _sanitize_next(next)
@@ -168,9 +201,36 @@ def signup_action(
                 "login_url": _with_query("/login", {"next": safe_next, "code": code}),
             },
         )
+    if len(password.encode("utf-8")) > 72:
+        return templates.TemplateResponse(
+            "signup.html",
+            {
+                "request": request,
+                "error": "Password must be 72 bytes or fewer.",
+                "next": safe_next,
+                "code": code.strip().upper(),
+                "current_user": None,
+                "login_url": _with_query("/login", {"next": safe_next, "code": code}),
+            },
+        )
     conn = get_db_connection()
     try:
-        password_hash = hash_password(password)
+        try:
+            password_hash = hash_password(password)
+        except Exception:
+            return templates.TemplateResponse(
+                "signup.html",
+                {
+                    "request": request,
+                    "error": "Unable to process password. Try a shorter one.",
+                    "next": safe_next,
+                    "code": code.strip().upper(),
+                    "current_user": None,
+                    "login_url": _with_query(
+                        "/login", {"next": safe_next, "code": code}
+                    ),
+                },
+            )
         try:
             conn.execute(
                 "INSERT INTO users (username, password_hash) VALUES (?, ?)",
