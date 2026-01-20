@@ -18,12 +18,14 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 router = APIRouter()
 
+DEFAULT_DASHBOARD_NEXT = "/dashboard/machines"
 
-def _sanitize_next(next_path: str | None) -> str:
+
+def _sanitize_next(next_path: str | None, default: str = DEFAULT_DASHBOARD_NEXT) -> str:
     if not next_path:
-        return "/"
+        return default
     if not next_path.startswith("/") or next_path.startswith("//"):
-        return "/"
+        return default
     return next_path
 
 
@@ -38,7 +40,7 @@ def _with_query(path: str, params: dict[str, str]) -> str:
 
 
 def _next_with_code(next_path: str, code: str | None) -> str:
-    safe_next = _sanitize_next(next_path)
+    safe_next = _sanitize_next(next_path, default=DEFAULT_DASHBOARD_NEXT)
     return _with_query(safe_next, {"code": (code or "").strip().upper()})
 
 
@@ -77,7 +79,7 @@ def login_page(
     code: str | None = None,
     current_user: UserPublic | None = Depends(get_ui_optional_user),
 ) -> HTMLResponse:
-    safe_next = _sanitize_next(next)
+    safe_next = _sanitize_next(next, default=DEFAULT_DASHBOARD_NEXT)
     if current_user is not None:
         return RedirectResponse(
             _next_with_code(safe_next, code),
@@ -104,7 +106,7 @@ def login_action(
     next: str = Form("/dashboard/machines"),
     code: str = Form(""),
 ) -> HTMLResponse:
-    safe_next = _sanitize_next(next)
+    safe_next = _sanitize_next(next, default=DEFAULT_DASHBOARD_NEXT)
     conn = get_db_connection()
     try:
         row = conn.execute(
@@ -160,7 +162,7 @@ def signup_page(
     code: str | None = None,
     current_user: UserPublic | None = Depends(get_ui_optional_user),
 ) -> HTMLResponse:
-    safe_next = _sanitize_next(next)
+    safe_next = _sanitize_next(next, default=DEFAULT_DASHBOARD_NEXT)
     if current_user is not None:
         return RedirectResponse(
             _next_with_code(safe_next, code),
@@ -187,7 +189,7 @@ def signup_action(
     next: str = Form("/dashboard/machines"),
     code: str = Form(""),
 ) -> HTMLResponse:
-    safe_next = _sanitize_next(next)
+    safe_next = _sanitize_next(next, default=DEFAULT_DASHBOARD_NEXT)
     normalized_username = username.strip()
     if not normalized_username:
         return templates.TemplateResponse(
@@ -271,7 +273,7 @@ def logout_action(
     request: Request,
     next: str = Form("/login"),
 ) -> HTMLResponse:
-    safe_next = _sanitize_next(next)
+    safe_next = _sanitize_next(next, default="/login")
     response = RedirectResponse(
         safe_next,
         status_code=status.HTTP_303_SEE_OTHER,

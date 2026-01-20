@@ -175,7 +175,7 @@ def pairing_page(
         if code:
             params["code"] = code.strip().upper()
         return RedirectResponse(
-            f"/signup?{urlencode(params)}",
+            f"/login?{urlencode(params)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return templates.TemplateResponse(

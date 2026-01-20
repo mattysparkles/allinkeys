@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 from uuid import uuid4
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from telemetry_service.db import get_db_connection
@@ -28,6 +30,7 @@ from telemetry_service.models import (
 )
 
 router = APIRouter(tags=["Machines"])
+logger = logging.getLogger("telemetry.routes.machines")
 
 
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
@@ -278,8 +281,9 @@ def ingest_machine_telemetry(
     return IngestResponse(status="ok", count=len(items))
 
 
-@router.post(
+@router.api_route(
     "/{machine_id}/snapshot",
+    methods=["POST", "PUT"],
     response_model=MachineSummary,
     summary="Ingest a telemetry snapshot for a machine.",
 )
@@ -324,6 +328,16 @@ def ingest_machine_snapshot(
             "mode": payload.runtime.mode,
             "process_state": payload.runtime.process_state,
         }
+    try:
+        logger.info(
+            "Snapshot ingested | user_id=%s machine_id=%s machine_name=%s keys_per_sec=%s",
+            current_user.id,
+            machine_id,
+            machine_name,
+            payload.runtime.keys_per_sec,
+        )
+    except Exception:
+        pass
     return get_machine(machine_id, current_user=current_user)
 
 

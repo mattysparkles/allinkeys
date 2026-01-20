@@ -122,6 +122,10 @@ The telemetry UI exposes simple auth pages:
 Use the `next` query parameter to return to the original page after
 authentication (pairing uses `next=/pair` automatically).
 
+By default the UI redirects back to `/dashboard/machines` once login or
+signup completes.  Include `next` (and `code` when pairing) to override
+that destination so the browser lands on the desired page immediately.
+
 ## Dashboard access
 
 The authenticated dashboard UI lives at:
