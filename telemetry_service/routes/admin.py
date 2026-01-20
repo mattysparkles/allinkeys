@@ -138,6 +138,8 @@ def admin_dashboard(
     token = ""
     if auth_header.lower().startswith("bearer "):
         token = auth_header.split(" ", 1)[1]
+    elif request.cookies.get("telemetry_session"):
+        token = request.cookies.get("telemetry_session", "")
     return templates.TemplateResponse(
         "admin.html",
         {

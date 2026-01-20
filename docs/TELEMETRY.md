@@ -43,6 +43,13 @@ Telemetry opt‑out is stored locally at:
 config/local_telemetry.json
 ```
 
+## Account signup & login
+
+The telemetry dashboard supports multiple users. You can create an account at
+`/signup` and sign in at `/login`. After signing in, the browser stores a
+session cookie so your dashboard and pairing approvals stay authenticated
+across page loads.
+
 ## Collected Fields
 
 Only minimal metadata is transmitted and **never** any seeds, WIFs or derived
@@ -106,17 +113,18 @@ to `config/local_telemetry.json`.
 If you choose “Pair this machine via browser” in the wizard:
 
 1. The client requests a pairing code from `/v1/pair/init`.
-2. You open the pairing URL and sign up or log in.
+2. You open the pairing URL. If you are not signed in, you are redirected to
+   `/login` or `/signup`.
 3. After authentication, approve the pairing code at `/pair`.
-4. The client polls `/v1/pair/status` until approved and receives a token.
+4. The machine polls `/v1/pair/status` until approved and receives a token.
 5. The token is stored locally and the machine is registered automatically.
 
 ## User login and signup
 
-The telemetry UI exposes simple auth pages:
+The telemetry UI exposes simple authentication pages:
 
 - `/signup` creates a user and immediately starts a session.
-- `/login` signs in with the existing credentials.
+- `/login` signs in with existing credentials.
 - `/logout` clears the session.
 
 Use the `next` query parameter to return to the original page after
@@ -132,6 +140,15 @@ The authenticated dashboard UI lives at:
 
 - `/dashboard/machines` for the machine list
 - `/dashboard/machine/{machine_id}` for details and control
+
+## Token lifecycle
+
+- Telemetry access tokens are short-lived JWTs issued when you log in, sign up,
+  or approve a pairing request.
+- Tokens are stored locally in `config/.telemetry_token` and expire after the
+  configured `TOKEN_EXPIRY` window.
+- To revoke access, delete the local token file or run with `--no-telemetry`
+  and re-run the setup wizard to pair again.
 
 ## Central "Seen" Check
 

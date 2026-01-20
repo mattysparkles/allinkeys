@@ -19,7 +19,10 @@ router = APIRouter()
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard_home() -> RedirectResponse:
-    return RedirectResponse("/dashboard/machines", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        "/dashboard/machines",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.get("/dashboard/machines", response_class=HTMLResponse)
