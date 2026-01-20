@@ -11,6 +11,7 @@ from telemetry_service.db import get_db_connection
 from telemetry_service.dependencies import get_current_user, get_machine_for_user
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
+from telemetry_contract import MachineTelemetrySnapshot
 from telemetry_service.models import (
     ControlAckRequest,
     ControlCommand,
@@ -19,6 +20,8 @@ from telemetry_service.models import (
     IngestResponse,
     MachineRegisterRequest,
     MachineRegisterResponse,
+    MachineSnapshotPoint,
+    MachineSnapshotSeries,
     MachineSummary,
     TelemetryItem,
     UserPublic,
@@ -59,7 +62,10 @@ def _get_machine_for_user_or_admin(
         if current_user.is_admin:
             row = conn.execute(
                 """
-                SELECT id, user_id, machine_name, gpu_info, version, status, last_seen
+                SELECT id, user_id, machine_name, gpu_info, version, status, last_seen,
+                       keys_per_sec, total_keys, uptime_seconds, mode, process_state,
+                       cpu_percent, ram_percent, disk_free_percent, gpu_load_percent,
+                       last_error, last_activity
                 FROM machines
                 WHERE id = ?
                 """,
@@ -68,7 +74,10 @@ def _get_machine_for_user_or_admin(
         else:
             row = conn.execute(
                 """
-                SELECT id, user_id, machine_name, gpu_info, version, status, last_seen
+                SELECT id, user_id, machine_name, gpu_info, version, status, last_seen,
+                       keys_per_sec, total_keys, uptime_seconds, mode, process_state,
+                       cpu_percent, ram_percent, disk_free_percent, gpu_load_percent,
+                       last_error, last_activity
                 FROM machines
                 WHERE id = ? AND user_id = ?
                 """,
@@ -87,6 +96,17 @@ def _get_machine_for_user_or_admin(
             "version": row[4],
             "status": row[5],
             "last_seen": row[6],
+            "keys_per_sec": row[7],
+            "total_keys": row[8],
+            "uptime_seconds": row[9],
+            "mode": row[10],
+            "process_state": row[11],
+            "cpu_percent": row[12],
+            "ram_percent": row[13],
+            "disk_free_percent": row[14],
+            "gpu_load_percent": row[15],
+            "last_error": row[16],
+            "last_activity": row[17],
         }
     finally:
         conn.close()
@@ -146,6 +166,87 @@ def register_machine(
     return MachineRegisterResponse(machine_id=machine_id, message="Machine registered")
 
 
+def _persist_snapshot(
+    *,
+    conn: sqlite3.Connection,
+    snapshot: MachineTelemetrySnapshot,
+    machine_id: str,
+    user_id: int,
+    machine_name: str,
+    gpu_info: Optional[str],
+    version: Optional[str],
+) -> None:
+    runtime = snapshot.runtime
+    resources = snapshot.resources
+    conn.execute(
+        """
+        INSERT INTO machine_snapshots (
+            machine_id, user_id, timestamp, payload,
+            keys_per_sec, total_keys, uptime_seconds, mode, process_state,
+            cpu_percent, ram_percent, disk_free_percent, gpu_load_percent,
+            last_error, last_activity
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            machine_id,
+            user_id,
+            snapshot.timestamp_iso,
+            snapshot.json(),
+            runtime.keys_per_sec,
+            runtime.total_keys,
+            runtime.uptime_seconds,
+            runtime.mode,
+            runtime.process_state,
+            resources.cpu_percent,
+            resources.ram_percent,
+            resources.disk_free_percent,
+            resources.gpu_load_percent,
+            runtime.last_error,
+            runtime.last_activity_ts,
+        ),
+    )
+    conn.execute(
+        """
+        UPDATE machines
+        SET machine_name = COALESCE(?, machine_name),
+            gpu_info = COALESCE(?, gpu_info),
+            version = COALESCE(?, version),
+            status = 'online',
+            last_seen = ?,
+            keys_per_sec = ?,
+            total_keys = ?,
+            uptime_seconds = ?,
+            mode = ?,
+            process_state = ?,
+            cpu_percent = ?,
+            ram_percent = ?,
+            disk_free_percent = ?,
+            gpu_load_percent = ?,
+            last_error = ?,
+            last_activity = ?
+        WHERE id = ?
+        """,
+        (
+            machine_name,
+            gpu_info,
+            version,
+            snapshot.timestamp_iso,
+            runtime.keys_per_sec,
+            runtime.total_keys,
+            runtime.uptime_seconds,
+            runtime.mode,
+            runtime.process_state,
+            resources.cpu_percent,
+            resources.ram_percent,
+            resources.disk_free_percent,
+            resources.gpu_load_percent,
+            runtime.last_error,
+            runtime.last_activity_ts,
+            machine_id,
+        ),
+    )
+
+
 @router.post(
     "/{machine_id}/telemetry",
     response_model=IngestResponse,
@@ -177,6 +278,55 @@ def ingest_machine_telemetry(
     return IngestResponse(status="ok", count=len(items))
 
 
+@router.post(
+    "/{machine_id}/snapshot",
+    response_model=MachineSummary,
+    summary="Ingest a telemetry snapshot for a machine.",
+)
+def ingest_machine_snapshot(
+    machine_id: str,
+    payload: MachineTelemetrySnapshot,
+    current_user: UserPublic = Depends(get_current_user),
+) -> MachineSummary:
+    machine = get_machine_for_user(machine_id, current_user)
+    machine_name = payload.identity.machine_name or machine.get("machine_name") or machine_id
+    gpu_info = payload.resources.gpu_name or machine.get("gpu_info")
+    version = payload.identity.client_version or machine.get("version")
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            _persist_snapshot(
+                conn=conn,
+                snapshot=payload,
+                machine_id=machine_id,
+                user_id=current_user.id,
+                machine_name=machine_name,
+                gpu_info=gpu_info,
+                version=version,
+            )
+    finally:
+        conn.close()
+
+    with MACHINE_REGISTRY_LOCK:
+        MACHINE_REGISTRY[(current_user.id, machine_id)] = {
+            "user_id": current_user.id,
+            "machine_id": machine_id,
+            "machine_name": machine_name,
+            "last_seen": payload.timestamp_iso,
+            "cpu_percent": payload.resources.cpu_percent,
+            "ram_percent": payload.resources.ram_percent,
+            "disk_free_percent": payload.resources.disk_free_percent,
+            "gpu_load_percent": payload.resources.gpu_load_percent,
+            "gpu_name": payload.resources.gpu_name,
+            "time_to_disk_full": payload.resources.time_to_disk_full,
+            "keys_per_sec": payload.runtime.keys_per_sec,
+            "mode": payload.runtime.mode,
+            "process_state": payload.runtime.process_state,
+        }
+    return get_machine(machine_id, current_user=current_user)
+
+
 @router.get(
     "/me",
     response_model=List[MachineSummary],
@@ -205,32 +355,53 @@ def list_my_machines(
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         rows = conn.execute(
             f"""
-            SELECT id, machine_name, gpu_info, version, last_seen
+            SELECT id, machine_name, gpu_info, version, last_seen,
+                   keys_per_sec, total_keys, uptime_seconds, mode, process_state,
+                   cpu_percent, ram_percent, disk_free_percent, gpu_load_percent,
+                   last_error, last_activity
             FROM machines
             {where_clause}
             ORDER BY machine_name, id
             """,
             params,
         ).fetchall()
-        cutoff = (now - timedelta(seconds=60)).isoformat() + "Z"
         response: List[MachineSummary] = []
         for row in rows:
-            machine_id, machine_name, gpu_info, version, last_seen = row
-            kps_count = conn.execute(
-                """
-                SELECT COUNT(*)
-                FROM seed_events
-                WHERE machine_id = ? AND last_seen >= ?
-                """,
-                (machine_id, cutoff),
-            ).fetchone()[0]
+            (
+                machine_id,
+                machine_name,
+                gpu_info,
+                version,
+                last_seen,
+                keys_per_sec,
+                total_keys,
+                uptime_seconds,
+                mode,
+                process_state,
+                cpu_percent,
+                ram_percent,
+                disk_free_percent,
+                gpu_load_percent,
+                last_error,
+                last_activity,
+            ) = row
             response.append(
                 MachineSummary(
                     id=machine_id,
                     machine_name=machine_name or machine_id,
                     gpu_info=gpu_info,
                     status=_status_from_last_seen(last_seen, now),
-                    keys_per_sec=round(kps_count / 60, 2) if kps_count else 0,
+                    keys_per_sec=round(keys_per_sec or 0, 2),
+                    total_keys=total_keys,
+                    uptime_seconds=uptime_seconds,
+                    mode=mode,
+                    process_state=process_state,
+                    cpu_percent=cpu_percent,
+                    ram_percent=ram_percent,
+                    disk_free_percent=disk_free_percent,
+                    gpu_load_percent=gpu_load_percent,
+                    last_error=last_error,
+                    last_activity=last_activity,
                     last_seen=last_seen,
                     version=version,
                 )
@@ -251,30 +422,124 @@ def get_machine(
 ) -> MachineSummary:
     now = datetime.utcnow()
     machine_row = _get_machine_for_user_or_admin(machine_id, current_user)
-    machine_id, _user_id, machine_name, gpu_info, version, _status, last_seen = (
+    (
+        machine_id,
+        _user_id,
+        machine_name,
+        gpu_info,
+        version,
+        _status,
+        last_seen,
+        keys_per_sec,
+        total_keys,
+        uptime_seconds,
+        mode,
+        process_state,
+        cpu_percent,
+        ram_percent,
+        disk_free_percent,
+        gpu_load_percent,
+        last_error,
+        last_activity,
+    ) = (
         machine_row
     )
-    conn = get_db_connection()
-    try:
-        cutoff = (now - timedelta(seconds=60)).isoformat() + "Z"
-        kps_count = conn.execute(
-            """
-            SELECT COUNT(*)
-            FROM seed_events
-            WHERE machine_id = ? AND last_seen >= ?
-            """,
-            (machine_id, cutoff),
-        ).fetchone()[0]
-    finally:
-        conn.close()
     return MachineSummary(
         id=machine_id,
         machine_name=machine_name or machine_id,
         gpu_info=gpu_info,
         status=_status_from_last_seen(last_seen, now),
-        keys_per_sec=round(kps_count / 60, 2) if kps_count else 0,
+        keys_per_sec=round(keys_per_sec or 0, 2),
+        total_keys=total_keys,
+        uptime_seconds=uptime_seconds,
+        mode=mode,
+        process_state=process_state,
+        cpu_percent=cpu_percent,
+        ram_percent=ram_percent,
+        disk_free_percent=disk_free_percent,
+        gpu_load_percent=gpu_load_percent,
+        last_error=last_error,
+        last_activity=last_activity,
         last_seen=last_seen,
         version=version,
+    )
+
+
+@router.get(
+    "/summary",
+    summary="Return aggregate telemetry summary for the current user.",
+)
+def machine_summary(
+    current_user: UserPublic = Depends(get_current_user),
+) -> dict:
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT status, keys_per_sec, total_keys, cpu_percent, ram_percent, gpu_load_percent
+            FROM machines
+            WHERE user_id = ?
+            """,
+            (current_user.id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    total = len(rows)
+    online = len([r for r in rows if r[0] == "online"])
+    kps_values = [r[1] or 0 for r in rows]
+    total_keys = sum((r[2] or 0) for r in rows)
+    cpu_values = [r[3] for r in rows if r[3] is not None]
+    ram_values = [r[4] for r in rows if r[4] is not None]
+    gpu_values = [r[5] for r in rows if r[5] is not None]
+    return {
+        "machine_count": total,
+        "online_count": online,
+        "total_keys_per_sec": round(sum(kps_values), 2),
+        "avg_keys_per_sec": round(sum(kps_values) / total, 2) if total else 0,
+        "total_keys": total_keys,
+        "avg_cpu_percent": round(sum(cpu_values) / len(cpu_values), 2) if cpu_values else None,
+        "avg_ram_percent": round(sum(ram_values) / len(ram_values), 2) if ram_values else None,
+        "avg_gpu_percent": round(sum(gpu_values) / len(gpu_values), 2) if gpu_values else None,
+    }
+
+
+@router.get(
+    "/{machine_id}/snapshots",
+    response_model=MachineSnapshotSeries,
+    summary="Return recent telemetry snapshots for a machine.",
+)
+def list_machine_snapshots(
+    machine_id: str,
+    minutes: int = Query(60, ge=1, le=1440),
+    current_user: UserPublic = Depends(get_current_user),
+) -> MachineSnapshotSeries:
+    _get_machine_for_user_or_admin(machine_id, current_user)
+    cutoff = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat() + "Z"
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT timestamp, keys_per_sec, cpu_percent, ram_percent, gpu_load_percent
+            FROM machine_snapshots
+            WHERE machine_id = ? AND timestamp >= ?
+            ORDER BY timestamp ASC
+            """,
+            (machine_id, cutoff),
+        ).fetchall()
+    finally:
+        conn.close()
+    return MachineSnapshotSeries(
+        machine_id=machine_id,
+        points=[
+            MachineSnapshotPoint(
+                timestamp=row[0],
+                keys_per_sec=row[1],
+                cpu_percent=row[2],
+                ram_percent=row[3],
+                gpu_load_percent=row[4],
+            )
+            for row in rows
+        ],
     )
 
 

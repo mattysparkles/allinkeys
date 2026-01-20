@@ -30,6 +30,8 @@ so it matches the naming convention expected by the application.
   - `TELEMETRY_FLUSH_SECONDS`: flush cadence (`TELEMETRY_FLUSH_SECONDS`)
   - `TELEMETRY_MAX_BACKOFF`: retry backoff ceiling (`TELEMETRY_MAX_BACKOFF`)
   - `TELEMETRY_CHECK_TIMEOUT`: remote check timeout (`TELEMETRY_CHECK_TIMEOUT`)
+  - `TELEMETRY_API_KEY`: optional API key header (`TELEMETRY_API_KEY`)
+  - `TELEMETRY_SNAPSHOT_SECONDS`: snapshot cadence (`TELEMETRY_SNAPSHOT_SECONDS`)
   - `AUTO_START_TELEMETRY_SERVICE`: launch embedded FastAPI service
   - `TELEMETRY_SERVICE_HOST`/`PORT`: bind address for embedded service
 - **Machine identity**

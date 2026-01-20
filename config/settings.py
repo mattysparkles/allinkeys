@@ -701,6 +701,8 @@ STATS_TO_DISPLAY = {
     "derive_recoveries": True,
     "status": True,
     "last_updated": True,
+    "active_mode": True,
+    "global_run_state": True,
 }
 # ===================== ⏱️ DASHBOARD REFRESH ==========================
 DASHBOARD_REFRESH_INTERVAL = 1.0  # seconds between dashboard UI updates
@@ -766,6 +768,8 @@ METRICS_LABEL_MAP = {
     "derive_recoveries": "Derive Recoveries",
     "status": "Module Status",
     "last_updated": "Last Updated",
+    "active_mode": "Active Mode",
+    "global_run_state": "Process State",
 }
 # ===================== ⚠️ ALERT CONFIG OPTIONS FOR GUI ======================
 ALERT_OPTIONS = {

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from telemetry_service.dependencies import _extract_request_token, get_ui_current_user
@@ -14,6 +14,11 @@ TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 router = APIRouter()
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+def dashboard_home() -> RedirectResponse:
+    return RedirectResponse("/dashboard/machines", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/dashboard/machines", response_class=HTMLResponse)
@@ -47,5 +52,19 @@ def dashboard_machine(
             "current_user": current_user,
             "auth_token": token,
             "machine_id": machine_id,
+        },
+    )
+
+
+@router.get("/dashboard/pairing", response_class=HTMLResponse)
+def dashboard_pairing(
+    request: Request,
+    current_user: UserPublic = Depends(get_ui_current_user),
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "pairing_instructions.html",
+        {
+            "request": request,
+            "current_user": current_user,
         },
     )

@@ -5,6 +5,7 @@
 * Set `TELEMETRY_API_KEY` in `/opt/apps/allinkeys/telemetry_service/.env`.
 * When the variable is set, **all** `/v1/*` endpoints require the `X-API-Key` header.
 * When the variable is unset or empty, requests are allowed (useful for local development).
+* The AllInKeys client can send the header automatically when `TELEMETRY_API_KEY` is set.
 
 Example `.env`:
 

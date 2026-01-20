@@ -52,6 +52,12 @@ def start(shared_metrics, args):
 
         if shared_metrics is None:
             shared_metrics = init_dashboard_manager()
+        try:
+            from core.dashboard import set_metric
+            set_metric("active_mode", "btc_only")
+            set_metric("global_run_state", "running")
+        except Exception:
+            pass
         shutdown_keygen = multiprocessing.Event()
         pause_keygen = multiprocessing.Event()
         shutdown_btc = multiprocessing.Event()

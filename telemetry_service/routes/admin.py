@@ -152,8 +152,6 @@ def admin_dashboard(
 def admin_users_summary(
     current_user: UserPublic = Depends(get_current_admin_user),
 ) -> List[AdminUserSummary]:
-    now = datetime.utcnow()
-    cutoff = (now - timedelta(seconds=60)).isoformat() + "Z"
     conn = get_db_connection()
     try:
         users = conn.execute(
@@ -169,15 +167,14 @@ def admin_users_summary(
                 "SELECT COUNT(*) FROM machines WHERE user_id = ?",
                 (user_id,),
             ).fetchone()[0]
-            kps_count = conn.execute(
+            total_kps = conn.execute(
                 """
-                SELECT COUNT(*)
-                FROM seed_events
-                WHERE user_id = ? AND last_seen >= ?
+                SELECT COALESCE(SUM(keys_per_sec), 0)
+                FROM machines
+                WHERE user_id = ?
                 """,
-                (user_id, cutoff),
+                (user_id,),
             ).fetchone()[0]
-            total_kps = kps_count / 60 if kps_count else 0
             avg_kps = total_kps / machine_count if machine_count else 0
             coverage_rows = conn.execute(
                 """
@@ -207,7 +204,6 @@ def admin_machines_summary(
     current_user: UserPublic = Depends(get_current_admin_user),
 ) -> List[AdminMachineSummary]:
     now = datetime.utcnow()
-    cutoff = (now - timedelta(seconds=60)).isoformat() + "Z"
     conn = get_db_connection()
     try:
         rows = conn.execute(
@@ -218,7 +214,8 @@ def admin_machines_summary(
                    users.username,
                    machines.gpu_info,
                    machines.version,
-                   machines.last_seen
+                   machines.last_seen,
+                   machines.keys_per_sec
             FROM machines
             JOIN users ON users.id = machines.user_id
             ORDER BY users.username, machines.machine_name, machines.id
@@ -226,17 +223,16 @@ def admin_machines_summary(
         ).fetchall()
         response: List[AdminMachineSummary] = []
         for row in rows:
-            machine_id, machine_name, user_id, username, gpu_info, version, last_seen = (
-                row
-            )
-            kps_count = conn.execute(
-                """
-                SELECT COUNT(*)
-                FROM seed_events
-                WHERE machine_id = ? AND last_seen >= ?
-                """,
-                (machine_id, cutoff),
-            ).fetchone()[0]
+            (
+                machine_id,
+                machine_name,
+                user_id,
+                username,
+                gpu_info,
+                version,
+                last_seen,
+                keys_per_sec,
+            ) = row
             response.append(
                 AdminMachineSummary(
                     id=machine_id,
@@ -245,7 +241,7 @@ def admin_machines_summary(
                     username=username,
                     gpu_info=gpu_info,
                     status=_status_from_last_seen(last_seen, now),
-                    keys_per_sec=round(kps_count / 60, 2) if kps_count else 0,
+                    keys_per_sec=round(keys_per_sec or 0, 2),
                     last_seen=last_seen,
                     version=version,
                 )

@@ -90,6 +90,16 @@ class MachineSummary(BaseModel):
     gpu_info: Optional[str] = None
     status: str
     keys_per_sec: float = 0
+    total_keys: Optional[float] = None
+    uptime_seconds: Optional[float] = None
+    mode: Optional[str] = None
+    process_state: Optional[str] = None
+    cpu_percent: Optional[float] = None
+    ram_percent: Optional[float] = None
+    disk_free_percent: Optional[float] = None
+    gpu_load_percent: Optional[float] = None
+    last_error: Optional[str] = None
+    last_activity: Optional[str] = None
     last_seen: Optional[str] = None
     version: Optional[str] = None
 
@@ -124,7 +134,7 @@ class AdminKeyspaceProgress(BaseModel):
 
 
 class ControlCommandRequest(BaseModel):
-    command: Literal["pause", "resume", "set_mode", "set_range"]
+    command: Literal["pause", "resume", "stop", "restart", "set_mode", "set_range"]
     value: Optional[str] = None
 
 
@@ -154,3 +164,16 @@ class TimeSeriesResponse(BaseModel):
     metric: str
     bucket_minutes: int
     points: List[TimeSeriesPoint]
+
+
+class MachineSnapshotPoint(BaseModel):
+    timestamp: str
+    keys_per_sec: Optional[float] = None
+    cpu_percent: Optional[float] = None
+    ram_percent: Optional[float] = None
+    gpu_load_percent: Optional[float] = None
+
+
+class MachineSnapshotSeries(BaseModel):
+    machine_id: str
+    points: List[MachineSnapshotPoint]

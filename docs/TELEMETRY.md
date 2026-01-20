@@ -20,6 +20,12 @@ The wizard will:
 2. Let you paste an existing token, pair via browser, or disable telemetry.
 3. Store your token locally so future runs “just work.”
 
+Public pairing requires no API key. API keys are intended for private/on-prem
+telemetry deployments only. The public SparkleServer telemetry service does not
+require `TELEMETRY_API_KEY` for pairing or telemetry. If your private telemetry
+service requires an API key, set `TELEMETRY_API_KEY` in the environment so the
+client can include the `X-API-Key` header during pairing and telemetry requests.
+
 ## Token storage (local-only)
 
 Telemetry tokens are stored locally at:

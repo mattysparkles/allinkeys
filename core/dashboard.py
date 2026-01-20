@@ -537,6 +537,7 @@ def _default_metrics():
         },
         # Flattened status for backward compatibility with older dashboard code
         "alerts_status": "Running" if ENABLE_ALERTS else "Stopped",
+        "active_mode": "vanity",
         "global_run_state": "running",
         "auto_resume_enabled": True,
         "alerts_enabled": {
@@ -554,6 +555,7 @@ def _default_metrics():
         "pin_reset_required": False,
         "metrics_last_reset": datetime.now().isoformat(),
         "last_updated": datetime.now().isoformat(),
+        "last_activity_ts": datetime.utcnow().isoformat() + "Z",
         "thread_health_flags": THREAD_HEALTH.copy(),
         "rate_history": {},
     }
