@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Machines</title>
+{% extends "base.html" %}
+{% block title %}My Machines{% endblock %}
+{% block head_extra %}
     <style>
       :root {
         color-scheme: dark;
@@ -11,9 +8,9 @@
         background: #0b0d12;
         color: #f6f7fb;
       }
-      body {
-        margin: 0;
+      main {
         padding: 32px 40px 64px;
+        display: block;
       }
       header {
         display: flex;
@@ -214,9 +211,59 @@
         border: 1px dashed #2d3240;
         color: #9fa4b4;
       }
+      .empty-state .cta {
+        margin-top: 18px;
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .summary-bar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin: 20px 0 10px;
+      }
+      .summary-card {
+        background: #171d2c;
+        border-radius: 12px;
+        padding: 12px;
+        border: 1px solid #262c3b;
+      }
+      .summary-card span {
+        color: #9fa4b4;
+        font-size: 12px;
+      }
+      .summary-card strong {
+        display: block;
+        margin-top: 6px;
+        font-size: 18px;
+        color: #f6f7fb;
+      }
+      .bulk-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 12px 0 20px;
+      }
+      .bulk-actions button {
+        background: #1f2937;
+        border: 1px solid #2d3748;
+        color: #e2e8f0;
+        border-radius: 10px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      .machine-select {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: #cbd5f5;
+        font-size: 12px;
+      }
     </style>
-  </head>
-  <body>
+{% endblock %}
+{% block content %}
     <header>
       <div>
         <h1>My Machines</h1>
@@ -238,10 +285,23 @@
         <button id="refreshButton" type="button">Refresh</button>
       </div>
     </header>
+    <section class="summary-bar" id="summaryBar"></section>
+    <section class="bulk-actions" id="bulkActions" hidden>
+      <button type="button" data-command="pause">Pause Selected</button>
+      <button type="button" data-command="resume">Resume Selected</button>
+      <button type="button" data-command="stop">Stop Selected</button>
+      <button type="button" data-command="restart">Restart Selected</button>
+    </section>
     <section id="machineContainer" class="machine-grid"></section>
     <section id="emptyState" class="empty-state" hidden>
-      No machines are registered yet.
+      <div id="emptyMessage">No machines connected yet.</div>
+      <div class="cta">
+        <a class="control-link" href="/pair">Pair a machine</a>
+        <a class="control-link" href="/dashboard/pairing">View pairing instructions</a>
+      </div>
     </section>
+{% endblock %}
+{% block scripts %}
     <script>
       const apiEndpoint = "/api/machines/me";
       const controlEndpoint = "/api/machines";
@@ -252,6 +312,9 @@
       const searchInput = document.getElementById("searchInput");
       const machineContainer = document.getElementById("machineContainer");
       const emptyState = document.getElementById("emptyState");
+      const emptyMessage = document.getElementById("emptyMessage");
+      const summaryBar = document.getElementById("summaryBar");
+      const bulkActions = document.getElementById("bulkActions");
 
       let machines = [];
 
@@ -276,26 +339,43 @@
         if (!token) {
           machineContainer.innerHTML = "";
           emptyState.hidden = false;
-          emptyState.textContent =
+          emptyMessage.textContent =
             "Add a valid access token to load your machines.";
+          summaryBar.innerHTML = "";
+          bulkActions.hidden = true;
           return;
         }
         try {
-          const response = await fetch(apiEndpoint, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
-          if (!response.ok) {
-            throw new Error(`Request failed: ${response.status}`);
+          const [machinesResponse, summaryResponse] = await Promise.all([
+            fetch(apiEndpoint, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }),
+            fetch("/api/machines/summary", {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }),
+          ]);
+          if (!machinesResponse.ok) {
+            throw new Error(`Request failed: ${machinesResponse.status}`);
           }
-          machines = await response.json();
+          machines = await machinesResponse.json();
+          if (summaryResponse.ok) {
+            const summary = await summaryResponse.json();
+            renderSummary(summary);
+          } else {
+            summaryBar.innerHTML = "";
+          }
           renderMachines();
         } catch (error) {
           machineContainer.innerHTML = "";
           emptyState.hidden = false;
-          emptyState.textContent =
+          emptyMessage.textContent =
             "Unable to load machines. Check your token and try again.";
+          summaryBar.innerHTML = "";
+          bulkActions.hidden = true;
         }
       }
 
@@ -345,6 +425,29 @@
               "Failed to send command. Check your token and try again.";
           }
         }
+      }
+
+      function renderSummary(summary) {
+        summaryBar.innerHTML = "";
+        if (!summary || typeof summary.machine_count !== "number") {
+          return;
+        }
+        const cards = [
+          { label: "Machines", value: summary.machine_count },
+          { label: "Online", value: summary.online_count },
+          { label: "Total KPS", value: formatKps(summary.total_keys_per_sec) },
+          { label: "Avg KPS", value: formatKps(summary.avg_keys_per_sec) },
+          {
+            label: "Total Keys",
+            value: numberFormatter.format(summary.total_keys || 0),
+          },
+        ];
+        cards.forEach((card) => {
+          const el = document.createElement("div");
+          el.className = "summary-card";
+          el.innerHTML = `<span>${card.label}</span><strong>${card.value}</strong>`;
+          summaryBar.appendChild(el);
+        });
       }
 
       function renderCommandList(container, commands) {
@@ -406,17 +509,23 @@
         machineContainer.innerHTML = "";
         if (!filtered.length) {
           emptyState.hidden = false;
-          emptyState.textContent = filterValue
+          emptyMessage.textContent = filterValue
             ? "No machines match that search."
             : "No machines are registered yet.";
+          bulkActions.hidden = true;
           return;
         }
         emptyState.hidden = true;
+        bulkActions.hidden = false;
         filtered.forEach((machine) => {
           const card = document.createElement("div");
           card.className = "machine-card";
           const statusClass = `status-${machine.status}`;
           card.innerHTML = `
+            <div class="machine-select">
+              <input type="checkbox" data-machine="${machine.id}" />
+              <span>Select</span>
+            </div>
             <div class="machine-header">
               <div>
                 <h2>${machine.machine_name || "Unnamed machine"}</h2>
@@ -429,6 +538,10 @@
             <div class="machine-meta">
               <div>GPU: <span>${machine.gpu_info || "Unknown"}</span></div>
               <div>Keys/sec: <span>${formatKps(machine.keys_per_sec)}</span></div>
+              <div>Mode: <span>${machine.mode || "—"}</span></div>
+              <div>State: <span>${machine.process_state || "—"}</span></div>
+              <div>CPU: <span>${machine.cpu_percent ?? "—"}%</span></div>
+              <div>RAM: <span>${machine.ram_percent ?? "—"}%</span></div>
               <div>Last Seen: <span>${formatDate(machine.last_seen)}</span></div>
               <div>Version: <span>${machine.version || "—"}</span></div>
             </div>
@@ -437,6 +550,8 @@
               <div class="control-actions">
                 <button type="button" data-command="pause">Pause</button>
                 <button type="button" data-command="resume">Resume</button>
+                <button type="button" data-command="stop">Stop</button>
+                <button type="button" data-command="restart">Restart</button>
               </div>
               <form class="control-form">
                 <label>
@@ -444,6 +559,8 @@
                   <select name="command">
                     <option value="pause">Pause</option>
                     <option value="resume">Resume</option>
+                    <option value="stop">Stop</option>
+                    <option value="restart">Restart</option>
                     <option value="set_mode">Set Mode</option>
                     <option value="set_range">Set Range</option>
                   </select>
@@ -496,6 +613,23 @@
         });
       }
 
+      function getSelectedMachineIds() {
+        return Array.from(
+          document.querySelectorAll('input[type="checkbox"][data-machine]:checked')
+        ).map((el) => el.dataset.machine);
+      }
+
+      bulkActions.addEventListener("click", async (event) => {
+        const button = event.target.closest("button[data-command]");
+        if (!button) return;
+        const ids = getSelectedMachineIds();
+        if (!ids.length) return;
+        for (const id of ids) {
+          await sendControlCommand(id, button.dataset.command, null, null);
+        }
+        fetchMachines();
+      });
+
       saveTokenButton.addEventListener("click", () => {
         const value = tokenInput.value.trim();
         setStoredToken(value);
@@ -511,5 +645,4 @@
       fetchMachines();
       setInterval(fetchMachines, 10000);
     </script>
-  </body>
-</html>
+{% endblock %}

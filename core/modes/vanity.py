@@ -151,6 +151,7 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
             "gpu_load_percent": "N/A",
             "gpu_name": "N/A",
             "gpu_assignments": get_gpu_assignments(),
+            "last_activity_ts": datetime.utcnow().isoformat() + "Z",
         }
         vs_ids = set(get_vanitysearch_gpu_ids())
         ad_ids = set(get_altcoin_gpu_ids())
@@ -507,6 +508,13 @@ def run_allinkeys(args, shared_metrics=None):
     if shared_metrics is None:
         shared_metrics = init_dashboard_manager()
 
+    try:
+        from core.dashboard import set_metric
+        set_metric("active_mode", getattr(args, "mode", None) or "vanity")
+        set_metric("global_run_state", "running")
+    except Exception:
+        pass
+
     # ``multiprocessing.Manager().Event`` objects can trigger ``KeyError`` when
     # forwarded through a ``ProcessPoolExecutor``.  Using plain
     # ``multiprocessing.Event`` avoids proxy lookups that occasionally fail when
@@ -618,6 +626,10 @@ def run_allinkeys(args, shared_metrics=None):
         shutdown_event.set()
         for ev in shutdown_events.values():
             ev.set()
+        try:
+            set_metric("global_run_state", "stopped")
+        except Exception:
+            pass
         for p in processes:
             try:
                 p.join(timeout=5)

@@ -2,105 +2,117 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Optional
-from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from fastapi import APIRouter, Form, Request, status, HTTPException
+from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from config.telemetry import TOKEN_EXPIRY
 from telemetry_service.auth import create_access_token, hash_password, verify_password
 from telemetry_service.db import get_db_connection
-from telemetry_service.dependencies import resolve_user_from_token
+from telemetry_service.dependencies import AUTH_COOKIE_NAME, get_ui_optional_user
+from telemetry_service.models import UserPublic
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 router = APIRouter()
 
-SESSION_COOKIE = "telemetry_session"
-DEFAULT_REDIRECT = "/dashboard/machines"
 
+# ─────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────
 
-def _safe_next_path(next_path: Optional[str]) -> str:
+def _sanitize_next(next_path: str | None) -> str:
     if not next_path:
-        return DEFAULT_REDIRECT
+        return "/dashboard/machines"
     if not next_path.startswith("/") or next_path.startswith("//"):
-        return DEFAULT_REDIRECT
+        return "/dashboard/machines"
     return next_path
 
 
-def _build_redirect_path(next_path: Optional[str], code: Optional[str]) -> str:
-    safe_path = _safe_next_path(next_path)
-    if not code:
-        return safe_path
-    parsed = urlparse(safe_path)
-    query = parsed.query
-    if query:
-        query += "&"
-    query += urlencode({"code": code})
-    return urlunparse(parsed._replace(query=query))
+def _with_query(path: str, params: dict[str, str]) -> str:
+    parts = urlparse(path)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    for key, value in params.items():
+        if value:
+            query[key] = value
+    new_query = urlencode(query)
+    return urlunparse(("", "", parts.path, parts.params, new_query, parts.fragment))
 
 
-def _get_authenticated_user(request: Request):
-    token = request.cookies.get(SESSION_COOKIE)
-    if not token:
-        return None
-    try:
-        return resolve_user_from_token(token)
-    except HTTPException:
-        return None
+def _next_with_code(next_path: str, code: str | None) -> str:
+    safe_next = _sanitize_next(next_path)
+    return _with_query(safe_next, {"code": (code or "").strip().upper()})
 
 
-def _set_session_cookie(response: RedirectResponse, token: str, request: Request) -> None:
-    response.set_cookie(
-        SESSION_COOKIE,
-        token,
-        max_age=TOKEN_EXPIRY * 60,
-        httponly=True,
-        samesite="lax",
-        secure=request.url.scheme == "https",
+def _secure_cookie(request: Request) -> bool:
+    return request.url.scheme == "https"
+
+
+# ─────────────────────────────────────────────────────────────
+# Pages
+# ─────────────────────────────────────────────────────────────
+
+@router.api_route(
+    "/",
+    methods=["GET", "HEAD"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def landing_page(
+    request: Request,
+    current_user: UserPublic | None = Depends(get_ui_optional_user),
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "landing.html",
+        {
+            "request": request,
+            "current_user": current_user,
+        },
     )
 
 
-@router.get("/login", response_class=HTMLResponse, include_in_schema=False)
-def login_page(request: Request, next: Optional[str] = None, code: Optional[str] = None):
-    current_user = _get_authenticated_user(request)
-    if current_user:
-        redirect_path = _build_redirect_path(next, code)
-        return RedirectResponse(url=redirect_path, status_code=status.HTTP_303_SEE_OTHER)
+@router.api_route(
+    "/login",
+    methods=["GET", "HEAD"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def login_page(
+    request: Request,
+    next: str | None = None,
+    code: str | None = None,
+    current_user: UserPublic | None = Depends(get_ui_optional_user),
+) -> HTMLResponse:
+    safe_next = _sanitize_next(next)
+    if current_user is not None:
+        return RedirectResponse(
+            _next_with_code(safe_next, code),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return templates.TemplateResponse(
         "login.html",
         {
             "request": request,
-            "next": _safe_next_path(next),
-            "code": code,
+            "error": None,
+            "next": safe_next,
+            "code": (code or "").strip().upper(),
+            "current_user": current_user,
+            "signup_url": _with_query("/signup", {"next": safe_next, "code": code or ""}),
         },
     )
 
 
 @router.post("/login", response_class=HTMLResponse, include_in_schema=False)
-def login_submit(
+def login_action(
     request: Request,
-    username: str = Form(""),
-    password: str = Form(""),
-    next: Optional[str] = Form(None),
-    code: Optional[str] = Form(None),
-):
-    username = username.strip()
-    if not username or not password:
-        return templates.TemplateResponse(
-            "login.html",
-            {
-                "request": request,
-                "error": "Enter both username and password.",
-                "username": username,
-                "next": _safe_next_path(next),
-                "code": code,
-            },
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/dashboard/machines"),
+    code: str = Form(""),
+) -> HTMLResponse:
+    safe_next = _sanitize_next(next)
     conn = get_db_connection()
     try:
         row = conn.execute(
@@ -109,110 +121,160 @@ def login_submit(
             FROM users
             WHERE username = ?
             """,
-            (username,),
+            (username.strip(),),
         ).fetchone()
-        if not row or not verify_password(password, row[1]):
-            return templates.TemplateResponse(
-                "login.html",
-                {
-                    "request": request,
-                    "error": "Incorrect username or password.",
-                    "username": username,
-                    "next": _safe_next_path(next),
-                    "code": code,
-                },
-                status_code=status.HTTP_401_UNAUTHORIZED,
-            )
     finally:
         conn.close()
-    token = create_access_token(subject=username)
-    redirect_path = _build_redirect_path(next, code)
+
+    try:
+        valid = bool(row and verify_password(password, row[1]))
+    except Exception:
+        valid = False
+
+    if not valid:
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "error": "Invalid username or password.",
+                "next": safe_next,
+                "code": code.strip().upper(),
+                "current_user": None,
+                "signup_url": _with_query("/signup", {"next": safe_next, "code": code}),
+            },
+        )
+
+    token = create_access_token(subject=row[0])
     response = RedirectResponse(
-        url=redirect_path, status_code=status.HTTP_303_SEE_OTHER
+        _next_with_code(safe_next, code),
+        status_code=status.HTTP_303_SEE_OTHER,
     )
-    _set_session_cookie(response, token, request)
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=_secure_cookie(request),
+    )
     return response
 
 
-@router.get("/signup", response_class=HTMLResponse, include_in_schema=False)
-def signup_page(request: Request, next: Optional[str] = None, code: Optional[str] = None):
-    current_user = _get_authenticated_user(request)
-    if current_user:
-        redirect_path = _build_redirect_path(next, code)
-        return RedirectResponse(url=redirect_path, status_code=status.HTTP_303_SEE_OTHER)
+@router.api_route(
+    "/signup",
+    methods=["GET", "HEAD"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def signup_page(
+    request: Request,
+    next: str | None = None,
+    code: str | None = None,
+    current_user: UserPublic | None = Depends(get_ui_optional_user),
+) -> HTMLResponse:
+    safe_next = _sanitize_next(next)
+    if current_user is not None:
+        return RedirectResponse(
+            _next_with_code(safe_next, code),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return templates.TemplateResponse(
         "signup.html",
         {
             "request": request,
-            "next": _safe_next_path(next),
-            "code": code,
+            "error": None,
+            "next": safe_next,
+            "code": (code or "").strip().upper(),
+            "current_user": current_user,
+            "login_url": _with_query("/login", {"next": safe_next, "code": code or ""}),
         },
     )
 
 
 @router.post("/signup", response_class=HTMLResponse, include_in_schema=False)
-def signup_submit(
+def signup_action(
     request: Request,
-    username: str = Form(""),
-    password: str = Form(""),
-    next: Optional[str] = Form(None),
-    code: Optional[str] = Form(None),
-):
-    username = username.strip()
-    errors = []
-    if len(username) < 3 or len(username) > 150:
-        errors.append("Username must be 3-150 characters long.")
-    if len(password) < 8:
-        errors.append("Password must be at least 8 characters long.")
-    if errors:
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/dashboard/machines"),
+    code: str = Form(""),
+) -> HTMLResponse:
+    safe_next = _sanitize_next(next)
+    normalized_username = username.strip()
+
+    if not normalized_username:
         return templates.TemplateResponse(
             "signup.html",
             {
                 "request": request,
-                "error": " ".join(errors),
-                "username": username,
-                "next": _safe_next_path(next),
-                "code": code,
+                "error": "Username is required.",
+                "next": safe_next,
+                "code": code.strip().upper(),
+                "current_user": None,
+                "login_url": _with_query("/login", {"next": safe_next, "code": code}),
             },
-            status_code=status.HTTP_400_BAD_REQUEST,
         )
+
+    if len(password.encode("utf-8")) > 72:
+        return templates.TemplateResponse(
+            "signup.html",
+            {
+                "request": request,
+                "error": "Password must be 72 bytes or fewer.",
+                "next": safe_next,
+                "code": code.strip().upper(),
+                "current_user": None,
+                "login_url": _with_query("/login", {"next": safe_next, "code": code}),
+            },
+        )
+
     conn = get_db_connection()
     try:
         password_hash = hash_password(password)
         try:
             conn.execute(
                 "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                (username, password_hash),
+                (normalized_username, password_hash),
             )
             conn.commit()
-        except sqlite3.IntegrityError as exc:
+        except sqlite3.IntegrityError:
             return templates.TemplateResponse(
                 "signup.html",
                 {
                     "request": request,
                     "error": "Username already exists.",
-                    "username": username,
-                    "next": _safe_next_path(next),
-                    "code": code,
+                    "next": safe_next,
+                    "code": code.strip().upper(),
+                    "current_user": None,
+                    "login_url": _with_query("/login", {"next": safe_next, "code": code}),
                 },
-                status_code=status.HTTP_400_BAD_REQUEST,
             )
     finally:
         conn.close()
-    token = create_access_token(subject=username)
-    redirect_path = _build_redirect_path(next, code)
+
+    token = create_access_token(subject=normalized_username)
     response = RedirectResponse(
-        url=redirect_path, status_code=status.HTTP_303_SEE_OTHER
+        _next_with_code(safe_next, code),
+        status_code=status.HTTP_303_SEE_OTHER,
     )
-    _set_session_cookie(response, token, request)
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=_secure_cookie(request),
+    )
     return response
 
 
-@router.post("/logout", include_in_schema=False)
-def logout(request: Request, next: Optional[str] = Form(None)):
-    redirect_path = _safe_next_path(next)
+@router.post("/logout", response_class=HTMLResponse, include_in_schema=False)
+def logout_action(
+    request: Request,
+    next: str = Form("/login"),
+) -> HTMLResponse:
+    safe_next = _sanitize_next(next)
     response = RedirectResponse(
-        url=redirect_path, status_code=status.HTTP_303_SEE_OTHER
+        safe_next,
+        status_code=status.HTTP_303_SEE_OTHER,
     )
-    response.delete_cookie(SESSION_COOKIE)
+    response.delete_cookie(AUTH_COOKIE_NAME)
     return response

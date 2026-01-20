@@ -61,8 +61,10 @@ from config.telemetry import (
     TELEMETRY_ENDPOINT,
     TELEMETRY_FLUSH_SECONDS,
     TELEMETRY_MAX_BACKOFF,
+    TELEMETRY_API_KEY,
     TELEMETRY_SERVICE_HOST,
     TELEMETRY_SERVICE_PORT,
+    TELEMETRY_SNAPSHOT_SECONDS,
 )
 from core.logger import get_logger, log_with_context
 from core.worker_bootstrap import _safe_inc_metric
@@ -73,6 +75,13 @@ from utils.machine_identity import (
     get_machine_name_state,
     set_machine_name,
     suggest_machine_name,
+)
+from telemetry_contract import (
+    ControlCapabilities,
+    MachineIdentity,
+    MachineTelemetrySnapshot,
+    ResourceStats,
+    RuntimeStats,
 )
 
 logger = get_logger(__name__)
@@ -205,6 +214,102 @@ def _telemetry_root_url(endpoint: str) -> str:
     return endpoint
 
 
+def _telemetry_headers(token: Optional[str] = None) -> Dict[str, str]:
+    headers: Dict[str, str] = {}
+    api_key = TELEMETRY_API_KEY.strip() if TELEMETRY_API_KEY else ""
+    if api_key:
+        headers["X-API-Key"] = api_key
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _parse_uptime_seconds(value: Optional[str]) -> Optional[float]:
+    if not value:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    parts = text.split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        hours, minutes, seconds = (int(p) for p in parts)
+    except ValueError:
+        return None
+    return float(hours * 3600 + minutes * 60 + seconds)
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip().rstrip("%"))
+    except Exception:
+        return None
+
+
+def _infer_process_state(metrics: Dict[str, Any]) -> Optional[str]:
+    state = metrics.get("global_run_state")
+    if isinstance(state, str) and state.strip():
+        return state
+    status = metrics.get("status") or {}
+    if isinstance(status, dict):
+        running = any(str(val).lower() == "running" for val in status.values())
+        paused = any(str(val).lower() == "paused" for val in status.values())
+        if paused:
+            return "paused"
+        if running:
+            return "running"
+    return None
+
+
+def _snapshot_from_metrics(
+    metrics: Dict[str, Any],
+    *,
+    machine_id: str,
+    machine_name: Optional[str],
+    app_instance_id: str,
+    client_version: Optional[str],
+) -> MachineTelemetrySnapshot:
+    last_activity = metrics.get("last_activity_ts")
+    if not last_activity:
+        last_rotation = metrics.get("last_rotation")
+        if isinstance(last_rotation, (int, float)):
+            last_activity = datetime.utcfromtimestamp(last_rotation).isoformat() + "Z"
+    runtime = RuntimeStats(
+        mode=metrics.get("active_mode"),
+        keys_per_sec=_coerce_float(metrics.get("keys_per_sec")),
+        total_keys=_coerce_float(metrics.get("keys_generated_lifetime")),
+        uptime_seconds=_parse_uptime_seconds(metrics.get("uptime")),
+        process_state=_infer_process_state(metrics),
+        last_activity_ts=last_activity,
+        last_error=str(metrics.get("last_popen_error") or "") or None,
+    )
+    resources = ResourceStats(
+        cpu_percent=_coerce_float(metrics.get("cpu_percent")),
+        ram_percent=_coerce_float(metrics.get("ram_percent")),
+        disk_free_percent=_coerce_float(metrics.get("disk_free_percent")),
+        gpu_load_percent=_coerce_float(metrics.get("gpu_load_percent")),
+        gpu_name=str(metrics.get("gpu_name") or "") or None,
+        time_to_disk_full=str(metrics.get("time_to_disk_full") or "") or None,
+    )
+    identity = MachineIdentity(
+        machine_id=machine_id,
+        machine_name=machine_name,
+        app_instance_id=app_instance_id,
+        client_version=client_version,
+    )
+    return MachineTelemetrySnapshot(
+        identity=identity,
+        runtime=runtime,
+        resources=resources,
+        capabilities=ControlCapabilities(),
+    )
+
+
 def _valid_token_format(token: str) -> bool:
     cleaned = token.strip()
     if len(cleaned) < 12:
@@ -230,7 +335,7 @@ def _attempt_machine_registration(
         response = requests_module.post(
             register_url,
             json=payload,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_telemetry_headers(token),
             timeout=10,
         )
         response.raise_for_status()
@@ -257,7 +362,7 @@ def _validate_auth_token(
     try:
         response = requests_module.get(
             f"{root}/me",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_telemetry_headers(token),
             timeout=10,
         )
     except Exception:
@@ -366,10 +471,21 @@ def run_telemetry_setup(
         if choice in {"2", "pair", "p"}:
             init_url = f"{_telemetry_base_url(endpoint)}/pair/init"
             try:
-                response = requests_module.post(init_url, json={}, timeout=10)
+                response = requests_module.post(
+                    init_url,
+                    json={},
+                    headers=_telemetry_headers(),
+                    timeout=10,
+                )
                 response.raise_for_status()
                 data = response.json()
             except Exception as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status == 401 and not TELEMETRY_API_KEY:
+                    output_func(
+                        "[Telemetry] Telemetry server requires API key; set TELEMETRY_API_KEY "
+                        "or use a public endpoint."
+                    )
                 output_func(f"[Telemetry] Pairing init failed: {exc}")
                 continue
             pair_code = data.get("pair_code")
@@ -391,6 +507,7 @@ def run_telemetry_setup(
                     status_resp = requests_module.get(
                         status_url,
                         params={"pair_code": pair_code},
+                        headers=_telemetry_headers(),
                         timeout=10,
                     )
                     status_resp.raise_for_status()
@@ -584,9 +701,7 @@ class TelemetryClient:
                 raise
 
     def _authorization_headers(self) -> Dict[str, str]:
-        if not self.auth_token:
-            return {}
-        return {"Authorization": f"Bearer {self.auth_token}"}
+        return _telemetry_headers(self.auth_token)
 
     def _machine_endpoints(self, machine_id: Optional[str] = None) -> tuple[str, str]:
         base = _telemetry_base_url(self.endpoint)
@@ -595,6 +710,10 @@ class TelemetryClient:
             f"{base}/machines/{machine_id}/telemetry" if machine_id else f"{base}/machines/telemetry"
         )
         return register_url, telemetry_url
+
+    def _snapshot_url(self, machine_id: str) -> str:
+        base = _telemetry_base_url(self.endpoint)
+        return f"{base}/machines/{machine_id}/snapshot"
 
     def _control_base(self) -> Optional[str]:
         endpoint = (self.control_endpoint or self.endpoint).strip().rstrip("/")
@@ -645,6 +764,12 @@ class TelemetryClient:
                         event.set()
                     else:
                         event.clear()
+                try:
+                    from core.dashboard import set_metric
+
+                    set_metric("global_run_state", "paused" if cmd == "pause" else "running")
+                except Exception:
+                    pass
             except Exception as exc:
                 try:
                     log_with_context(
@@ -676,6 +801,56 @@ class TelemetryClient:
             except Exception:
                 pass
             return True
+        if cmd in {"stop", "restart"}:
+            try:
+                from core.dashboard import get_shutdown_event
+
+                shutdown = get_shutdown_event()
+                if shutdown:
+                    shutdown.set()
+                try:
+                    from core.dashboard import set_metric
+
+                    set_metric("global_run_state", "stopped")
+                except Exception:
+                    pass
+                self._update_control_state(
+                    {
+                        "last_command": cmd,
+                        "last_value": value,
+                    }
+                )
+                if cmd == "restart":
+                    def _restart() -> None:
+                        import os
+                        import sys
+                        time.sleep(1)
+                        os.execv(sys.executable, [sys.executable] + sys.argv)
+                    threading.Thread(target=_restart, daemon=True).start()
+                try:
+                    log_with_context(
+                        logger,
+                        "INFO",
+                        "[Telemetry] Control command applied | command=%s",
+                        cmd,
+                        **_telemetry_log_context(endpoint=self.endpoint),
+                    )
+                except Exception:
+                    pass
+                return True
+            except Exception as exc:
+                try:
+                    log_with_context(
+                        logger,
+                        "WARNING",
+                        "[Telemetry] Control command failed | command=%s | reason=%s",
+                        cmd,
+                        exc,
+                        **_telemetry_log_context(endpoint=self.endpoint),
+                    )
+                except Exception:
+                    pass
+                return False
         if cmd == "set_mode":
             self._update_control_state(
                 {
@@ -842,6 +1017,72 @@ class TelemetryClient:
         self.machine_id = str(machine_id)
         _save_machine_id(self.machine_id, self.machine_id_path)
         return True
+
+    def send_snapshot(self, snapshot: MachineTelemetrySnapshot) -> bool:
+        if not self._ensure_machine_registered():
+            return False
+        if not self.machine_id:
+            return False
+        url = self._snapshot_url(self.machine_id)
+        try:
+            response = requests.post(
+                url,
+                json=snapshot.dict(),
+                headers=self._authorization_headers(),
+                timeout=10,
+            )
+            response.raise_for_status()
+            return True
+        except Exception as exc:
+            try:
+                log_with_context(
+                    logger,
+                    "WARNING",
+                    "[Telemetry] Snapshot upload failed | reason=%s",
+                    getattr(getattr(exc, "response", None), "status_code", exc),
+                    **_telemetry_log_context(endpoint=url),
+                )
+            except Exception:
+                pass
+            return False
+
+    def start_snapshot_loop(self, shutdown_event: threading.Event) -> None:
+        if getattr(self, "_snapshot_thread", None) is not None:
+            if self._snapshot_thread.is_alive():  # type: ignore[attr-defined]
+                return
+        if TELEMETRY_SNAPSHOT_SECONDS <= 0:
+            return
+
+        def _loop() -> None:
+            from core.dashboard import get_current_metrics
+
+            while not shutdown_event.is_set():
+                try:
+                    if not self._ensure_machine_registered():
+                        shutdown_event.wait(TELEMETRY_SNAPSHOT_SECONDS)
+                        continue
+                    metrics = get_current_metrics()
+                    snapshot = _snapshot_from_metrics(
+                        metrics,
+                        machine_id=self.machine_id or "",
+                        machine_name=self.machine_name,
+                        app_instance_id=self.app_id,
+                        client_version=CLIENT_VERSION,
+                    )
+                    self.send_snapshot(snapshot)
+                except Exception:
+                    pass
+                shutdown_event.wait(TELEMETRY_SNAPSHOT_SECONDS)
+
+        if can_spawn_thread("telemetry_snapshot"):
+            self._snapshot_thread = threading.Thread(
+                target=_loop,
+                name="telemetry_snapshot",
+                daemon=True,
+            )
+            self._snapshot_thread.start()
+        else:
+            logger.warning("[Telemetry] Skipping snapshot thread; at thread limit")
 
     def _sanity_check(self, conn: sqlite3.Connection) -> None:
         try:
@@ -1275,6 +1516,7 @@ def start_telemetry(
         _CLIENT = TelemetryClient(auth_token=auth_token)
     _CLIENT.start(shutdown_event)
     _CLIENT.start_control_polling(shutdown_event)
+    _CLIENT.start_snapshot_loop(shutdown_event)
     try:
         log_with_context(
             logger,
@@ -1397,10 +1639,8 @@ def check_seed_seen(seed_bytes: bytes, *, mode: str, range_id: Optional[str] = N
         url = TELEMETRY_CHECK_ENDPOINT or TELEMETRY_ENDPOINT
         timeout = TELEMETRY_CHECK_TIMEOUT or 1.5
         payload = {"seed_fingerprint": fp, "mode": mode, "range_id": range_id}
-        headers = {}
         auth_token = _CLIENT.auth_token if _CLIENT else _resolve_auth_token(None)
-        if auth_token:
-            headers["Authorization"] = f"Bearer {auth_token}"
+        headers = _telemetry_headers(auth_token)
         try:
             r = requests.post(url, json=payload, headers=headers, timeout=timeout)
         except Exception:

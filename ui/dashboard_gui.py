@@ -203,6 +203,8 @@ class DashboardGUI:
             "last_updated",
             "status",
             "download_progress",
+            "active_mode",
+            "global_run_state",
         }
         csv_stats = {
             "csv_checked_today",

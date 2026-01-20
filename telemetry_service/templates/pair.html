@@ -1,111 +1,59 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Telemetry Pairing</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        background: #0b0f19;
-        color: #f5f7ff;
-        display: flex;
-        justify-content: center;
-        padding: 48px 16px;
-      }
-      .card {
-        background: #141a2b;
-        border-radius: 12px;
-        padding: 24px;
-        width: 460px;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
-      }
-      h1 {
-        margin-top: 0;
-        font-size: 22px;
-      }
-      .meta {
-        font-size: 13px;
-        color: #c7d2fe;
-        margin-bottom: 16px;
-      }
-      .pair-code {
-        display: inline-block;
-        font-size: 20px;
-        letter-spacing: 3px;
-        padding: 8px 12px;
-        border-radius: 8px;
-        background: #0f1424;
-        border: 1px solid #2a3250;
-      }
-      button {
-        margin-top: 18px;
-        width: 100%;
-        padding: 10px 12px;
-        border: none;
-        border-radius: 8px;
-        background: #4f46e5;
-        color: white;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      .message {
-        margin-top: 16px;
-        font-size: 13px;
-        color: #93c5fd;
-        white-space: pre-wrap;
-      }
-      .error {
-        color: #fca5a5;
-      }
-      .disclosure {
-        margin-top: 20px;
-        font-size: 12px;
-        line-height: 1.5;
-        color: #cbd5f5;
-        background: #0f1424;
-        padding: 12px;
-        border-radius: 8px;
-        border: 1px solid #2a3250;
-      }
-      .disclosure ul {
-        margin: 8px 0 0 18px;
-        padding: 0;
-      }
-      .disclosure li {
-        margin-bottom: 6px;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>Approve telemetry pairing</h1>
-      <p class="meta">
-        Telemetry helps the AllInKeys maintainers understand aggregate usage so
-        we can improve performance and safety.
-      </p>
-      {% if pair_code %}
-      <p class="meta">Pairing code</p>
-      <div class="pair-code">{{ pair_code }}</div>
-      {% else %}
-      <p class="meta error">Missing pairing code. Return to the CLI and open the pairing URL again.</p>
-      {% endif %}
-      <form method="post" action="/pair/approve">
-        <input type="hidden" name="pair_code" value="{{ pair_code }}" />
-        <button type="submit" {% if not pair_code %}disabled{% endif %}>Approve Pairing</button>
-      </form>
-      {% if approved %}
-      <div class="message">Pairing approved. You can return to the CLI.</div>
-      {% elif error %}
-      <div class="message error">{{ error }}</div>
-      {% endif %}
-      <div class="disclosure">
-        <strong>Telemetry disclosure</strong>
-        <ul>
-          <li>Collects: anonymized seed fingerprints, range IDs, basic machine health, and timing metadata.</li>
-          <li>Does not collect: raw seeds, private keys, WIFs, or derived addresses.</li>
-          <li>To revoke access: delete the local telemetry token or run with <code>--no-telemetry</code> to stop sending events.</li>
-        </ul>
-      </div>
+{% extends "base.html" %}
+
+{% block title %}Telemetry Pairing{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>Approve telemetry pairing</h1>
+
+  <p class="meta">
+    Telemetry helps the AllInKeys maintainers understand aggregate usage so
+    we can improve performance and safety.
+  </p>
+
+  {% if pair_code %}
+    <p class="meta">Pairing code</p>
+    <div class="pair-code">{{ pair_code }}</div>
+  {% else %}
+    <p class="meta error">
+      Missing pairing code. Return to the CLI and open the pairing URL again.
+    </p>
+  {% endif %}
+
+  <form method="post" action="/pair/approve">
+    <input type="hidden" name="pair_code" value="{{ pair_code }}" />
+    <button
+      class="primary"
+      type="submit"
+      {% if not pair_code %}disabled{% endif %}
+    >
+      Approve Pairing
+    </button>
+  </form>
+
+  {% if approved %}
+    <div class="message">
+      Pairing approved. You can return to the CLI.
     </div>
-  </body>
-</html>
+  {% elif error %}
+    <div class="message error">{{ error }}</div>
+  {% endif %}
+
+  <div class="disclosure">
+    <strong>Telemetry disclosure</strong>
+    <ul>
+      <li>
+        Collects: anonymized seed fingerprints, range IDs, basic machine health,
+        and timing metadata.
+      </li>
+      <li>
+        Does not collect: raw seeds, private keys, WIFs, or derived addresses.
+      </li>
+      <li>
+        To revoke access: delete the local telemetry token or run with
+        <code>--no-telemetry</code>.
+      </li>
+    </ul>
+  </div>
+</div>
+{% endblock %}

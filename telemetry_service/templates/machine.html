@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Machine Control</title>
+{% extends "base.html" %}
+{% block title %}Machine Control{% endblock %}
+{% block head_extra %}
     <style>
       :root {
         color-scheme: dark;
@@ -11,9 +8,9 @@
         background: #0b0d12;
         color: #f6f7fb;
       }
-      body {
-        margin: 0;
+      main {
         padding: 32px 40px 64px;
+        display: block;
       }
       header {
         display: flex;
@@ -173,9 +170,26 @@
       .command-item.acknowledged {
         border-color: rgba(66, 186, 150, 0.4);
       }
+      .machine-charts {
+        margin-top: 28px;
+        padding: 16px;
+        border-radius: 12px;
+        background: #141a2b;
+        border: 1px solid #262c3b;
+      }
+      .machine-charts h2 {
+        margin: 0 0 12px 0;
+        font-size: 18px;
+      }
+      .machine-charts canvas {
+        width: 100%;
+        margin-top: 10px;
+        background: #0f1424;
+        border-radius: 8px;
+      }
     </style>
-  </head>
-  <body>
+{% endblock %}
+{% block content %}
     <header>
       <a class="nav-link" href="/dashboard/machines">Back to My Machines</a>
       <div>
@@ -200,6 +214,8 @@
       <div class="control-actions">
         <button type="button" data-command="pause">Pause</button>
         <button type="button" data-command="resume">Resume</button>
+        <button type="button" data-command="stop">Stop</button>
+        <button type="button" data-command="restart">Restart</button>
       </div>
 
       <form class="control-form" id="controlForm">
@@ -208,6 +224,8 @@
           <select name="command" id="commandSelect">
             <option value="pause">Pause</option>
             <option value="resume">Resume</option>
+            <option value="stop">Stop</option>
+            <option value="restart">Restart</option>
             <option value="set_mode">Set Mode</option>
             <option value="set_range">Set Range</option>
           </select>
@@ -227,6 +245,15 @@
       </div>
     </section>
 
+    <section class="machine-charts">
+      <h2>Performance History</h2>
+      <canvas id="kpsChart" width="560" height="140"></canvas>
+      <canvas id="cpuChart" width="560" height="140"></canvas>
+      <canvas id="ramChart" width="560" height="140"></canvas>
+    </section>
+
+{% endblock %}
+{% block scripts %}
     <script>
       const machineId = "{{ machine_id }}";
       const apiBase = "/api/machines";
@@ -243,6 +270,9 @@
       const commandSelect = document.getElementById("commandSelect");
       const commandValue = document.getElementById("commandValue");
       const controlForm = document.getElementById("controlForm");
+      const kpsChart = document.getElementById("kpsChart");
+      const cpuChart = document.getElementById("cpuChart");
+      const ramChart = document.getElementById("ramChart");
 
       const numberFormatter = new Intl.NumberFormat(undefined, {
         maximumFractionDigits: 2,
@@ -319,8 +349,36 @@
               <div>${numberFormatter.format(machine.keys_per_sec || 0)}</div>
             </div>
             <div>
+              <div class="meta-label">Mode</div>
+              <div>${machine.mode || "—"}</div>
+            </div>
+            <div>
+              <div class="meta-label">State</div>
+              <div>${machine.process_state || "—"}</div>
+            </div>
+            <div>
+              <div class="meta-label">CPU</div>
+              <div>${machine.cpu_percent ?? "—"}%</div>
+            </div>
+            <div>
+              <div class="meta-label">RAM</div>
+              <div>${machine.ram_percent ?? "—"}%</div>
+            </div>
+            <div>
+              <div class="meta-label">Disk Free</div>
+              <div>${machine.disk_free_percent ?? "—"}%</div>
+            </div>
+            <div>
+              <div class="meta-label">Last Error</div>
+              <div>${machine.last_error || "—"}</div>
+            </div>
+            <div>
               <div class="meta-label">Last Seen</div>
               <div>${formatDate(machine.last_seen)}</div>
+            </div>
+            <div>
+              <div class="meta-label">Last Activity</div>
+              <div>${formatDate(machine.last_activity)}</div>
             </div>
             <div>
               <div class="meta-label">Version</div>
@@ -330,6 +388,68 @@
         } catch (error) {
           machineSubtitle.textContent =
             "Unable to load machine details. Check your token.";
+        }
+      }
+
+      function drawSparkline(canvas, values, color) {
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!values.length) {
+          ctx.fillStyle = "#64748b";
+          ctx.fillText("No data yet", 10, 20);
+          return;
+        }
+        const width = canvas.width;
+        const height = canvas.height;
+        const maxVal = Math.max(...values, 1);
+        const minVal = Math.min(...values, 0);
+        const range = maxVal - minVal || 1;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        values.forEach((value, index) => {
+          const x = (index / Math.max(values.length - 1, 1)) * (width - 20) + 10;
+          const y = height - ((value - minVal) / range) * (height - 20) - 10;
+          if (index === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+      }
+
+      async function loadSnapshots() {
+        try {
+          const response = await fetch(`${apiBase}/${machineId}/snapshots?minutes=120`, {
+            headers: getAuthHeaders(),
+          });
+          if (!response.ok) {
+            throw new Error("Failed to load snapshots");
+          }
+          const data = await response.json();
+          const points = Array.isArray(data.points) ? data.points : [];
+          drawSparkline(
+            kpsChart,
+            points.map((p) => p.keys_per_sec || 0),
+            "#38bdf8"
+          );
+          drawSparkline(
+            cpuChart,
+            points.map((p) => p.cpu_percent || 0),
+            "#f97316"
+          );
+          drawSparkline(
+            ramChart,
+            points.map((p) => p.ram_percent || 0),
+            "#a78bfa"
+          );
+        } catch (error) {
+          drawSparkline(kpsChart, [], "#38bdf8");
+          drawSparkline(cpuChart, [], "#f97316");
+          drawSparkline(ramChart, [], "#a78bfa");
         }
       }
 
@@ -398,6 +518,7 @@
       refreshButton.addEventListener("click", () => {
         fetchMachine();
         loadCommands();
+        loadSnapshots();
       });
 
       controlForm.addEventListener("submit", async (event) => {
@@ -423,10 +544,11 @@
       commandSelect.addEventListener("change", updateValueField);
       fetchMachine();
       loadCommands();
+      loadSnapshots();
       setInterval(() => {
         fetchMachine();
         loadCommands();
+        loadSnapshots();
       }, 10000);
     </script>
-  </body>
-</html>
+{% endblock %}

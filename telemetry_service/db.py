@@ -127,6 +127,17 @@ def get_db_connection() -> sqlite3.Connection:
         "version": "TEXT",
         "status": "TEXT",
         "last_seen": "TIMESTAMP",
+        "keys_per_sec": "REAL",
+        "total_keys": "REAL",
+        "uptime_seconds": "REAL",
+        "mode": "TEXT",
+        "process_state": "TEXT",
+        "cpu_percent": "REAL",
+        "ram_percent": "REAL",
+        "disk_free_percent": "REAL",
+        "gpu_load_percent": "REAL",
+        "last_error": "TEXT",
+        "last_activity": "TEXT",
     }
     for name, col_type in optional_machine_columns.items():
         if name not in machine_columns:
@@ -172,6 +183,36 @@ def get_db_connection() -> sqlite3.Connection:
         """
         CREATE INDEX IF NOT EXISTS idx_pairing_code
         ON pairing_requests(pair_code)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS machine_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            timestamp TEXT NOT NULL,
+            payload TEXT,
+            keys_per_sec REAL,
+            total_keys REAL,
+            uptime_seconds REAL,
+            mode TEXT,
+            process_state TEXT,
+            cpu_percent REAL,
+            ram_percent REAL,
+            disk_free_percent REAL,
+            gpu_load_percent REAL,
+            last_error TEXT,
+            last_activity TEXT,
+            FOREIGN KEY(machine_id) REFERENCES machines(id),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_machine_snapshots_machine_time
+        ON machine_snapshots(machine_id, timestamp)
         """
     )
     return conn

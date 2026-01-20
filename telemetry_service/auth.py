@@ -8,7 +8,10 @@ from passlib.context import CryptContext
 
 from config.telemetry import JWT_SECRET, TOKEN_EXPIRY
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["pbkdf2_sha256", "bcrypt"],
+    deprecated="auto",
+)
 ALGORITHM = "HS256"
 
 

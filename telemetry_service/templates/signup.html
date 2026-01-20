@@ -1,120 +1,65 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Telemetry Signup</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        background: #0b0f19;
-        color: #f5f7ff;
-        display: flex;
-        justify-content: center;
-        padding: 48px 16px;
-      }
-      .card {
-        background: #141a2b;
-        border-radius: 12px;
-        padding: 24px;
-        width: 460px;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
-      }
-      h1 {
-        margin-top: 0;
-        font-size: 22px;
-      }
-      label {
-        display: block;
-        margin-top: 14px;
-        font-size: 13px;
-        color: #c7d2fe;
-      }
-      input {
-        width: 100%;
-        margin-top: 6px;
-        padding: 10px 12px;
-        border-radius: 8px;
-        border: 1px solid #2a3250;
-        background: #0f1424;
-        color: #f5f7ff;
-      }
-      button {
-        margin-top: 18px;
-        width: 100%;
-        padding: 10px 12px;
-        border: none;
-        border-radius: 8px;
-        background: #4f46e5;
-        color: white;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      .message {
-        margin-top: 16px;
-        font-size: 13px;
-        color: #93c5fd;
-        white-space: pre-wrap;
-      }
-      .error {
-        color: #fca5a5;
-      }
-      .disclosure {
-        margin-top: 20px;
-        font-size: 12px;
-        line-height: 1.5;
-        color: #cbd5f5;
-        background: #0f1424;
-        padding: 12px;
-        border-radius: 8px;
-        border: 1px solid #2a3250;
-      }
-      .disclosure ul {
-        margin: 8px 0 0 18px;
-        padding: 0;
-      }
-      .disclosure li {
-        margin-bottom: 6px;
-      }
-      .link {
-        margin-top: 14px;
-        font-size: 13px;
-      }
-      a {
-        color: #93c5fd;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>Create a telemetry account</h1>
-      <p class="message">
-        Telemetry lets you view your own multi-machine dashboard and pair new
-        machines securely using a browser.
-      </p>
-      <form method="post" action="/signup">
-        <input type="hidden" name="next" value="{{ next }}" />
-        <input type="hidden" name="code" value="{{ code or '' }}" />
-        <label for="username">Username</label>
-        <input id="username" name="username" autocomplete="username" value="{{ username or '' }}" />
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="new-password" />
-        <button type="submit">Create account</button>
-      </form>
-      {% if error %}
-      <div class="message error">{{ error }}</div>
-      {% endif %}
-      <div class="link">
-        Already have an account?
-        <a href="/login?next={{ next }}{% if code %}&code={{ code }}{% endif %}">Log in</a>
-      </div>
-      <div class="disclosure">
-        <strong>Telemetry disclosure</strong>
-        <ul>
-          <li>Collects: anonymized seed fingerprints, range IDs, basic machine health, and timing metadata.</li>
-          <li>Does not collect: raw seeds, private keys, WIFs, or derived addresses.</li>
-          <li>To revoke access: delete the local telemetry token or run with <code>--no-telemetry</code> to stop sending events.</li>
-        </ul>
-      </div>
-    </div>
-  </body>
-</html>
+{% extends "base.html" %}
+
+{% block title %}Telemetry Signup{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>Create a telemetry account</h1>
+
+  <p class="message">
+    Telemetry lets you view your own multi-machine dashboard and pair new
+    machines securely using a browser.
+  </p>
+
+  <form method="post" action="/signup">
+    <input type="hidden" name="next" value="{{ next }}" />
+    <input type="hidden" name="code" value="{{ code }}" />
+
+    <label for="username">Username</label>
+    <input
+      id="username"
+      name="username"
+      autocomplete="username"
+      value="{{ username or '' }}"
+      required
+    />
+
+    <label for="password">Password</label>
+    <input
+      id="password"
+      name="password"
+      type="password"
+      autocomplete="new-password"
+      required
+    />
+
+    <button class="primary" type="submit">Create account</button>
+  </form>
+
+  {% if error %}
+    <div class="message error">{{ error }}</div>
+  {% endif %}
+
+  <div class="link">
+    Already have an account?
+    <a href="{{ login_url }}">Log in</a>
+  </div>
+
+  <div class="disclosure">
+    <strong>Telemetry disclosure</strong>
+    <ul>
+      <li>
+        Collects: anonymized seed fingerprints, range IDs, basic machine health,
+        and timing metadata.
+      </li>
+      <li>
+        Does not collect: raw seeds, private keys, WIFs, or derived addresses.
+      </li>
+      <li>
+        To revoke access: delete the local telemetry token or run with
+        <code>--no-telemetry</code>.
+      </li>
+    </ul>
+  </div>
+</div>
+{% endblock %}

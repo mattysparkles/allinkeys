@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
-from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -25,6 +24,7 @@ from telemetry_service.routes.dashboard import router as dashboard_router
 from telemetry_service.routes.admin import router as admin_router
 from telemetry_service.routes.auth_ui import router as auth_ui_router
 from telemetry_service.routes.machines import router as machines_router
+from telemetry_service.routes.auth_ui import router as auth_ui_router
 from telemetry_service.routes.pairing import router as pairing_router
 from telemetry_service.routes.pairing import ui_router as pairing_ui_router
 from telemetry_service.models import (
@@ -149,13 +149,14 @@ class CheckResponse(BaseModel):
 
 
 app = FastAPI(title="AllInKeys Central Telemetry")
-app.include_router(machines_router, prefix="/v1/machines")
-app.include_router(machines_router, prefix="/api/machines")
+app.include_router(auth_ui_router)
+app.include_router(pairing_ui_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(auth_ui_router)
 app.include_router(pairing_router)
-app.include_router(pairing_ui_router)
+app.include_router(machines_router, prefix="/v1/machines")
+app.include_router(machines_router, prefix="/api/machines")
 app.mount(
     "/static",
     StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
@@ -168,11 +169,18 @@ def _expected_api_key() -> Optional[str]:
     return value or None
 
 
+# Pairing endpoints are intentionally public to allow token issuance.
+# Do not secure them with API keys or auth middleware.
+PUBLIC_PAIR_ENDPOINTS = {"/v1/pair/init", "/v1/pair/status", "/v1/pair/claim"}
+
+
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
     path = request.url.path
     if path.startswith("/v1"):
         if path.startswith("/v1/dashboard"):
+            return await call_next(request)
+        if path in PUBLIC_PAIR_ENDPOINTS or path.startswith("/v1/pair/"):
             return await call_next(request)
         expected = _expected_api_key()
         if expected:
@@ -230,9 +238,21 @@ def register_user(payload: UserCreate) -> TokenResponse:
     tags=["Auth"],
     description="Authenticate and receive an access token.",
 )
-def login_user(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-) -> TokenResponse:
+async def login_user(request: Request) -> TokenResponse:
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/json" in content_type:
+        payload = await request.json()
+        username = (payload or {}).get("username")
+        password = (payload or {}).get("password")
+    else:
+        form = await request.form()
+        username = form.get("username")
+        password = form.get("password")
+    if not username or not password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username and password required",
+        )
     conn = get_db_connection()
     try:
         row = conn.execute(
@@ -241,16 +261,16 @@ def login_user(
             FROM users
             WHERE username = ?
             """,
-            (form_data.username,),
+            (str(username),),
         ).fetchone()
-        if not row or not verify_password(form_data.password, row[1]):
+        if not row or not verify_password(str(password), row[1]):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect username or password",
             )
     finally:
         conn.close()
-    token = create_access_token(subject=form_data.username)
+    token = create_access_token(subject=str(username))
     return TokenResponse(access_token=token, expires_in=TOKEN_EXPIRY * 60)
 
 
@@ -261,6 +281,16 @@ def login_user(
     description="Return the currently authenticated user.",
 )
 def get_me(current_user: UserPublic = Depends(get_current_user)) -> UserPublic:
+    return current_user
+
+
+@app.get(
+    "/v1/me",
+    response_model=UserPublic,
+    tags=["Auth"],
+    description="Return the currently authenticated user.",
+)
+def get_me_v1(current_user: UserPublic = Depends(get_current_user)) -> UserPublic:
     return current_user
 
 

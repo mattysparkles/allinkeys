@@ -20,6 +20,12 @@ The wizard will:
 2. Let you paste an existing token, pair via browser, or disable telemetry.
 3. Store your token locally so future runs “just work.”
 
+Public pairing requires no API key. API keys are intended for private/on-prem
+telemetry deployments only. The public SparkleServer telemetry service does not
+require `TELEMETRY_API_KEY` for pairing or telemetry. If your private telemetry
+service requires an API key, set `TELEMETRY_API_KEY` in the environment so the
+client can include the `X-API-Key` header during pairing and telemetry requests.
+
 ## Token storage (local-only)
 
 Telemetry tokens are stored locally at:
@@ -107,11 +113,29 @@ to `config/local_telemetry.json`.
 If you choose “Pair this machine via browser” in the wizard:
 
 1. The client requests a pairing code from `/v1/pair/init`.
-2. You open the provided pairing URL. If you are not signed in, you are
-   redirected to `/login` or `/signup`.
-3. Approve the pairing request. The machine polls `/v1/pair/status` until
-   approved and receives a token.
-4. The token is stored locally and the machine is registered automatically.
+2. You open the pairing URL. If you are not signed in, you are redirected to
+   `/login` or `/signup`.
+3. After authentication, approve the pairing code at `/pair`.
+4. The machine polls `/v1/pair/status` until approved and receives a token.
+5. The token is stored locally and the machine is registered automatically.
+
+## User login and signup
+
+The telemetry UI exposes simple authentication pages:
+
+- `/signup` creates a user and immediately starts a session.
+- `/login` signs in with existing credentials.
+- `/logout` clears the session.
+
+Use the `next` query parameter to return to the original page after
+authentication (pairing uses `next=/pair` automatically).
+
+## Dashboard access
+
+The authenticated dashboard UI lives at:
+
+- `/dashboard/machines` for the machine list
+- `/dashboard/machine/{machine_id}` for details and control
 
 ## Token lifecycle
 
