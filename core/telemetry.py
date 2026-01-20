@@ -1032,6 +1032,17 @@ class TelemetryClient:
                 timeout=10,
             )
             response.raise_for_status()
+            try:
+                log_with_context(
+                    logger,
+                    "INFO",
+                    "[Telemetry] Snapshot uploaded | machine_id=%s status=%s",
+                    self.machine_id,
+                    response.status_code,
+                    **_telemetry_log_context(endpoint=url),
+                )
+            except Exception:
+                pass
             return True
         except Exception as exc:
             try:

@@ -74,6 +74,27 @@ The pairing URL serves a small HTML page at `/pair` that lets a user approve a
 pairing code. Tokens returned from pairing are secrets and should be treated
 like passwords.
 
+## Machine snapshots
+
+When the client collects runtime and resource metrics it uploads a snapshot
+for the registered machine. The endpoint returns the current
+`MachineSummary` so dashboards stay in sync with the uploader.
+
+* `POST /v1/machines/{machine_id}/snapshot`
+  * Accepts the telemetry snapshot payload (see `telemetry_contract.py` for
+    schema details).
+  * The server also accepts `PUT` for backward compatibility; `POST` is preferred.
+  * Requires a bearer token (and optionally `X-API-Key` in private deployments).
+
+Example:
+
+```bash
+curl -X POST http://localhost:3088/v1/machines/<machine_id>/snapshot \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"identity": {...}, "runtime": {...}, "resources": {...}}'
+```
+
 ## Seed analytics endpoints
 
 ### `GET /v1/seed/stats`
