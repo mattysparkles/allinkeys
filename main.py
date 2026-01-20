@@ -9,6 +9,7 @@ import subprocess
 import config.settings as settings
 from config.settings import find_vanitysearch_binary
 from core.modes import btc_only, vanity, mnemonic
+from core.logger import get_logger
 
 # Wrap stdout once with UTF-8 encoding if not already wrapped
 if not isinstance(sys.stdout, io.TextIOWrapper):
@@ -27,6 +28,8 @@ PLUGIN_REGISTRY = {
     "vanity": vanity,
     "mnemonic": mnemonic,
 }
+
+logger = get_logger(__name__)
 
 
 def _parse_only(value: str) -> list[str]:
@@ -79,9 +82,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="AllInKeys Modular Runner")
     parser.add_argument(
         "--mode",
-        default="btc_only",
+        default="vanity",
         choices=sorted(PLUGIN_REGISTRY.keys()),
-        help="Select the execution mode (default: btc_only)",
+        help="Select the execution mode (default: vanity)",
     )
     parser.add_argument(
         "--skip-backlog", action="store_true", help="Skip backlog conversion on startup"
@@ -408,6 +411,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.mode not in PLUGIN_REGISTRY:
         print(f"Unknown mode '{args.mode}'.", file=sys.stderr)
         return 2
+
+    missing_integrations = settings.get_missing_optional_integrations()
+    if missing_integrations:
+        import multiprocessing as mp
+
+        if mp.current_process().name == "MainProcess":
+            logger.info(
+                "[Startup] Optional integrations disabled: %s. Configure them later in config/settings.py.",
+                ", ".join(missing_integrations),
+            )
+
+    logger.info("[Startup] Mode selected: %s", args.mode)
+    if args.mode == "vanity":
+        logger.info("[Startup] VanitySearch/keygen pipeline enabled")
+        if settings.ENABLE_BACKLOG_CONVERSION and not getattr(args, "skip_backlog", False):
+            logger.info("[Startup] Altcoin derive pipeline enabled")
+        if settings.ENABLE_DAY_ONE_CHECK or settings.ENABLE_UNIQUE_RECHECK:
+            logger.info("[Startup] CSV checking pipeline enabled")
+    elif args.mode == "btc_only":
+        logger.info("[Startup] BTC-only VanitySearch pipeline enabled")
+    elif args.mode == "mnemonic":
+        logger.info("[Startup] Mnemonic derivation pipeline enabled")
 
     shared_metrics = None
     result = PLUGIN_REGISTRY[args.mode].start(shared_metrics, args)

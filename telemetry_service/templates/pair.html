@@ -1,19 +1,59 @@
 {% extends "base.html" %}
+
 {% block title %}Telemetry Pairing{% endblock %}
+
 {% block content %}
 <div class="card">
-  <h1>Approve this machine</h1>
-  <p>Enter the pairing code shown in the CLI to approve the request.</p>
+  <h1>Approve telemetry pairing</h1>
+
+  <p class="meta">
+    Telemetry helps the AllInKeys maintainers understand aggregate usage so
+    we can improve performance and safety.
+  </p>
+
+  {% if pair_code %}
+    <p class="meta">Pairing code</p>
+    <div class="pair-code">{{ pair_code }}</div>
+  {% else %}
+    <p class="meta error">
+      Missing pairing code. Return to the CLI and open the pairing URL again.
+    </p>
+  {% endif %}
+
   <form method="post" action="/pair/approve">
-    <label for="pair_code">Pairing Code</label>
-    <input
-      id="pair_code"
-      name="pair_code"
-      placeholder="ABC123"
-      value="{{ pair_code }}"
-      required
-    />
-    <button class="primary" type="submit">Approve this machine</button>
+    <input type="hidden" name="pair_code" value="{{ pair_code }}" />
+    <button
+      class="primary"
+      type="submit"
+      {% if not pair_code %}disabled{% endif %}
+    >
+      Approve Pairing
+    </button>
   </form>
+
+  {% if approved %}
+    <div class="message">
+      Pairing approved. You can return to the CLI.
+    </div>
+  {% elif error %}
+    <div class="message error">{{ error }}</div>
+  {% endif %}
+
+  <div class="disclosure">
+    <strong>Telemetry disclosure</strong>
+    <ul>
+      <li>
+        Collects: anonymized seed fingerprints, range IDs, basic machine health,
+        and timing metadata.
+      </li>
+      <li>
+        Does not collect: raw seeds, private keys, WIFs, or derived addresses.
+      </li>
+      <li>
+        To revoke access: delete the local telemetry token or run with
+        <code>--no-telemetry</code>.
+      </li>
+    </ul>
+  </div>
 </div>
 {% endblock %}

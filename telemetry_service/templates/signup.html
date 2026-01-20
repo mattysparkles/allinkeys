@@ -1,17 +1,29 @@
 {% extends "base.html" %}
+
 {% block title %}Telemetry Signup{% endblock %}
+
 {% block content %}
 <div class="card">
-  <h1>Create Telemetry Account</h1>
-  <p class="hint">
-    Telemetry provides a dashboard view of aggregate key search coverage
-    and machine health. It does not collect private keys or seed phrases.
+  <h1>Create a telemetry account</h1>
+
+  <p class="message">
+    Telemetry lets you view your own multi-machine dashboard and pair new
+    machines securely using a browser.
   </p>
+
   <form method="post" action="/signup">
     <input type="hidden" name="next" value="{{ next }}" />
     <input type="hidden" name="code" value="{{ code }}" />
-    <label for="username">Username or email</label>
-    <input id="username" name="username" autocomplete="username" required />
+
+    <label for="username">Username</label>
+    <input
+      id="username"
+      name="username"
+      autocomplete="username"
+      value="{{ username or '' }}"
+      required
+    />
+
     <label for="password">Password</label>
     <input
       id="password"
@@ -20,13 +32,34 @@
       autocomplete="new-password"
       required
     />
-    <button class="primary" type="submit">Sign up</button>
+
+    <button class="primary" type="submit">Create account</button>
   </form>
+
   {% if error %}
-  <div class="message">{{ error }}</div>
+    <div class="message error">{{ error }}</div>
   {% endif %}
+
   <div class="link">
-    Already have an account? <a href="{{ login_url }}">Log in</a>.
+    Already have an account?
+    <a href="{{ login_url }}">Log in</a>
+  </div>
+
+  <div class="disclosure">
+    <strong>Telemetry disclosure</strong>
+    <ul>
+      <li>
+        Collects: anonymized seed fingerprints, range IDs, basic machine health,
+        and timing metadata.
+      </li>
+      <li>
+        Does not collect: raw seeds, private keys, WIFs, or derived addresses.
+      </li>
+      <li>
+        To revoke access: delete the local telemetry token or run with
+        <code>--no-telemetry</code>.
+      </li>
+    </ul>
   </div>
 </div>
 {% endblock %}

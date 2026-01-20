@@ -22,6 +22,7 @@ from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
 from telemetry_service.routes.dashboard import router as dashboard_router
 from telemetry_service.routes.admin import router as admin_router
+from telemetry_service.routes.auth_ui import router as auth_ui_router
 from telemetry_service.routes.machines import router as machines_router
 from telemetry_service.routes.auth_ui import router as auth_ui_router
 from telemetry_service.routes.pairing import router as pairing_router
@@ -152,6 +153,7 @@ app.include_router(auth_ui_router)
 app.include_router(pairing_ui_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
+app.include_router(auth_ui_router)
 app.include_router(pairing_router)
 app.include_router(machines_router, prefix="/v1/machines")
 app.include_router(machines_router, prefix="/api/machines")

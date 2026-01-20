@@ -19,11 +19,15 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 router = APIRouter()
 
 
+# ─────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────
+
 def _sanitize_next(next_path: str | None) -> str:
     if not next_path:
-        return "/"
+        return "/dashboard/machines"
     if not next_path.startswith("/") or next_path.startswith("//"):
-        return "/"
+        return "/dashboard/machines"
     return next_path
 
 
@@ -45,6 +49,10 @@ def _next_with_code(next_path: str, code: str | None) -> str:
 def _secure_cookie(request: Request) -> bool:
     return request.url.scheme == "https"
 
+
+# ─────────────────────────────────────────────────────────────
+# Pages
+# ─────────────────────────────────────────────────────────────
 
 @router.api_route(
     "/",
@@ -117,10 +125,12 @@ def login_action(
         ).fetchone()
     finally:
         conn.close()
+
     try:
         valid = bool(row and verify_password(password, row[1]))
     except Exception:
         valid = False
+
     if not valid:
         return templates.TemplateResponse(
             "login.html",
@@ -133,6 +143,7 @@ def login_action(
                 "signup_url": _with_query("/signup", {"next": safe_next, "code": code}),
             },
         )
+
     token = create_access_token(subject=row[0])
     response = RedirectResponse(
         _next_with_code(safe_next, code),
@@ -189,6 +200,7 @@ def signup_action(
 ) -> HTMLResponse:
     safe_next = _sanitize_next(next)
     normalized_username = username.strip()
+
     if not normalized_username:
         return templates.TemplateResponse(
             "signup.html",
@@ -201,6 +213,7 @@ def signup_action(
                 "login_url": _with_query("/login", {"next": safe_next, "code": code}),
             },
         )
+
     if len(password.encode("utf-8")) > 72:
         return templates.TemplateResponse(
             "signup.html",
@@ -213,24 +226,10 @@ def signup_action(
                 "login_url": _with_query("/login", {"next": safe_next, "code": code}),
             },
         )
+
     conn = get_db_connection()
     try:
-        try:
-            password_hash = hash_password(password)
-        except Exception:
-            return templates.TemplateResponse(
-                "signup.html",
-                {
-                    "request": request,
-                    "error": "Unable to process password. Try a shorter one.",
-                    "next": safe_next,
-                    "code": code.strip().upper(),
-                    "current_user": None,
-                    "login_url": _with_query(
-                        "/login", {"next": safe_next, "code": code}
-                    ),
-                },
-            )
+        password_hash = hash_password(password)
         try:
             conn.execute(
                 "INSERT INTO users (username, password_hash) VALUES (?, ?)",
@@ -251,6 +250,7 @@ def signup_action(
             )
     finally:
         conn.close()
+
     token = create_access_token(subject=normalized_username)
     response = RedirectResponse(
         _next_with_code(safe_next, code),
