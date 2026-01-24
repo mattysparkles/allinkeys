@@ -403,8 +403,14 @@ def main(argv: list[str] | None = None) -> int:
     handle_deprecated_flags(args)
 
     argv_list = list(argv) if argv is not None else sys.argv[1:]
-    if getattr(args, "mnemonic", False) and "--mode" not in argv_list:
-        args.mode = "mnemonic"
+    explicit_mode = "--mode" in argv_list
+    if not explicit_mode:
+        if getattr(args, "mnemonic", False):
+            args.mode = "mnemonic"
+        elif getattr(args, "only", None):
+            args.mode = "btc_only"
+        elif getattr(args, "puzzle", None) is not None:
+            args.mode = "btc_only"
 
     handle_puzzle_mode(args)
 
