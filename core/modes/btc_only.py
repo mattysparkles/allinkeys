@@ -50,20 +50,36 @@ def start(shared_metrics, args):
         # ``gpu_assignments.json`` file is always created.
         assign_gpu_roles(getattr(args, "gpu_index", None))
 
-        if shared_metrics is None:
-            shared_metrics = init_dashboard_manager()
-        try:
-            from core.dashboard import set_metric
-            set_metric("active_mode", "btc_only")
-            set_metric("global_run_state", "running")
-        except Exception:
-            pass
         shutdown_keygen = multiprocessing.Event()
         pause_keygen = multiprocessing.Event()
         shutdown_btc = multiprocessing.Event()
         pause_btc = multiprocessing.Event()
         shutdown_metrics = multiprocessing.Event()
         vanity_gpu_flag = multiprocessing.Value("i", 1)
+        if shared_metrics is None:
+            shared_metrics = init_dashboard_manager()
+        try:
+            from core.dashboard import register_control_events, set_metric, set_thread_health
+
+            set_metric("active_mode", "btc_only")
+            set_metric("global_run_state", "running")
+            set_metric("gpu_assignment", "vanity")
+            set_metric("vanity_gpu_on", True)
+            set_metric("altcoin_gpu_on", False)
+            set_metric("status.keygen", "Running")
+            set_metric("status.csv_check", "Running")
+            set_metric("status.csv_recheck", "Stopped")
+            set_metric("status.backlog", "Stopped")
+            set_metric("status.altcoin", "Stopped")
+            set_thread_health("keygen", True)
+            set_thread_health("csv_check", True)
+            set_thread_health("csv_recheck", False)
+            set_thread_health("backlog", False)
+            set_thread_health("altcoin", False)
+            register_control_events(shutdown_keygen, pause_keygen, module="keygen")
+            register_control_events(shutdown_btc, pause_btc, module="csv_check")
+        except Exception:
+            pass
 
         processes = []
         from core.logger import log_queue
