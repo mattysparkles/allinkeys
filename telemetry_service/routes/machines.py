@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import uuid4
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 
-from telemetry_contract import MachineTelemetrySnapshot
 from telemetry_service.db import get_db_connection
 from telemetry_service.dependencies import get_current_user, get_machine_for_user
-from telemetry_service.error_logging import log_ingest_error
+from telemetry_service.error_logging import log_ingest_error, log_raw_snapshot
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
 from telemetry_service.models import (
@@ -55,6 +56,19 @@ def _status_from_last_seen(last_seen: Optional[str], now: datetime) -> str:
     if delta > timedelta(seconds=60):
         return "stalled"
     return "online"
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ensure_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _get_machine_for_user_or_admin(
@@ -193,15 +207,17 @@ def register_machine(
 def _persist_snapshot(
     *,
     conn: sqlite3.Connection,
-    snapshot: MachineTelemetrySnapshot,
+    snapshot: dict[str, Any],
+    raw_payload: str,
     machine_id: str,
     user_id: int,
     machine_name: str,
     gpu_info: Optional[str],
     version: Optional[str],
 ) -> None:
-    runtime = snapshot.runtime
-    resources = snapshot.resources
+    runtime = _ensure_dict(snapshot.get("runtime"))
+    resources = _ensure_dict(snapshot.get("resources"))
+    timestamp_iso = snapshot.get("timestamp_iso") or datetime.utcnow().isoformat() + "Z"
     conn.execute(
         """
         INSERT INTO machine_snapshots (
@@ -214,19 +230,19 @@ def _persist_snapshot(
         (
             machine_id,
             user_id,
-            snapshot.timestamp_iso,
-            snapshot.json(),
-            runtime.keys_per_sec,
-            runtime.total_keys,
-            runtime.uptime_seconds,
-            runtime.mode,
-            runtime.process_state,
-            resources.cpu_percent,
-            resources.ram_percent,
-            resources.disk_free_percent,
-            resources.gpu_load_percent,
-            runtime.last_error,
-            runtime.last_activity_ts,
+            timestamp_iso,
+            raw_payload or "",
+            _safe_float(runtime.get("keys_per_sec")),
+            _safe_float(runtime.get("total_keys")),
+            _safe_float(runtime.get("uptime_seconds")),
+            runtime.get("mode"),
+            runtime.get("process_state"),
+            _safe_float(resources.get("cpu_percent")),
+            _safe_float(resources.get("ram_percent")),
+            _safe_float(resources.get("disk_free_percent")),
+            _safe_float(resources.get("gpu_load_percent")),
+            runtime.get("last_error"),
+            runtime.get("last_activity_ts"),
         ),
     )
     conn.execute(
@@ -254,18 +270,18 @@ def _persist_snapshot(
             machine_name,
             gpu_info,
             version,
-            snapshot.timestamp_iso,
-            runtime.keys_per_sec,
-            runtime.total_keys,
-            runtime.uptime_seconds,
-            runtime.mode,
-            runtime.process_state,
-            resources.cpu_percent,
-            resources.ram_percent,
-            resources.disk_free_percent,
-            resources.gpu_load_percent,
-            runtime.last_error,
-            runtime.last_activity_ts,
+            timestamp_iso,
+            _safe_float(runtime.get("keys_per_sec")),
+            _safe_float(runtime.get("total_keys")),
+            _safe_float(runtime.get("uptime_seconds")),
+            runtime.get("mode"),
+            runtime.get("process_state"),
+            _safe_float(resources.get("cpu_percent")),
+            _safe_float(resources.get("ram_percent")),
+            _safe_float(resources.get("disk_free_percent")),
+            _safe_float(resources.get("gpu_load_percent")),
+            runtime.get("last_error"),
+            runtime.get("last_activity_ts"),
             machine_id,
         ),
     )
@@ -320,40 +336,61 @@ def ingest_machine_telemetry(
     response_model=MachineSummary,
     summary="Ingest a telemetry snapshot for a machine.",
 )
-def ingest_machine_snapshot(
+async def ingest_machine_snapshot(
     machine_id: str,
-    payload: MachineTelemetrySnapshot,
+    request: Request,
     current_user: UserPublic = Depends(get_current_user),
 ) -> MachineSummary:
     machine = get_machine_for_user(machine_id, current_user)
-    machine_name = payload.identity.machine_name or machine.get("machine_name") or machine_id
-    gpu_info = payload.resources.gpu_name or machine.get("gpu_info")
-    version = payload.identity.client_version or machine.get("version")
+    machine_name = machine.get("machine_name") or machine_id
+    gpu_info = machine.get("gpu_info")
+    version = machine.get("version")
+    timestamp_iso = datetime.utcnow().isoformat() + "Z"
 
     conn = get_db_connection()
+    payload_text = ""
+    snapshot_dict: dict[str, Any] = {}
+    identity_data: dict[str, Any] = {}
+    runtime_data: dict[str, Any] = {}
+    resources_data: dict[str, Any] = {}
     try:
+        raw_body = await request.body()
+        payload_text = raw_body.decode("utf-8", errors="replace")
+        log_raw_snapshot(payload=payload_text, machine_id=machine_id)
+        if payload_text.strip():
+            parsed = json.loads(payload_text)
+            if isinstance(parsed, dict):
+                snapshot_dict = parsed
+        identity_data = _ensure_dict(snapshot_dict.get("identity"))
+        runtime_data = _ensure_dict(snapshot_dict.get("runtime"))
+        resources_data = _ensure_dict(snapshot_dict.get("resources"))
+        machine_name = identity_data.get("machine_name") or machine_name
+        gpu_info = resources_data.get("gpu_name") or gpu_info
+        version = identity_data.get("client_version") or version
+        timestamp_iso = snapshot_dict.get("timestamp_iso") or timestamp_iso
+
         with conn:
             _persist_snapshot(
                 conn=conn,
-                snapshot=payload,
+                snapshot=snapshot_dict,
+                raw_payload=payload_text,
                 machine_id=machine_id,
                 user_id=current_user.id,
                 machine_name=machine_name,
                 gpu_info=gpu_info,
                 version=version,
             )
-    except Exception as exc:  # pragma: no cover (diagnostic capture)
+    except HTTPException:
+        raise
+    except Exception as exc:
         log_ingest_error(
             context="ingest_machine_snapshot",
             exc=exc,
-            payload=payload.dict(),
+            payload=payload_text,
             tables=["machine_snapshots", "machines"],
             conn=conn,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to ingest snapshot",
-        ) from exc
+        return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
     finally:
         conn.close()
 
@@ -362,16 +399,16 @@ def ingest_machine_snapshot(
             "user_id": current_user.id,
             "machine_id": machine_id,
             "machine_name": machine_name,
-            "last_seen": payload.timestamp_iso,
-            "cpu_percent": payload.resources.cpu_percent,
-            "ram_percent": payload.resources.ram_percent,
-            "disk_free_percent": payload.resources.disk_free_percent,
-            "gpu_load_percent": payload.resources.gpu_load_percent,
-            "gpu_name": payload.resources.gpu_name,
-            "time_to_disk_full": payload.resources.time_to_disk_full,
-            "keys_per_sec": payload.runtime.keys_per_sec,
-            "mode": payload.runtime.mode,
-            "process_state": payload.runtime.process_state,
+            "last_seen": timestamp_iso,
+            "cpu_percent": _safe_float(resources_data.get("cpu_percent")),
+            "ram_percent": _safe_float(resources_data.get("ram_percent")),
+            "disk_free_percent": _safe_float(resources_data.get("disk_free_percent")),
+            "gpu_load_percent": _safe_float(resources_data.get("gpu_load_percent")),
+            "gpu_name": resources_data.get("gpu_name"),
+            "time_to_disk_full": resources_data.get("time_to_disk_full"),
+            "keys_per_sec": _safe_float(runtime_data.get("keys_per_sec")),
+            "mode": runtime_data.get("mode"),
+            "process_state": runtime_data.get("process_state"),
         }
     try:
         logger.info(
@@ -379,7 +416,7 @@ def ingest_machine_snapshot(
             current_user.id,
             machine_id,
             machine_name,
-            payload.runtime.keys_per_sec,
+            _safe_float(runtime_data.get("keys_per_sec")),
         )
     except Exception:
         pass

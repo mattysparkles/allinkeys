@@ -4,20 +4,21 @@ import json
 import sqlite3
 import traceback
 from datetime import datetime
+
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from config.directories import LOG_DIR
 
 ERROR_LOG_PATH = Path(LOG_DIR) / "telemetry_ingest_errors.log"
+SNAPSHOT_LOG_PATH = Path(LOG_DIR) / "telemetry_snapshot_payloads.log"
 
 
-def _ensure_log_dir() -> None:
+def _ensure_log_dir(path: Path) -> None:
     try:
-        ERROR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
-
 
 def _collect_schema(conn: sqlite3.Connection, table: str) -> Any:
     try:
@@ -50,7 +51,7 @@ def log_ingest_error(
 ) -> None:
     """Persist diagnostics for telemetry ingest failures."""
 
-    _ensure_log_dir()
+    _ensure_log_dir(ERROR_LOG_PATH)
     payload_json = None
     try:
         payload_json = json.dumps(payload, default=str, ensure_ascii=False, indent=2)
@@ -73,6 +74,23 @@ def log_ingest_error(
     }
     try:
         with ERROR_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False))
+            handle.write("\n")
+    except Exception:
+        pass
+
+
+def log_raw_snapshot(*, payload: str, machine_id: str | None = None) -> None:
+    """Durably capture the raw JSON sent by machines for later inspection."""
+
+    _ensure_log_dir(SNAPSHOT_LOG_PATH)
+    entry = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "machine_id": machine_id,
+        "payload": payload,
+    }
+    try:
+        with SNAPSHOT_LOG_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False))
             handle.write("\n")
     except Exception:
