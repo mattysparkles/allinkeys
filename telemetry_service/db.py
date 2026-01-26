@@ -209,6 +209,26 @@ def get_db_connection() -> sqlite3.Connection:
         );
         """
     )
+    snapshot_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(machine_snapshots)").fetchall()
+    }
+    snapshot_optional_columns = {
+        "payload": "TEXT",
+        "keys_per_sec": "REAL",
+        "total_keys": "REAL",
+        "uptime_seconds": "REAL",
+        "mode": "TEXT",
+        "process_state": "TEXT",
+        "cpu_percent": "REAL",
+        "ram_percent": "REAL",
+        "disk_free_percent": "REAL",
+        "gpu_load_percent": "REAL",
+        "last_error": "TEXT",
+        "last_activity": "TEXT",
+    }
+    for name, col_type in snapshot_optional_columns.items():
+        if name not in snapshot_cols:
+            conn.execute(f"ALTER TABLE machine_snapshots ADD COLUMN {name} {col_type}")
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_machine_snapshots_machine_time
