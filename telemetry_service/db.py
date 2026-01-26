@@ -37,6 +37,9 @@ TABLE_COLUMN_DEFINITIONS = {
         "gpu_load_percent": "REAL",
         "last_error": "TEXT",
         "last_activity": "TEXT",
+        "range_recent": "TEXT",
+        "range_distribution": "TEXT",
+        "machine_identity": "TEXT",
     },
     "machine_snapshots": {
         "payload": "TEXT",
@@ -51,6 +54,9 @@ TABLE_COLUMN_DEFINITIONS = {
         "gpu_load_percent": "REAL",
         "last_error": "TEXT",
         "last_activity": "TEXT",
+        "range_recent": "TEXT",
+        "range_distribution": "TEXT",
+        "machine_identity": "TEXT",
     },
 }
 
@@ -115,10 +121,13 @@ def get_db_connection() -> sqlite3.Connection:
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
             machine_name TEXT,
+            machine_identity TEXT,
             gpu_info TEXT,
             version TEXT,
             status TEXT DEFAULT 'online',
             last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            range_recent TEXT,
+            range_distribution TEXT,
             FOREIGN KEY(user_id) REFERENCES users(id)
         );
         """
@@ -163,6 +172,13 @@ def get_db_connection() -> sqlite3.Connection:
             for row in conn.execute("PRAGMA table_info(machines)").fetchall()
         }
     _ensure_table_columns(conn, "machines", TABLE_COLUMN_DEFINITIONS["machines"])
+    conn.execute(
+        """
+        UPDATE machines
+        SET machine_identity = COALESCE(machine_identity, machine_name)
+        WHERE machine_identity IS NULL
+        """
+    )
     conn.execute("DROP INDEX IF EXISTS idx_machine_user_name")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_machine_user ON machines(user_id)"
@@ -211,6 +227,7 @@ def get_db_connection() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS machine_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             machine_id TEXT NOT NULL,
+            machine_identity TEXT,
             user_id INTEGER NOT NULL,
             timestamp TEXT NOT NULL,
             payload TEXT,
@@ -225,6 +242,8 @@ def get_db_connection() -> sqlite3.Connection:
             gpu_load_percent REAL,
             last_error TEXT,
             last_activity TEXT,
+            range_recent TEXT,
+            range_distribution TEXT,
             FOREIGN KEY(machine_id) REFERENCES machines(id),
         FOREIGN KEY(user_id) REFERENCES users(id)
         );

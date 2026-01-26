@@ -1306,8 +1306,15 @@ class TelemetryClient:
         for item in batch:
             enriched = dict(item)
             enriched.setdefault("machine_id", self.machine_id)
-            enriched.setdefault("machine_name", self.machine_name)
+            enriched.setdefault(
+                "machine_name",
+                self.machine_name or get_machine_name(self.hardware_machine_id),
+            )
+            enriched.setdefault("range_recent", [])
+            enriched.setdefault("range_distribution", [])
             payload.append(enriched)
+        if payload:
+            print("DEBUG TELEMETRY PAYLOAD:", payload[0])
         response = requests.post(
             telemetry_url,
             json=payload,
