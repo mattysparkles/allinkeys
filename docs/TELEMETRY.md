@@ -98,6 +98,15 @@ machine keeps a friendly, recognizable label even without manual overrides.
 Changing `MACHINE_NAME` updates the display name only; historical telemetry is
 still associated by the stable `machine_id`.
 
+## Range metadata visibility
+
+Machine snapshots persist the client-provided `range_recent` and
+`range_distribution` blobs on each `machines` row, and the `/api/machines/*`
+responses surface the parsed JSON. Dashboards now prefer the deterministic
+`machine_identity` (e.g. Frosted-Quartz) before falling back to the opaque
+`machine_id`, so the generated labels and range coverage data stay visible
+instead of being silently dropped.
+
 ## Opt‑out
 
 Telemetry is enabled by default.  To disable it, run the application with the
@@ -145,6 +154,15 @@ The authenticated dashboard UI lives at:
 - `/dashboard/machines` for the machine list
 - `/dashboard/machine/{machine_id}` for details and control
 
+## Telemetry dashboard site
+
+The telemetry dashboard is available publicly at [https://telemetry.sparkleserver.site](https://telemetry.sparkleserver.site). The `/login` and `/signup` pages issue a `telemetry_token` cookie scoped to `/`, so after authenticating the machine grid, health metrics, and range analytics automatically load without requiring you to paste tokens manually. From the dashboard you can:
+
+* Inspect every machine and its snapshots, issue per-machine control commands, or open the machine-level details page for tuning modes and ranges.
+* Use the global overview to see aggregated stats across all of your machines, issue mass commands (pause/resume/set_mode/set_range), and plot range distributions or search for specific fingerprints.
+* Pair new machines via `/pair` and immediately see them appear in the grid once the session token is active.
+
+Link back to the [GitHub repository](https://github.com/mattysparkles/allinkeys) from the telemetry site so visitors can clone the project and run the same software themselves.
 ## Token lifecycle
 
 - Telemetry access tokens are short-lived JWTs issued when you log in, sign up,

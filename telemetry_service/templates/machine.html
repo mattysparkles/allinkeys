@@ -546,7 +546,7 @@
             </div>
             <div>
               <strong>Machine</strong>
-              <span>${data.machine_name || data.machine_id || "—"}</span>
+              <span>${data.machine_name || "Unknown machine"}</span>
             </div>
             <div>
               <strong>Mode</strong>
@@ -636,7 +636,9 @@
           }
           const machine = await response.json();
           const statusClass = `status-${machine.status}`;
-          machineTitle.textContent = machine.machine_name || "Unnamed machine";
+          const machineLabel =
+            machine.machine_name || machine.identity_name || "Unnamed machine";
+          machineTitle.textContent = machineLabel;
           machineSubtitle.textContent = `Machine ID: ${machine.id}`;
           machineMeta.innerHTML = `
             <div>

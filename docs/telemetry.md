@@ -95,6 +95,15 @@ curl -X POST http://localhost:3088/v1/machines/<machine_id>/snapshot \
   -d '{"identity": {...}, "runtime": {...}, "resources": {...}}'
 ```
 
+## Range metadata visibility
+
+Machine snapshots now persist the client-provided `range_recent` and
+`range_distribution` blobs on the `machines` row, so the `/api/machines/*`
+responses expose the parsed JSON. The dashboard UI and API consumers now prefer
+the deterministic `machine_identity` (e.g. Frosted-Quartz) before falling back
+to the opaque `machine_id`, making the friendly labels and range coverage data
+available without silently dropping it.
+
 ## Seed analytics endpoints
 
 ### `GET /v1/seed/stats`
@@ -189,6 +198,16 @@ Returns the range distribution snapshot, default `limit=200`.
 ### `GET /v1/dashboard/{slug}/contributors/top`
 
 Returns the top contributors by submission count, default `limit=20`.
+
+# Telemetry web UI
+
+The public telemetry dashboard is served from [https://telemetry.sparkleserver.site](https://telemetry.sparkleserver.site) and consumes the `/v1/dashboard/{slug}/*` endpoints. Signing in via `/login` or pairing a machine stores a JWT in the `telemetry_token` cookie at the root path so every dashboard page loads your machines and runs automatically without requiring manual token pasting. Once authenticated you can:
+
+* View machine-level detail and historical snapshots under `/dashboard/machine/{machine_id}`.
+* Send control commands or global mode/range updates to selected machines.
+* Explore the actual ranges reported by each run, visualize the cluster map with the normalized distribution view, and lookup specific ranges plus their nearest neighbors for quick analysis.
+
+For administrators there is also `/admin/dashboard`, which stays protected by `get_current_admin_user` and surfaces the same aggregate telemetry metrics plus user/machine summaries.
 
 ## Admin dashboard endpoints
 

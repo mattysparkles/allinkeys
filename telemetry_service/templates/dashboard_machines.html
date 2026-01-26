@@ -501,8 +501,11 @@
         const filterValue = searchInput.value.trim().toLowerCase();
         const filtered = machines.filter((machine) => {
           if (!filterValue) return true;
+          const nameCandidates = (
+            machine.machine_name || machine.identity_name || ""
+          ).toLowerCase();
           return (
-            (machine.machine_name || "").toLowerCase().includes(filterValue) ||
+            nameCandidates.includes(filterValue) ||
             (machine.gpu_info || "").toLowerCase().includes(filterValue)
           );
         });
@@ -521,6 +524,8 @@
           const card = document.createElement("div");
           card.className = "machine-card";
           const statusClass = `status-${machine.status}`;
+          const displayName =
+            machine.machine_name || machine.identity_name || "Unnamed machine";
           card.innerHTML = `
             <div class="machine-select">
               <input type="checkbox" data-machine="${machine.id}" />
@@ -528,7 +533,7 @@
             </div>
             <div class="machine-header">
               <div>
-                <h2>${machine.machine_name || "Unnamed machine"}</h2>
+                <h2>${displayName}</h2>
                 <a class="control-link" href="/dashboard/machine/${machine.id}">
                   Control
                 </a>

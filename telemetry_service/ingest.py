@@ -7,6 +7,7 @@ from typing import Optional
 
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
 from telemetry_service.models import TelemetryItem, UserPublic
+from telemetry_service.name_generator import generate_machine_name
 
 
 def ingest_seed_events(
@@ -21,17 +22,23 @@ def ingest_seed_events(
     for item in items:
         ts = item.timestamp_iso or now
         machine_key = machine_id_override or item.machine_id or item.app_instance_id
-        machine_name = machine_name_override or item.machine_name
+        candidate_name = machine_name_override or item.machine_name
         if machine_key:
             with MACHINE_REGISTRY_LOCK:
                 registry_key = (current_user.id, machine_key)
                 existing = MACHINE_REGISTRY.get(registry_key, {})
+                machine_identity = existing.get("machine_identity") or generate_machine_name(
+                    machine_key
+                )
                 machine_name = (
-                    machine_name or existing.get("machine_name") or machine_key
+                    candidate_name
+                    or existing.get("machine_name")
+                    or machine_identity
                 )
                 MACHINE_REGISTRY[registry_key] = {
                     "user_id": current_user.id,
                     "machine_id": machine_key,
+                    "machine_identity": machine_identity,
                     "machine_name": machine_name,
                     "last_seen": ts,
                     "cpu_percent": item.cpu_percent,
@@ -41,25 +48,42 @@ def ingest_seed_events(
                     "gpu_name": item.gpu_name,
                     "time_to_disk_full": item.time_to_disk_full,
                 }
+            range_recent_json = (
+                json.dumps(item.range_recent, ensure_ascii=False)
+                if item.range_recent
+                else None
+            )
+            range_distribution_json = (
+                json.dumps(item.range_distribution, ensure_ascii=False)
+                if item.range_distribution
+                else None
+            )
             conn.execute(
                 """
                 INSERT INTO machines (
-                    id, user_id, machine_name, gpu_info, version, status, last_seen
-                ) VALUES (?, ?, ?, ?, ?, 'online', ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    machine_name=COALESCE(excluded.machine_name, machines.machine_name),
-                    gpu_info=COALESCE(excluded.gpu_info, machines.gpu_info),
-                    version=COALESCE(excluded.version, machines.version),
-                    status='online',
-                    last_seen=excluded.last_seen
+                        id, user_id, machine_name, machine_identity, gpu_info, version, status, last_seen,
+                        range_recent, range_distribution
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'online', ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        machine_name=COALESCE(excluded.machine_name, machines.machine_name),
+                        machine_identity=COALESCE(excluded.machine_identity, machines.machine_identity),
+                        gpu_info=COALESCE(excluded.gpu_info, machines.gpu_info),
+                        version=COALESCE(excluded.version, machines.version),
+                        status='online',
+                        last_seen=excluded.last_seen,
+                        range_recent=COALESCE(excluded.range_recent, machines.range_recent),
+                        range_distribution=COALESCE(excluded.range_distribution, machines.range_distribution)
                 """,
                 (
                     machine_key,
                     current_user.id,
                     machine_name,
+                    machine_identity,
                     item.gpu_name,
                     item.client_version,
                     ts,
+                    range_recent_json,
+                    range_distribution_json,
                 ),
             )
         conn.execute(

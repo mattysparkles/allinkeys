@@ -22,6 +22,7 @@ from telemetry_service.models import (
     ControlCommandList,
     ControlCommandRequest,
     IngestResponse,
+    MachineRangeHistory,
     MachineRegisterRequest,
     MachineRegisterResponse,
     MachineSnapshotPoint,
@@ -30,6 +31,7 @@ from telemetry_service.models import (
     TelemetryItem,
     UserPublic,
 )
+from telemetry_service.name_generator import generate_machine_name
 
 router = APIRouter(tags=["Machines"])
 logger = logging.getLogger("telemetry.routes.machines")
@@ -67,8 +69,59 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
+def _safe_int(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            return int(cleaned, 0)
+        except ValueError:
+            pass
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _ensure_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _parse_json_field(value: Any) -> Any:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return json.loads(value)
+    except Exception:
+        return None
+
+
+def _friendly_machine_name(
+    explicit_name: Optional[str],
+    identity_name: Optional[str],
+    fallback_id: str,
+) -> str:
+    return explicit_name or identity_name or fallback_id
+
+
+def _record_sql_statement(
+    diagnostics: list[dict[str, Any]] | None,
+    statement: str,
+    params: tuple[Any, ...],
+) -> None:
+    if diagnostics is None:
+        return
+    diagnostics.append(
+        {
+            "sql": statement.strip(),
+            "params": [str(value) for value in params],
+        }
+    )
 
 
 def _get_machine_for_user_or_admin(
@@ -80,10 +133,10 @@ def _get_machine_for_user_or_admin(
         if current_user.is_admin:
             row = conn.execute(
                 """
-                SELECT id, user_id, machine_name, gpu_info, version, status, last_seen,
+                SELECT id, user_id, machine_name, machine_identity, gpu_info, version, status, last_seen,
                        keys_per_sec, total_keys, uptime_seconds, mode, process_state,
                        cpu_percent, ram_percent, disk_free_percent, gpu_load_percent,
-                       last_error, last_activity
+                       last_error, last_activity, range_recent, range_distribution
                 FROM machines
                 WHERE id = ?
                 """,
@@ -92,10 +145,10 @@ def _get_machine_for_user_or_admin(
         else:
             row = conn.execute(
                 """
-                SELECT id, user_id, machine_name, gpu_info, version, status, last_seen,
+                SELECT id, user_id, machine_name, machine_identity, gpu_info, version, status, last_seen,
                        keys_per_sec, total_keys, uptime_seconds, mode, process_state,
                        cpu_percent, ram_percent, disk_free_percent, gpu_load_percent,
-                       last_error, last_activity
+                       last_error, last_activity, range_recent, range_distribution
                 FROM machines
                 WHERE id = ? AND user_id = ?
                 """,
@@ -110,21 +163,24 @@ def _get_machine_for_user_or_admin(
             "id": row[0],
             "user_id": row[1],
             "machine_name": row[2],
-            "gpu_info": row[3],
-            "version": row[4],
-            "status": row[5],
-            "last_seen": row[6],
-            "keys_per_sec": row[7],
-            "total_keys": row[8],
-            "uptime_seconds": row[9],
-            "mode": row[10],
-            "process_state": row[11],
-            "cpu_percent": row[12],
-            "ram_percent": row[13],
-            "disk_free_percent": row[14],
-            "gpu_load_percent": row[15],
-            "last_error": row[16],
-            "last_activity": row[17],
+            "machine_identity": row[3],
+            "gpu_info": row[4],
+            "version": row[5],
+            "status": row[6],
+            "last_seen": row[7],
+            "keys_per_sec": row[8],
+            "total_keys": row[9],
+            "uptime_seconds": row[10],
+            "mode": row[11],
+            "process_state": row[12],
+            "cpu_percent": row[13],
+            "ram_percent": row[14],
+            "disk_free_percent": row[15],
+            "gpu_load_percent": row[16],
+            "last_error": row[17],
+            "last_activity": row[18],
+            "range_recent": _parse_json_field(row[19]),
+            "range_distribution": _parse_json_field(row[20]),
         }
     finally:
         conn.close()
@@ -144,17 +200,20 @@ def register_machine(
     now = datetime.utcnow().isoformat() + "Z"
     conn = get_db_connection()
     payload_data = payload.dict()
+    machine_identity = generate_machine_name(machine_id)
+    machine_display_name = payload.machine_name or machine_identity
     try:
         conn.execute(
             """
             INSERT INTO machines (
-                id, user_id, machine_name, gpu_info, version, status, last_seen
-            ) VALUES (?, ?, ?, ?, ?, 'online', ?)
+                id, user_id, machine_name, machine_identity, gpu_info, version, status, last_seen
+            ) VALUES (?, ?, ?, ?, ?, ?, 'online', ?)
             """,
             (
                 machine_id,
                 current_user.id,
-                payload.machine_name,
+                machine_display_name,
+                machine_identity,
                 payload.gpu_info,
                 payload.version,
                 now,
@@ -192,7 +251,8 @@ def register_machine(
         MACHINE_REGISTRY[(current_user.id, machine_id)] = {
             "user_id": current_user.id,
             "machine_id": machine_id,
-            "machine_name": payload.machine_name,
+            "machine_name": machine_display_name,
+            "machine_identity": machine_identity,
             "last_seen": now,
             "cpu_percent": None,
             "ram_percent": None,
@@ -214,39 +274,53 @@ def _persist_snapshot(
     machine_name: str,
     gpu_info: Optional[str],
     version: Optional[str],
+    machine_identity: str,
+    diagnostics: list[dict[str, Any]] | None = None,
 ) -> None:
     runtime = _ensure_dict(snapshot.get("runtime"))
     resources = _ensure_dict(snapshot.get("resources"))
     timestamp_iso = snapshot.get("timestamp_iso") or datetime.utcnow().isoformat() + "Z"
-    conn.execute(
-        """
+    range_recent = snapshot.get("range_recent")
+    range_distribution = snapshot.get("range_distribution")
+    range_recent_json = (
+        json.dumps(range_recent, ensure_ascii=False) if isinstance(range_recent, list) else None
+    )
+    range_distribution_json = (
+        json.dumps(range_distribution, ensure_ascii=False)
+        if isinstance(range_distribution, list)
+        else None
+    )
+    insert_sql = """
         INSERT INTO machine_snapshots (
-            machine_id, user_id, timestamp, payload,
+            machine_id, machine_identity, user_id, timestamp, payload,
             keys_per_sec, total_keys, uptime_seconds, mode, process_state,
             cpu_percent, ram_percent, disk_free_percent, gpu_load_percent,
-            last_error, last_activity
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            machine_id,
-            user_id,
-            timestamp_iso,
-            raw_payload or "",
-            _safe_float(runtime.get("keys_per_sec")),
-            _safe_float(runtime.get("total_keys")),
-            _safe_float(runtime.get("uptime_seconds")),
-            runtime.get("mode"),
-            runtime.get("process_state"),
-            _safe_float(resources.get("cpu_percent")),
-            _safe_float(resources.get("ram_percent")),
-            _safe_float(resources.get("disk_free_percent")),
-            _safe_float(resources.get("gpu_load_percent")),
-            runtime.get("last_error"),
-            runtime.get("last_activity_ts"),
-        ),
-    )
-    conn.execute(
+            last_error, last_activity, range_recent, range_distribution
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
+    insert_params = (
+        machine_id,
+        machine_identity,
+        user_id,
+        timestamp_iso,
+        raw_payload or "",
+        _safe_float(runtime.get("keys_per_sec")),
+        _safe_float(runtime.get("total_keys")),
+        _safe_float(runtime.get("uptime_seconds")),
+        runtime.get("mode"),
+        runtime.get("process_state"),
+        _safe_float(resources.get("cpu_percent")),
+        _safe_float(resources.get("ram_percent")),
+        _safe_float(resources.get("disk_free_percent")),
+        _safe_float(resources.get("gpu_load_percent")),
+        runtime.get("last_error"),
+        runtime.get("last_activity_ts"),
+        range_recent_json,
+        range_distribution_json,
+    )
+    _record_sql_statement(diagnostics, insert_sql, insert_params)
+    conn.execute(insert_sql, insert_params)
+    update_sql = """
         UPDATE machines
         SET machine_name = COALESCE(?, machine_name),
             gpu_info = COALESCE(?, gpu_info),
@@ -263,28 +337,33 @@ def _persist_snapshot(
             disk_free_percent = ?,
             gpu_load_percent = ?,
             last_error = ?,
-            last_activity = ?
+            last_activity = ?,
+            range_recent = COALESCE(?, range_recent),
+            range_distribution = COALESCE(?, range_distribution)
         WHERE id = ?
-        """,
-        (
-            machine_name,
-            gpu_info,
-            version,
-            timestamp_iso,
-            _safe_float(runtime.get("keys_per_sec")),
-            _safe_float(runtime.get("total_keys")),
-            _safe_float(runtime.get("uptime_seconds")),
-            runtime.get("mode"),
-            runtime.get("process_state"),
-            _safe_float(resources.get("cpu_percent")),
-            _safe_float(resources.get("ram_percent")),
-            _safe_float(resources.get("disk_free_percent")),
-            _safe_float(resources.get("gpu_load_percent")),
-            runtime.get("last_error"),
-            runtime.get("last_activity_ts"),
-            machine_id,
-        ),
+        """
+    update_params = (
+        machine_name,
+        gpu_info,
+        version,
+        timestamp_iso,
+        _safe_float(runtime.get("keys_per_sec")),
+        _safe_float(runtime.get("total_keys")),
+        _safe_float(runtime.get("uptime_seconds")),
+        runtime.get("mode"),
+        runtime.get("process_state"),
+        _safe_float(resources.get("cpu_percent")),
+        _safe_float(resources.get("ram_percent")),
+        _safe_float(resources.get("disk_free_percent")),
+        _safe_float(resources.get("gpu_load_percent")),
+        runtime.get("last_error"),
+        runtime.get("last_activity_ts"),
+        range_recent_json,
+        range_distribution_json,
+        machine_id,
     )
+    _record_sql_statement(diagnostics, update_sql, update_params)
+    conn.execute(update_sql, update_params)
 
 
 @router.post(
@@ -301,7 +380,7 @@ def ingest_machine_telemetry(
         raise HTTPException(status_code=400, detail="Expected non-empty list body")
 
     machine = get_machine_for_user(machine_id, current_user)
-    machine_name = machine.get("machine_name") or machine_id
+    machine_name = machine.get("machine_name") or generate_machine_name(machine_id)
 
     conn = get_db_connection()
     try:
@@ -342,7 +421,8 @@ async def ingest_machine_snapshot(
     current_user: UserPublic = Depends(get_current_user),
 ) -> MachineSummary:
     machine = get_machine_for_user(machine_id, current_user)
-    machine_name = machine.get("machine_name") or machine_id
+    machine_identity = machine.get("machine_identity") or generate_machine_name(machine_id)
+    machine_name = machine.get("machine_name") or machine_identity
     gpu_info = machine.get("gpu_info")
     version = machine.get("version")
     timestamp_iso = datetime.utcnow().isoformat() + "Z"
@@ -353,6 +433,7 @@ async def ingest_machine_snapshot(
     identity_data: dict[str, Any] = {}
     runtime_data: dict[str, Any] = {}
     resources_data: dict[str, Any] = {}
+    diagnostics: list[dict[str, Any]] = []
     try:
         raw_body = await request.body()
         payload_text = raw_body.decode("utf-8", errors="replace")
@@ -379,16 +460,31 @@ async def ingest_machine_snapshot(
                 machine_name=machine_name,
                 gpu_info=gpu_info,
                 version=version,
+                machine_identity=machine_identity,
+                diagnostics=diagnostics,
             )
     except HTTPException:
         raise
     except Exception as exc:
+        statement_summary = diagnostics.copy()
         log_ingest_error(
             context="ingest_machine_snapshot",
             exc=exc,
-            payload=payload_text,
+            payload={
+                "machine_id": machine_id,
+                "user_id": current_user.id,
+                "snapshot": payload_text,
+                "statements": statement_summary,
+            },
             tables=["machine_snapshots", "machines"],
             conn=conn,
+        )
+        logger.exception(
+            "Snapshot ingest failed | machine_id=%s user_id=%s payload=%s statements=%s",
+            machine_id,
+            current_user.id,
+            payload_text,
+            statement_summary,
         )
         return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
     finally:
@@ -399,6 +495,7 @@ async def ingest_machine_snapshot(
             "user_id": current_user.id,
             "machine_id": machine_id,
             "machine_name": machine_name,
+            "machine_identity": machine_identity,
             "last_seen": timestamp_iso,
             "cpu_percent": _safe_float(resources_data.get("cpu_percent")),
             "ram_percent": _safe_float(resources_data.get("ram_percent")),
@@ -451,10 +548,10 @@ def list_my_machines(
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         rows = conn.execute(
             f"""
-            SELECT id, machine_name, gpu_info, version, last_seen,
+            SELECT id, machine_name, machine_identity, gpu_info, version, last_seen,
                    keys_per_sec, total_keys, uptime_seconds, mode, process_state,
                    cpu_percent, ram_percent, disk_free_percent, gpu_load_percent,
-                   last_error, last_activity
+                   last_error, last_activity, range_recent, range_distribution
             FROM machines
             {where_clause}
             ORDER BY machine_name, id
@@ -466,6 +563,7 @@ def list_my_machines(
             (
                 machine_id,
                 machine_name,
+                machine_identity,
                 gpu_info,
                 version,
                 last_seen,
@@ -480,14 +578,20 @@ def list_my_machines(
                 gpu_load_percent,
                 last_error,
                 last_activity,
+                range_recent,
+                range_distribution,
             ) = row
+            kps_value = _safe_float(keys_per_sec)
+            parsed_range_recent = _parse_json_field(range_recent)
+            parsed_range_distribution = _parse_json_field(range_distribution)
+            display_name = _friendly_machine_name(machine_name, machine_identity, machine_id)
             response.append(
                 MachineSummary(
                     id=machine_id,
-                    machine_name=machine_name or machine_id,
+                    machine_name=display_name,
                     gpu_info=gpu_info,
                     status=_status_from_last_seen(last_seen, now),
-                    keys_per_sec=round(keys_per_sec or 0, 2),
+                    keys_per_sec=round(kps_value or 0, 2),
                     total_keys=total_keys,
                     uptime_seconds=uptime_seconds,
                     mode=mode,
@@ -500,6 +604,9 @@ def list_my_machines(
                     last_activity=last_activity,
                     last_seen=last_seen,
                     version=version,
+                    range_recent=parsed_range_recent,
+                    range_distribution=parsed_range_distribution,
+                    identity_name=machine_identity,
                 )
             )
         return response
@@ -517,47 +624,34 @@ def get_machine(
     current_user: UserPublic = Depends(get_current_user),
 ) -> MachineSummary:
     now = datetime.utcnow()
-    machine_row = _get_machine_for_user_or_admin(machine_id, current_user)
-    (
+    machine = _get_machine_for_user_or_admin(machine_id, current_user)
+    kps_value = _safe_float(machine.get("keys_per_sec"))
+    display_name = _friendly_machine_name(
+        machine.get("machine_name"),
+        machine.get("machine_identity"),
         machine_id,
-        _user_id,
-        machine_name,
-        gpu_info,
-        version,
-        _status,
-        last_seen,
-        keys_per_sec,
-        total_keys,
-        uptime_seconds,
-        mode,
-        process_state,
-        cpu_percent,
-        ram_percent,
-        disk_free_percent,
-        gpu_load_percent,
-        last_error,
-        last_activity,
-    ) = (
-        machine_row
     )
     return MachineSummary(
-        id=machine_id,
-        machine_name=machine_name or machine_id,
-        gpu_info=gpu_info,
-        status=_status_from_last_seen(last_seen, now),
-        keys_per_sec=round(keys_per_sec or 0, 2),
-        total_keys=total_keys,
-        uptime_seconds=uptime_seconds,
-        mode=mode,
-        process_state=process_state,
-        cpu_percent=cpu_percent,
-        ram_percent=ram_percent,
-        disk_free_percent=disk_free_percent,
-        gpu_load_percent=gpu_load_percent,
-        last_error=last_error,
-        last_activity=last_activity,
-        last_seen=last_seen,
-        version=version,
+        id=machine["id"],
+        machine_name=display_name,
+        gpu_info=machine.get("gpu_info"),
+        status=_status_from_last_seen(machine.get("last_seen"), now),
+        keys_per_sec=round(kps_value or 0, 2),
+        total_keys=machine.get("total_keys"),
+        uptime_seconds=machine.get("uptime_seconds"),
+        mode=machine.get("mode"),
+        process_state=machine.get("process_state"),
+        cpu_percent=machine.get("cpu_percent"),
+        ram_percent=machine.get("ram_percent"),
+        disk_free_percent=machine.get("disk_free_percent"),
+        gpu_load_percent=machine.get("gpu_load_percent"),
+        last_error=machine.get("last_error"),
+        last_activity=machine.get("last_activity"),
+        last_seen=machine.get("last_seen"),
+        version=machine.get("version"),
+        range_recent=machine.get("range_recent"),
+        range_distribution=machine.get("range_distribution"),
+        identity_name=machine.get("machine_identity"),
     )
 
 
@@ -636,6 +730,69 @@ def list_machine_snapshots(
             )
             for row in rows
         ],
+    )
+
+
+@router.get(
+    "/{machine_id}/ranges/recent",
+    response_model=MachineRangeHistory,
+    summary="Return recent range metadata reported by a machine.",
+)
+def list_machine_ranges(
+    machine_id: str,
+    limit: int = Query(20, ge=1, le=200),
+    current_user: UserPublic = Depends(get_current_user),
+) -> MachineRangeHistory:
+    machine = _get_machine_for_user_or_admin(machine_id, current_user)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT timestamp, range_recent
+            FROM machine_snapshots
+            WHERE machine_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (machine_id, max(1, min(limit * 3, 200))),
+        ).fetchall()
+    finally:
+        conn.close()
+    ranges: list[dict[str, Any]] = []
+    for snapshot_ts, payload in rows:
+        parsed = _parse_json_field(payload)
+        if not isinstance(parsed, list):
+            continue
+        for entry in parsed:
+            if not isinstance(entry, dict):
+                continue
+            ranges.append(
+                {
+                    "range_id": entry.get("range_id"),
+                    "start": _safe_int(entry.get("start")),
+                    "end": _safe_int(entry.get("end")),
+                    "position": _safe_int(entry.get("position")),
+                    "normalized_position": _safe_float(entry.get("normalized_position")),
+                    "normalized_span": _safe_float(entry.get("normalized_span")),
+                    "space_min": _safe_int(entry.get("space_min")),
+                    "space_max": _safe_int(entry.get("space_max")),
+                    "timestamp_iso": entry.get("timestamp_iso") or snapshot_ts,
+                    "source": "snapshot",
+                }
+            )
+            if len(ranges) >= limit:
+                break
+        if len(ranges) >= limit:
+            break
+    return MachineRangeHistory(
+        machine_id=machine_id,
+        machine_name=_friendly_machine_name(
+            machine.get("machine_name"),
+            machine.get("machine_identity"),
+            machine_id,
+        ),
+        identity_name=machine.get("machine_identity"),
+        ranges=ranges[:limit],
     )
 
 
