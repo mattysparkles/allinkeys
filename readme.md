@@ -229,17 +229,27 @@ The default run will:
 | `--dashboard-password <pw>` | Protect dashboard with password `pw` |
 | `--skip-downloads` | Skip downloading balance files |
 | `--headless` | Run without any GUI components |
+| `--no-telemetry` | Disable telemetry reporting |
+| `--telemetry-setup` | Run the telemetry setup wizard |
+| `--auth-token <token>` | Bearer token for authenticated telemetry endpoints |
+| `--control-url <url>` | Override the telemetry machine control polling URL |
 | `--match-test` | Trigger a fake match alert on startup |
-| `--purge` | Delete old downloaded files and exit |
+| `--purge [days]` | Delete old files (default 30) in `output/vanity_output/` and `output/csv/`, then exit |
+| `--dry-run` | Preview purge actions without deleting |
 | `--only <coins>` | Restrict processing to coin flow(s); comma-separated list |
 | `--addr-format {compressed,uncompressed}` | BTC-only: choose address format |
 | `--compressed` / `--uncompressed` | BTC-only convenience flags overriding `--addr-format` |
 | `--all` | BTC-only: use "all BTC addresses ever used" range mode |
 | `--funded` | BTC-only: use daily funded BTC list |
+| `--gpu-index <id>` | Force use of a specific GPU device index |
 | `--puzzle N` | BTC puzzle mode for puzzle number `N` |
 | `--every` | With `--puzzle`: keep generic `1**` prefix |
 | `--target` | With `--puzzle`: target specific puzzle address (default) |
 | `--chunk INDEX` | With `--puzzle`: start at chunk `INDEX` (0-based) |
+| `-v`, `--vanity <pattern>` | Custom VanitySearch prefix/pattern (e.g., `1nasty`) |
+| `-q`, `--case-insensitive` | Case-insensitive VanitySearch matching |
+| `--enable-bc1` | Enable bc1 (Bech32 v0/v1) address generation alongside legacy P2PKH |
+| `--bc1` | Use bech32 funded list, disable legacy P2PKH, and default pattern to `bc1**` |
 
 ### 🧩 BTC Puzzle Mode
 
@@ -259,6 +269,29 @@ starting chunk.
 python main.py --only btc --puzzle 71            # target puzzle 71 address
 python main.py --only btc --puzzle 71 --every    # search full puzzle range
 python main.py --only btc --puzzle 71 --chunk 5  # resume at chunk 5
+```
+
+### 🧬 VanitySearch + bc1 (Bech32) Options
+
+Use these flags when targeting bc1 (Bech32/Bech32m) addresses:
+
+- `--enable-bc1` turns on bc1q (P2WPKH) and bc1p (Taproot) generation while still
+  retaining legacy P2PKH (`1...`) matches.
+- `--bc1` switches the funded list to Bech32 only, disables legacy P2PKH, and
+  sets the default vanity pattern to `bc1**` (unless `--puzzle` or `--vanity`
+  is supplied).
+
+VanitySearch-specific pattern helpers:
+
+- `-v/--vanity <pattern>` customizes the vanity prefix/pattern.
+- `-q/--case-insensitive` enables case-insensitive matching.
+
+Example invocations:
+
+```bash
+python main.py --enable-bc1 --vanity bc1qak**          # bc1q with custom prefix
+python main.py --bc1 --case-insensitive                # bc1-only funded list + pattern
+python main.py --bc1 --vanity bc1pdead**               # taproot-style prefix
 ```
 
 ### 🧠 Mnemonic Mode
