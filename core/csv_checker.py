@@ -259,8 +259,6 @@ def load_btc_addresses(file_path, memory_limit=None):
                     continue
                 if addr.startswith("1"):
                     conn.execute("INSERT OR IGNORE INTO btc_p2pkh(addr) VALUES (?)", (addr,))
-                elif addr.startswith("3"):
-                    conn.execute("INSERT OR IGNORE INTO btc_p2sh(addr) VALUES (?)", (addr,))
                 elif addr.lower().startswith("bc1"):
                     addr = addr.lower() if NORMALIZE_BECH32_LOWER else addr
                     conn.execute("INSERT OR IGNORE INTO btc_bech32(addr) VALUES (?)", (addr,))

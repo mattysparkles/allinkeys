@@ -12,6 +12,7 @@ from config.settings import (
     ALL_BTC_RANGES_COUNT,
     BTC_RANGE_FILE_PATTERN,
     BTC_MIN_FILE_AGE_SEC,
+    BTC_FUNDED_ADDRESS_MODE,
 )
 from config.directories import VANITY_OUTPUT_DIR, ALL_BTC_ADDRESSES_DIR
 from core.dashboard import set_metric, increment_metric, update_dashboard_stat, get_metric
@@ -87,11 +88,18 @@ def prepare_btc_only_mode(use_all: bool, logger, skip_downloads: bool = False) -
         funded_fp = find_latest_funded_file("btc")
         if not funded_fp:
             return []
-        with open(funded_fp, "r", encoding="utf-8") as f:
-            for line in f:
-                addr = line.strip()
-                if addr:
-                    yield addr
+        from core.downloader import load_btc_funded_multi
+
+        funded_sets = load_btc_funded_multi(funded_fp)
+        mode = (BTC_FUNDED_ADDRESS_MODE or "p2pkh").lower()
+        if mode == "bech32":
+            selected = funded_sets.get("bech32", set())
+        elif mode == "all":
+            selected = funded_sets.get("all", set())
+        else:
+            selected = funded_sets.get("p2pkh", set())
+        for addr in selected:
+            yield addr
 
     if use_all:
         ensure_all_btc_ranges_ready(logger)

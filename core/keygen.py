@@ -517,6 +517,8 @@ def run_vanitysearch_stream(
     # IMPORTANT: Use VanitySearch's native -o output handling with a unique
     # filename. Python must not manage file rotation or write output directly.
     base_args = ["-s", str(hex_seed_full)]
+    if getattr(settings, "VANITY_CASE_INSENSITIVE", False):
+        base_args.append("-i")
     if use_gpu:
         base_args.append("-gpu")  # CUDA acceleration
     if not BTC_COMPRESSED:

@@ -29,6 +29,6 @@ def test_load_btc_funded_multi(tmp_path):
     sample.write_text("1ABC\n3def\nBC1XYZ\n", encoding="utf-8")
     result = downloader.load_btc_funded_multi(sample)
     assert result["p2pkh"] == {"1ABC"}
-    assert result["p2sh"] == {"3def"}
     assert result["bech32"] == {"bc1xyz"}
-    assert result["all"] == {"1ABC", "3def", "bc1xyz"}
+    assert result["p2sh"] == set()
+    assert result["all"] == {"1ABC", "bc1xyz"}

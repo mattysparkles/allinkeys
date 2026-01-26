@@ -303,6 +303,8 @@ FILTER_ONLY_P2PKH = False
 
 # Address generation toggles
 ENABLE_P2PKH = True  # legacy "1" prefix (P2PKH)
+# Funded BTC list selection: "p2pkh", "bech32", or "all"
+BTC_FUNDED_ADDRESS_MODE = "p2pkh"
 # SegWit address generation toggles (bc1)
 ENABLE_BC1_DEFAULT = False
 ENABLE_BECH32_DEFAULT = ENABLE_BC1_DEFAULT  # deprecated alias
@@ -329,6 +331,7 @@ ADDR_PER_FILE = 200000
 START_BATCH_ID = 0
 USE_CUSTOM_SEEDS = False
 PATTERN = "1**"
+VANITY_CASE_INSENSITIVE = False
 VANITYSEARCH_GPU_INDEX = [0]
 VANITY_GPU_INDEX = [0]
 
