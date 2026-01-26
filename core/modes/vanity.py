@@ -268,6 +268,7 @@ def metrics_updater(shared_metrics=None, shutdown_event=None):
                 last_kps = 0.0
         stats["keys_generated_lifetime"] = curr_lifetime
         stats["keys_per_sec"] = round(current_kps, 2)
+        stats["vanitysearch_current_mkeys"] = round(current_kps / 1_000_000, 6)
         stats["uptime"] = prog["elapsed_time"]
         stats["last_updated"] = datetime.utcnow().strftime("%H:%M:%S")
         try:

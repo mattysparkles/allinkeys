@@ -1194,7 +1194,7 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
     try:
         ensure_metrics_ready(shared_metrics)
         _safe_set_metric("status.altcoin", "Running")
-        _safe_set_metric("altcoin_files_converted", 0)
+        _safe_set_metric("altcoin_files_converted_today", 0)
         _safe_set_metric("derived_addresses_today", 0)
         _safe_set_metric("backlog_files_completed", 0)
         _safe_set_metric("backlog_progress", {})
@@ -1376,8 +1376,11 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                             processed.add(txt_file)
                             durations.append(dur)
                             safe_increment_metric("altcoin_files_converted", 1)
+                            safe_increment_metric("altcoin_files_converted_today", 1)
+                            safe_increment_metric("altcoin_files_converted_lifetime", 1)
                             if rows:
                                 safe_increment_metric("derived_addresses_today", rows)
+                                safe_increment_metric("derived_addresses_lifetime", rows)
                             safe_increment_metric("backlog_files_completed", 1)
                             if dur > 0:
                                 rps = rows / dur

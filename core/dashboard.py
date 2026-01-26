@@ -23,6 +23,7 @@ from config.settings import (
     PAUSE_WARNING_RATELIMIT_SECONDS,
     COIN_DOWNLOAD_URLS,
 )
+from config.directories import LOG_DIR
 try:
     from multiprocessing.managers import DictProxy
 except Exception:  # pragma: no cover - manager may not exist
@@ -131,16 +132,23 @@ METRIC_ALIASES = {
 }
 
 # Lifetime metrics persistence
-METRICS_LIFETIME_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'metrics_lifetime.json'))
+METRICS_LIFETIME_PATH = os.path.abspath(os.path.join(LOG_DIR, "metrics_lifetime.json"))
+LEGACY_METRICS_LIFETIME_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "metrics_lifetime.json")
+)
+METRICS_DAILY_PATH = os.path.abspath(os.path.join(LOG_DIR, "metrics_daily.json"))
 LIFETIME_KEYS = {
     'keys_generated_lifetime',
     'mnemonics_generated_lifetime',
     'csv_checked_lifetime',
     'csv_rechecked_lifetime',
     'csv_created_lifetime',
+    'derived_addresses_lifetime',
+    'altcoin_files_converted_lifetime',
     'matches_found_lifetime',
     'addresses_checked_lifetime',
     'addresses_generated_lifetime',
+    'btc_only_matches_found_today',
     'alerts_sent_lifetime',
     'lifetime_start_timestamp',
 }
@@ -258,10 +266,13 @@ def _record_metric_history(metric: str, value: float, history_size: int = MAX_RA
 
 def load_lifetime_metrics():
     """Load persisted lifetime metrics from disk."""
-    if not os.path.exists(METRICS_LIFETIME_PATH):
+    path = METRICS_LIFETIME_PATH
+    if not os.path.exists(path) and os.path.exists(LEGACY_METRICS_LIFETIME_PATH):
+        path = LEGACY_METRICS_LIFETIME_PATH
+    if not os.path.exists(path):
         return {}
     try:
-        with open(METRICS_LIFETIME_PATH, 'r', encoding='utf-8') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             if 'lifetime_start_timestamp' not in data:
                 data['lifetime_start_timestamp'] = datetime.utcnow().isoformat()
@@ -273,6 +284,14 @@ def load_lifetime_metrics():
             ):
                 if not isinstance(data.get(key), dict):
                     data[key] = {c: 0 for c in defaults[key]}
+            if path != METRICS_LIFETIME_PATH:
+                try:
+                    os.makedirs(os.path.dirname(METRICS_LIFETIME_PATH), exist_ok=True)
+                    with open(METRICS_LIFETIME_PATH, "w", encoding="utf-8") as out_f:
+                        json.dump(data, out_f, indent=2)
+                    logger.info("Migrated legacy lifetime metrics to logs directory")
+                except Exception:
+                    logger.exception("Failed to migrate legacy lifetime metrics")
             logger.debug("Lifetime metrics loaded from disk")
             return data
     except Exception:
@@ -284,6 +303,7 @@ def save_lifetime_metrics():
     """Persist lifetime metrics to disk."""
     if metrics is None:
         return
+    os.makedirs(os.path.dirname(METRICS_LIFETIME_PATH), exist_ok=True)
     data = {}
     for key in LIFETIME_KEYS:
         val = metrics.get(key)
@@ -328,6 +348,75 @@ def save_lifetime_metrics():
                 break
 
 
+def _daily_date_str(tz):
+    return datetime.now(tz).strftime("%Y-%m-%d")
+
+
+def load_daily_metrics():
+    """Load persisted daily metrics if they match today's date."""
+    if not os.path.exists(METRICS_DAILY_PATH):
+        return {}
+    try:
+        with open(METRICS_DAILY_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        tz = get_local_timezone()
+        if payload.get("date") != _daily_date_str(tz):
+            return {}
+        data = payload.get("metrics", {})
+        defaults = _default_metrics()
+        for key in (
+            "addresses_generated_today",
+            "addresses_checked_today",
+        ):
+            if not isinstance(data.get(key), dict):
+                data[key] = {c: 0 for c in defaults[key]}
+        return data
+    except Exception:
+        logger.exception("Failed to load daily metrics")
+        return {}
+
+
+def save_daily_metrics():
+    """Persist today's metrics so they survive restarts."""
+    if metrics is None:
+        return
+    tz = get_local_timezone()
+    data = {"date": _daily_date_str(tz), "metrics": {}}
+    for key in TODAY_METRIC_KEYS:
+        val = metrics.get(key)
+        try:
+            from multiprocessing.managers import DictProxy
+        except Exception:
+            DictProxy = dict
+        if isinstance(val, DictProxy) or isinstance(val, dict):
+            data["metrics"][key] = dict(val)
+        else:
+            data["metrics"][key] = val
+    os.makedirs(os.path.dirname(METRICS_DAILY_PATH), exist_ok=True)
+    lock = metrics_lock if metrics_lock else nullcontext()
+    with lock:
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(METRICS_DAILY_PATH))
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, METRICS_DAILY_PATH)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            logger.exception("Failed to save daily metrics")
+
+
+def maybe_persist_daily(key):
+    """Persist metrics if the key belongs to daily stats."""
+    base = key.split('.')[0] if isinstance(key, str) else key
+    if base in TODAY_METRIC_KEYS:
+        save_daily_metrics()
+
+
 def maybe_persist_lifetime(key):
     """Persist metrics if the key belongs to lifetime stats."""
     base = key.split('.')[0] if isinstance(key, str) else key
@@ -361,8 +450,9 @@ TODAY_METRIC_KEYS = [
     'keys_generated_today',
     'mnemonics_generated_today',
     'derived_addresses_today',
-    'altcoin_files_converted',
+    'altcoin_files_converted_today',
     'alerts_sent_today',
+    'btc_only_files_checked_today',
 ]
 TODAY_METRIC_KEYS += [f'addresses_checked_today', f'addresses_generated_today']
 
@@ -386,6 +476,7 @@ def reset_daily_metrics_if_needed():
             else:
                 update_dashboard_stat(key, 0)
         update_dashboard_stat('metrics_last_reset', now.isoformat())
+        save_daily_metrics()
         save_lifetime_metrics()
 
 
@@ -406,6 +497,12 @@ def init_dashboard_manager():
         metrics.update({k: _coerce_value(v) for k, v in default_metrics.items()})
         lifetime = load_lifetime_metrics()
         for k, v in lifetime.items():
+            if isinstance(v, dict):
+                metrics[k] = _coerce_value(v)
+            else:
+                metrics[k] = v
+        daily = load_daily_metrics()
+        for k, v in daily.items():
             if isinstance(v, dict):
                 metrics[k] = _coerce_value(v)
             else:
@@ -447,6 +544,9 @@ def _default_metrics():
         "csv_rechecked_today": 0,
         "csv_rechecked_lifetime": 0,
         "derived_addresses_today": 0,
+        "derived_addresses_lifetime": 0,
+        "altcoin_files_converted_today": 0,
+        "altcoin_files_converted_lifetime": 0,
         "altcoin_files_converted": 0,
         "altcoin_addresses_per_sec": 0,
         "altcoin_addresses_per_sec_avg": 0,
@@ -707,6 +807,7 @@ def _update_stat_internal(key, value=None, skip_history=False):
     else:
         metrics[key] = value
     maybe_persist_lifetime(key)
+    maybe_persist_daily(key)
     alias = METRIC_ALIASES.get(key)
     if alias:
         metrics[alias] = value
@@ -738,6 +839,7 @@ def increment_metric(key, amount=1):
         if alias:
             metrics[alias] = metrics.get(key)
     maybe_persist_lifetime(key)
+    maybe_persist_daily(key)
 
 
 def set_metric(key, value):

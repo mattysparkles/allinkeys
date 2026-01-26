@@ -357,6 +357,8 @@ def process_pending_vanity_outputs_once(logger) -> None:
         increment_metric("btc_only_matches_found_today", matches)
         increment_metric("addresses_checked_today.btc", rows)
         increment_metric("addresses_checked_lifetime.btc", rows)
+        increment_metric("matches_found_today.btc", matches)
+        increment_metric("matches_found_lifetime.btc", matches)
         try:
             update_dashboard_stat(
                 "addresses_checked_today",
@@ -365,6 +367,14 @@ def process_pending_vanity_outputs_once(logger) -> None:
             update_dashboard_stat(
                 "addresses_checked_lifetime",
                 get_metric("addresses_checked_lifetime"),
+            )
+            update_dashboard_stat(
+                "matches_found_today",
+                get_metric("matches_found_today"),
+            )
+            update_dashboard_stat(
+                "matches_found_lifetime",
+                get_metric("matches_found_lifetime"),
             )
         except Exception:
             pass
@@ -408,9 +418,9 @@ def btc_only_checker_loop(
 
     try:
         ensure_metrics_ready(shared_metrics)
-        register_control_events(shutdown_event, pause_event, module="btc_check")
-        _safe_set_metric("status.btc_check", "Running")
-        set_thread_health("btc_check", True)
+        register_control_events(shutdown_event, pause_event, module="csv_check")
+        _safe_set_metric("status.csv_check", "Running")
+        set_thread_health("csv_check", True)
     except Exception as e:
         logger.exception(f"btc_only_checker_loop init failed: {e}")
 
@@ -422,13 +432,15 @@ def btc_only_checker_loop(
             continue
         try:
             process_pending_vanity_outputs_once(logger)
-            set_metric("vanity_backlog_count", get_vanity_backlog_count())
+            backlog_count = get_vanity_backlog_count()
+            set_metric("vanity_backlog_count", backlog_count)
+            set_metric("backlog_files_queued", backlog_count)
         except Exception as e:
             logger.warning(f"btc_only_checker_loop tick failed: {e}")
         time.sleep(1)
 
-    _safe_set_metric("status.btc_check", "Stopped")
+    _safe_set_metric("status.csv_check", "Stopped")
     try:
-        set_thread_health("btc_check", False)
+        set_thread_health("csv_check", False)
     except Exception:
         logger.warning("Failed to update btc_check thread health", exc_info=True)
