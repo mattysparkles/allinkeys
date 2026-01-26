@@ -18,6 +18,7 @@ from config.telemetry import TOKEN_EXPIRY
 from telemetry_service.auth import create_access_token, hash_password, verify_password
 from telemetry_service.db import get_db_connection
 from telemetry_service.dependencies import get_current_user, get_optional_user
+from telemetry_service.error_logging import log_ingest_error
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
 from telemetry_service.routes.dashboard import router as dashboard_router
@@ -86,6 +87,43 @@ class SeedRangeResponse(BaseModel):
     since: Optional[str] = None
     mode: Optional[str] = None
     limit: Optional[int] = None
+
+
+class SeedPositionEntry(BaseModel):
+    seed_fingerprint: str
+    range_id: Optional[str] = None
+    mode: Optional[str] = None
+    machine_id: Optional[str] = None
+    machine_name: Optional[str] = None
+    timestamp: Optional[str] = None
+    normalized_position: Optional[float] = None
+    used: bool = False
+    match_found: bool = False
+
+
+class SeedPositionResponse(BaseModel):
+    limit: int
+    seeds: List[SeedPositionEntry]
+
+
+class SeedLookupNeighbor(BaseModel):
+    seed_fingerprint: str
+    normalized_position: Optional[float] = None
+    range_id: Optional[str] = None
+    timestamp: Optional[str] = None
+    difference: Optional[float] = None
+
+
+class SeedLookupResponse(BaseModel):
+    seed_fingerprint: str
+    range_id: Optional[str] = None
+    mode: Optional[str] = None
+    machine_id: Optional[str] = None
+    machine_name: Optional[str] = None
+    timestamp: Optional[str] = None
+    normalized_position: Optional[float] = None
+    neighbors: List[SeedLookupNeighbor] = Field(default_factory=list)
+
 
 
 class RangeDistributionEntry(BaseModel):
@@ -306,6 +344,23 @@ def _safe_load_json(payload: Optional[str]) -> List[Dict[str, Any]]:
     return []
 
 
+def _extract_normalized_position(payload: Optional[str]) -> Optional[float]:
+    if not payload:
+        return None
+    entries = _safe_load_json(payload)
+    for entry in reversed(entries):
+        normalized = entry.get("normalized_position")
+        if isinstance(normalized, (int, float)):
+            normalized_value = float(normalized)
+            return max(0.0, min(1.0, normalized_value))
+        normalized_min = entry.get("normalized_min")
+        normalized_max = entry.get("normalized_max")
+        if isinstance(normalized_min, (int, float)) and isinstance(normalized_max, (int, float)):
+            average = (float(normalized_min) + float(normalized_max)) / 2
+            return max(0.0, min(1.0, average))
+    return None
+
+
 def _merge_intervals(intervals: List[tuple[float, float]]) -> List[tuple[float, float]]:
     if not intervals:
         return []
@@ -382,6 +437,18 @@ def ingest(
     try:
         with conn:
             ingest_seed_events(items, current_user=current_user, conn=conn)
+    except Exception as exc:  # pragma: no cover (diagnostic trails)
+        log_ingest_error(
+            context="v1_seed_ingest",
+            exc=exc,
+            payload=[item.dict() for item in items],
+            tables=["seed_events", "machines"],
+            conn=conn,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to ingest telemetry batch",
+        ) from exc
     finally:
         conn.close()
     return IngestResponse(status="ok", count=len(items))
@@ -740,6 +807,166 @@ def seed_range(
         )
     finally:
         conn.close()
+
+
+@app.get(
+    "/v1/seed/positions",
+    response_model=SeedPositionResponse,
+    tags=["Seeds"],
+    description="Return recent seed events with normalized positions for visualization.",
+)
+def seed_positions(
+    since: Optional[str] = Query(None),
+    mode: Optional[str] = Query(None),
+    range_id: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=500),
+    current_user: UserPublic = Depends(get_current_user),
+) -> SeedPositionResponse:
+    parsed_since = _parse_since(since)
+    filters = ["user_id = ?", "range_recent IS NOT NULL"]
+    params: List[Any] = [current_user.id]
+    if mode:
+        filters.append("mode = ?")
+        params.append(mode)
+    if range_id:
+        filters.append("range_id = ?")
+        params.append(range_id)
+    if parsed_since:
+        filters.append("last_seen >= ?")
+        params.append(parsed_since)
+    where_clause = f"WHERE {' AND '.join(filters)}"
+    limit_value = max(1, min(limit, 500))
+    params.append(limit_value)
+
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT seed_fingerprint, range_id, mode, machine_id, machine_name, last_seen,
+                   used, match_found, range_recent
+            FROM seed_events
+            {where_clause}
+            ORDER BY last_seen DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    seeds = [
+        SeedPositionEntry(
+            seed_fingerprint=row[0],
+            range_id=row[1],
+            mode=row[2],
+            machine_id=row[3],
+            machine_name=row[4],
+            timestamp=row[5],
+            used=bool(row[6]),
+            match_found=bool(row[7]),
+            normalized_position=_extract_normalized_position(row[8]),
+        )
+        for row in rows
+    ]
+    return SeedPositionResponse(limit=limit_value, seeds=seeds)
+
+
+@app.get(
+    "/v1/seed/lookup",
+    response_model=SeedLookupResponse,
+    tags=["Seeds"],
+    description="Look up a specific seed fingerprint and nearby submissions based on range position.",
+)
+def seed_lookup(
+    seed_fingerprint: str = Query(...),
+    limit: int = Query(5, ge=1, le=50),
+    since: Optional[str] = Query(None),
+    current_user: UserPublic = Depends(get_current_user),
+) -> SeedLookupResponse:
+    parsed_since = _parse_since(since)
+    conn = get_db_connection()
+    try:
+        target_row = conn.execute(
+            """
+            SELECT seed_fingerprint, range_id, mode, machine_id, machine_name,
+                   last_seen, range_recent
+            FROM seed_events
+            WHERE seed_fingerprint = ? AND user_id = ?
+            ORDER BY last_seen DESC
+            LIMIT 1
+            """,
+            (seed_fingerprint, current_user.id),
+        ).fetchone()
+        if not target_row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Seed not found",
+            )
+        normalized_target = _extract_normalized_position(target_row[6])
+
+        neighbor_filters = ["user_id = ?", "range_recent IS NOT NULL"]
+        neighbor_params: List[Any] = [current_user.id]
+        if parsed_since:
+            neighbor_filters.append("last_seen >= ?")
+            neighbor_params.append(parsed_since)
+        where_clause = f"WHERE {' AND '.join(neighbor_filters)}"
+        neighbor_limit = min(max(limit * 25, 50), 1000)
+        neighbor_rows = conn.execute(
+            f"""
+            SELECT seed_fingerprint, range_id, last_seen, range_recent
+            FROM seed_events
+            {where_clause} AND seed_fingerprint != ?
+            ORDER BY last_seen DESC
+            LIMIT ?
+            """,
+            (*neighbor_params, seed_fingerprint, neighbor_limit),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    neighbors: List[SeedLookupNeighbor]
+    if normalized_target is not None:
+        candidates = []
+        for row in neighbor_rows:
+            entry_pos = _extract_normalized_position(row[3])
+            if entry_pos is None:
+                continue
+            diff = abs(entry_pos - normalized_target)
+            candidates.append((diff, row, entry_pos))
+        candidates.sort(key=lambda item: (item[0],))
+        selected = candidates[:limit]
+        neighbors = [
+            SeedLookupNeighbor(
+                seed_fingerprint=row[0],
+                range_id=row[1],
+                timestamp=row[2],
+                normalized_position=entry_pos,
+                difference=round(diff * 100, 2),
+            )
+            for diff, row, entry_pos in selected
+        ]
+    else:
+        neighbors = [
+            SeedLookupNeighbor(
+                seed_fingerprint=row[0],
+                range_id=row[1],
+                timestamp=row[2],
+                normalized_position=_extract_normalized_position(row[3]),
+                difference=None,
+            )
+            for row in neighbor_rows[:limit]
+        ]
+
+    return SeedLookupResponse(
+        seed_fingerprint=target_row[0],
+        range_id=target_row[1],
+        mode=target_row[2],
+        machine_id=target_row[3],
+        machine_name=target_row[4],
+        timestamp=target_row[5],
+        normalized_position=normalized_target,
+        neighbors=neighbors,
+    )
 
 
 @app.get(

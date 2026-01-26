@@ -9,11 +9,12 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from telemetry_contract import MachineTelemetrySnapshot
 from telemetry_service.db import get_db_connection
 from telemetry_service.dependencies import get_current_user, get_machine_for_user
+from telemetry_service.error_logging import log_ingest_error
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
-from telemetry_contract import MachineTelemetrySnapshot
 from telemetry_service.models import (
     ControlAckRequest,
     ControlCommand,
@@ -128,6 +129,7 @@ def register_machine(
     machine_id = str(uuid4())
     now = datetime.utcnow().isoformat() + "Z"
     conn = get_db_connection()
+    payload_data = payload.dict()
     try:
         conn.execute(
             """
@@ -146,8 +148,27 @@ def register_machine(
         )
         conn.commit()
     except sqlite3.IntegrityError as exc:
+        log_ingest_error(
+            context="register_machine",
+            exc=exc,
+            payload=payload_data,
+            tables=["machines"],
+            conn=conn,
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail="Machine registration failed",
+        ) from exc
+    except Exception as exc:  # pragma: no cover (guards unexpected failures)
+        log_ingest_error(
+            context="register_machine",
+            exc=exc,
+            payload=payload_data,
+            tables=["machines"],
+            conn=conn,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Machine registration failed",
         ) from exc
     finally:
@@ -276,6 +297,18 @@ def ingest_machine_telemetry(
                 machine_id_override=machine_id,
                 machine_name_override=machine_name,
             )
+    except Exception as exc:  # pragma: no cover (diagnostic logging)
+        log_ingest_error(
+            context="ingest_machine_telemetry",
+            exc=exc,
+            payload=[item.dict() for item in items],
+            tables=["seed_events", "machines"],
+            conn=conn,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to ingest telemetry items",
+        ) from exc
     finally:
         conn.close()
     return IngestResponse(status="ok", count=len(items))
@@ -309,6 +342,18 @@ def ingest_machine_snapshot(
                 gpu_info=gpu_info,
                 version=version,
             )
+    except Exception as exc:  # pragma: no cover (diagnostic capture)
+        log_ingest_error(
+            context="ingest_machine_snapshot",
+            exc=exc,
+            payload=payload.dict(),
+            tables=["machine_snapshots", "machines"],
+            conn=conn,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to ingest snapshot",
+        ) from exc
     finally:
         conn.close()
 

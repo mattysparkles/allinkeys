@@ -91,6 +91,10 @@ The machine identifier is hashed into an opaque `machine_id` and persisted in
 - Otherwise, a deterministic adjective‑noun name is generated from `machine_id`
   and stored in `logs/machine_identity.json`.
 
+The generated names now alternate between adjective-noun and noun-verb pairs,
+each drawn from curated lists (~1k adjectives, ~3k nouns, ~1k verbs) so every
+machine keeps a friendly, recognizable label even without manual overrides.
+
 Changing `MACHINE_NAME` updates the display name only; historical telemetry is
 still associated by the stable `machine_id`.
 
@@ -191,3 +195,16 @@ is aggregated across all users.
 - `GET /v1/dashboard/{slug}/ranges/recent`
 - `GET /v1/dashboard/{slug}/ranges/distribution`
 - `GET /v1/dashboard/{slug}/contributors/top`
+
+## Seed analytics endpoints
+
+`/v1/seed` supports a few additional helpers that power the dashboards:
+
+* `GET /v1/seed/positions` – returns the most recent seed submissions for the
+  authenticated user, each tagged with a normalized keyspace position (0–1) and
+  the usual metadata (`machine_id`, `range_id`, `used`, `match_found`). Supports
+  `since`, `mode`, `range_id`, and `limit` (max 500).
+* `GET /v1/seed/lookup` – look up a fingerprint to highlight it on the
+  distribution and return the closest `n` submissions (default 5, max 50)
+  ordered by distance inside the normalized space. Accepts `seed_fingerprint`,
+  `limit`, and `since`.

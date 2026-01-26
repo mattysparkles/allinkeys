@@ -187,6 +187,125 @@
         background: #0f1424;
         border-radius: 8px;
       }
+      .seed-panel {
+        margin-top: 32px;
+        padding: 24px;
+        border-radius: 18px;
+        border: 1px solid #232b41;
+        background: #0f1424;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .seed-header {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: flex-start;
+      }
+      .seed-header h2 {
+        margin: 0;
+        font-size: 18px;
+        color: #f5f7fb;
+      }
+      .seed-lookup-form {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .seed-lookup-form label {
+        display: flex;
+        flex-direction: column;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #9fa4b4;
+      }
+      .seed-lookup-form input {
+        min-width: 180px;
+      }
+      .seed-lookup-form button {
+        align-self: flex-end;
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: 1px solid #2d3240;
+        background: #1e293b;
+        color: #f5f7fb;
+        cursor: pointer;
+      }
+      .seed-table-wrapper {
+        max-width: 100%;
+        overflow-x: auto;
+      }
+      .seed-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .seed-table th,
+      .seed-table td {
+        padding: 10px;
+        border-bottom: 1px solid #1e2434;
+        text-align: left;
+      }
+      .seed-table th {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #9fa4b4;
+      }
+      .seed-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .seed-lookup-result {
+        min-height: 60px;
+        font-size: 13px;
+        color: #9fa4b4;
+      }
+      .seed-lookup-card {
+        background: #141a2b;
+        border-radius: 12px;
+        border: 1px solid #232b41;
+        padding: 12px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px;
+      }
+      .seed-lookup-card strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #9fa4b4;
+      }
+      .seed-neighbors {
+        margin-top: 12px;
+      }
+      .seed-neighbors ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .seed-neighbors li {
+        border: 1px solid #1e2434;
+        border-radius: 10px;
+        padding: 10px;
+        background: #0d1320;
+        font-family: "Courier New", monospace;
+        font-size: 11px;
+      }
+      .seed-lookup-error {
+        color: #f97316;
+      }
+      .text-slate {
+        color: #9fa4b4;
+        font-size: 11px;
+      }
     </style>
 {% endblock %}
 {% block content %}
@@ -252,6 +371,52 @@
       <canvas id="ramChart" width="560" height="140"></canvas>
     </section>
 
+    <section class="panel seed-panel">
+      <div class="seed-header">
+        <div>
+          <h2>Seed telemetry</h2>
+          <p class="subtitle">Recent submissions and seed lookup</p>
+        </div>
+        <form id="seedLookupForm" class="seed-lookup-form">
+          <label>
+            Seed fingerprint
+            <input id="seedLookupInput" type="text" placeholder="Enter fingerprint" />
+          </label>
+          <label>
+            Neighbors
+            <input
+              id="seedLookupLimit"
+              type="number"
+              min="1"
+              max="50"
+              value="5"
+            />
+          </label>
+          <button type="submit">Lookup</button>
+        </form>
+      </div>
+
+      <div class="seed-table-wrapper">
+        <table class="seed-table">
+          <thead>
+            <tr>
+              <th>Fingerprint</th>
+              <th>Range</th>
+              <th>Position</th>
+              <th>Last seen</th>
+              <th>Used</th>
+              <th>Match</th>
+            </tr>
+          </thead>
+          <tbody id="seedList">
+            <tr><td colspan="6">Loading seed activity…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="seedLookupResult" class="seed-lookup-result"></div>
+    </section>
+
 {% endblock %}
 {% block scripts %}
     <script>
@@ -273,6 +438,12 @@
       const kpsChart = document.getElementById("kpsChart");
       const cpuChart = document.getElementById("cpuChart");
       const ramChart = document.getElementById("ramChart");
+      const seedList = document.getElementById("seedList");
+      const seedLookupForm = document.getElementById("seedLookupForm");
+      const seedLookupInput = document.getElementById("seedLookupInput");
+      const seedLookupLimit = document.getElementById("seedLookupLimit");
+      const seedLookupResult = document.getElementById("seedLookupResult");
+      const seedPositionsLimit = 12;
 
       const numberFormatter = new Intl.NumberFormat(undefined, {
         maximumFractionDigits: 2,
@@ -303,11 +474,143 @@
         return date.toLocaleString();
       }
 
+      function formatPosition(value) {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+          return "—";
+        }
+        return `${(value * 100).toFixed(2)}%`;
+      }
+
+      function formatFlag(flag) {
+        if (flag === true) return "Yes";
+        if (flag === false) return "No";
+        return "—";
+      }
+
       function formatCommandValue(command, value) {
         if (!value) return "";
         if (command === "set_mode") return `Mode: ${value}`;
         if (command === "set_range") return `Range: ${value}`;
         return value;
+      }
+
+      async function loadSeedPositions() {
+        seedList.innerHTML = '<tr><td colspan="6">Loading seed activity…</td></tr>';
+        try {
+          const response = await fetch(`/v1/seed/positions?limit=${seedPositionsLimit}`, {
+            headers: getAuthHeaders(),
+          });
+          if (!response.ok) {
+            throw new Error("Failed to load seeds");
+          }
+          const data = await response.json();
+          const seeds = Array.isArray(data.seeds) ? data.seeds : [];
+          if (!seeds.length) {
+            seedList.innerHTML = '<tr><td colspan="6">No seed activity yet.</td></tr>';
+            return;
+          }
+          seedList.innerHTML = seeds
+            .map(
+              (seed) => `
+                <tr>
+                  <td>${seed.seed_fingerprint}</td>
+                  <td>${seed.range_id || "—"}</td>
+                  <td>${formatPosition(seed.normalized_position)}</td>
+                  <td>${formatDate(seed.timestamp)}</td>
+                  <td>${formatFlag(seed.used)}</td>
+                  <td>${formatFlag(seed.match_found)}</td>
+                </tr>
+              `
+            )
+            .join("");
+        } catch (error) {
+          seedList.innerHTML = '<tr><td colspan="6">Unable to load seed activity.</td></tr>';
+        }
+      }
+
+      function renderSeedLookup(data) {
+        const normalized = formatPosition(data.normalized_position);
+        const targetCard = `
+          <div class="seed-lookup-card">
+            <div>
+              <strong>Seed</strong>
+              <span>${data.seed_fingerprint}</span>
+            </div>
+            <div>
+              <strong>Range</strong>
+              <span>${data.range_id || "—"}</span>
+            </div>
+            <div>
+              <strong>Position</strong>
+              <span>${normalized}</span>
+            </div>
+            <div>
+              <strong>Machine</strong>
+              <span>${data.machine_name || data.machine_id || "—"}</span>
+            </div>
+            <div>
+              <strong>Mode</strong>
+              <span>${data.mode || "—"}</span>
+            </div>
+            <div>
+              <strong>Last seen</strong>
+              <span>${formatDate(data.timestamp)}</span>
+            </div>
+          </div>
+        `;
+        let neighborsMarkup = '<p class="text-slate">No nearby seeds available.</p>';
+        if (data.neighbors && data.neighbors.length) {
+          neighborsMarkup = `
+            <div class="seed-neighbors">
+              <strong>Closest submissions</strong>
+              <ul>
+                ${data.neighbors
+                  .map(
+                    (neighbor) => `
+                      <li>
+                        <div>${neighbor.seed_fingerprint}</div>
+                        <div>Range: ${neighbor.range_id || "—"}</div>
+                        <div>Position: ${formatPosition(neighbor.normalized_position)}</div>
+                        ${
+                          neighbor.difference !== null
+                            ? `<div class="text-slate">Δ ${neighbor.difference.toFixed(2)}%</div>`
+                            : ""
+                        }
+                      </li>
+                    `
+                  )
+                  .join("")}
+              </ul>
+            </div>
+          `;
+        }
+        seedLookupResult.innerHTML = targetCard + neighborsMarkup;
+      }
+
+      async function lookupSeed(fingerprint, limit) {
+        if (!fingerprint) {
+          seedLookupResult.innerHTML =
+            '<div class="seed-lookup-error">Enter a fingerprint to search.</div>';
+          return;
+        }
+        seedLookupResult.innerHTML = '<div class="seed-lookup-loading">Looking up…</div>';
+        try {
+          const params = new URLSearchParams({
+            seed_fingerprint: fingerprint,
+            limit: String(limit),
+          });
+          const response = await fetch(`/v1/seed/lookup?${params.toString()}`, {
+            headers: getAuthHeaders(),
+          });
+          if (!response.ok) {
+            throw new Error("Lookup failed");
+          }
+          const data = await response.json();
+          renderSeedLookup(data);
+        } catch (error) {
+          seedLookupResult.innerHTML =
+            '<div class="seed-lookup-error">Lookup failed. Check the fingerprint and try again.</div>';
+        }
       }
 
       function updateValueField() {
@@ -519,6 +822,7 @@
         fetchMachine();
         loadCommands();
         loadSnapshots();
+        loadSeedPositions();
       });
 
       controlForm.addEventListener("submit", async (event) => {
@@ -536,6 +840,18 @@
         });
       });
 
+      if (seedLookupForm) {
+        seedLookupForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const fingerprint = seedLookupInput.value.trim();
+          const neighbors = Math.min(
+            Math.max(parseInt(seedLookupLimit.value, 10) || 5, 1),
+            50
+          );
+          await lookupSeed(fingerprint, neighbors);
+        });
+      }
+
       if (authTokenFromHeader) {
         setStoredToken(authTokenFromHeader);
       }
@@ -545,10 +861,12 @@
       fetchMachine();
       loadCommands();
       loadSnapshots();
+      loadSeedPositions();
       setInterval(() => {
         fetchMachine();
         loadCommands();
         loadSnapshots();
+        loadSeedPositions();
       }, 10000);
     </script>
 {% endblock %}
