@@ -436,7 +436,12 @@ def parse_vanity_file(path):
 
 
 def run_vanitysearch_stream(
-    initial_seed_int, batch_id, index_within_batch, pause_event=None, gpu_flag=None
+    initial_seed_int,
+    batch_id,
+    index_within_batch,
+    pause_event=None,
+    gpu_flag=None,
+    shutdown_event=None,
 ):
     """
     Run one VanitySearch batch. A batch is one process invocation that writes
@@ -551,11 +556,13 @@ def run_vanitysearch_stream(
     )
 
     # Respect pause before launch
-    if pause_event and pause_event.is_set():
+    if (shutdown_event and shutdown_event.is_set()) or (
+        pause_event and pause_event.is_set()
+    ):
         log_with_context(
             logger,
             "INFO",
-            "⏸️ Pause detected before launch. Skipping VanitySearch run.",
+            "⏸️ Pause or shutdown detected before launch. Skipping VanitySearch run.",
             **_keygen_log_context(
                 batch_id=batch_id,
                 index_within_batch=index_within_batch,
@@ -573,9 +580,12 @@ def run_vanitysearch_stream(
             pattern=pattern,
             env={**os.environ, **gpu_env},
             pause_event=pause_event,
+            shutdown_event=shutdown_event,
         )
         last_output_file = str(current_output_path)
         if rc != 0 and pause_event and pause_event.is_set():
+            return False
+        if shutdown_event and shutdown_event.is_set():
             return False
     except RuntimeError:
         logger.exception("VanitySearch execution aborted due to safeguard.")
@@ -915,7 +925,12 @@ def start_keygen_loop(
                         pass
 
                 success = run_vanitysearch_stream(
-                    seed, KEYGEN_STATE["batch_id"], index, pause_evt, gpu_flag
+                    seed,
+                    KEYGEN_STATE["batch_id"],
+                    index,
+                    pause_evt,
+                    gpu_flag,
+                    shutdown_evt,
                 )
                 if not success:
                     time.sleep(1)
