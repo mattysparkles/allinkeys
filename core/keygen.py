@@ -623,11 +623,21 @@ def run_vanitysearch_stream(
             total_keys_generated += lines
             increment_metric("keys_generated_today", lines)
             increment_metric("keys_generated_lifetime", lines)
+            increment_metric("addresses_generated_today.btc", lines)
+            increment_metric("addresses_generated_lifetime.btc", lines)
             update_dashboard_stat(
                 "keys_generated_today", get_metric("keys_generated_today")
             )
             update_dashboard_stat(
                 "keys_generated_lifetime", get_metric("keys_generated_lifetime")
+            )
+            update_dashboard_stat(
+                "addresses_generated_today",
+                get_metric("addresses_generated_today"),
+            )
+            update_dashboard_stat(
+                "addresses_generated_lifetime",
+                get_metric("addresses_generated_lifetime"),
             )
             if first_seed is not None and last_seed is not None:
                 record_seed_range(first_seed, last_seed)
