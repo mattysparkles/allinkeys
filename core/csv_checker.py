@@ -383,12 +383,16 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                 )
                                 if addr and in_funded:
                                     try:
+                                        privkey_wif = row.get("wif") or row.get("private_key") or row.get("priv_wif")
+                                        privkey_hex = row.get("priv_hex") or row.get("private_key_hex")
                                         match_payload = {
                                             "timestamp": datetime.utcnow().isoformat(),
                                             "coin": coin,
                                             "address": addr,
                                             "csv_file": filename,
-                                            "privkey": row.get("wif") or row.get("private_key") or row.get("priv_hex") or "unknown",
+                                            "privkey": privkey_wif or privkey_hex or "unknown",
+                                            "privkey_wif": privkey_wif or "unknown",
+                                            "privkey_hex": privkey_hex or "unknown",
                                             "batch_id": row.get("batch_id", "n/a"),
                                             "index": row.get("index", "n/a"),
                                             "row_number": rows_scanned
@@ -400,33 +404,51 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                         balance = None
                                         if filename != "test_alerts.csv":
                                             balance = fetch_live_balance(addr, coin)
-                                        if coin == 'btc':
-                                            log_msg = (
-                                                f"[{match_payload['timestamp']}] coin=BTC addr={addr} addr_type={atype} "
-                                                f"witness_ver={match_payload['witness_ver']} balance={balance if balance is not None else 'unknown'} "
-                                                f"file={filename} row={rows_scanned}"
-                                            )
-                                        else:
-                                            log_msg = (
-                                                f"[{match_payload['timestamp']}] coin={coin} address={addr} "
-                                                f"balance={balance if balance is not None else 'unknown'} file={filename} row={rows_scanned}"
-                                            )
-                                        print(log_msg)
-                                        logger.info(log_msg)
-
                                         if balance is not None:
                                             match_payload["balance"] = balance
 
+                                        output_payload = match_payload
                                         if ENABLE_PGP:
                                             try:
                                                 encrypted = encrypt_with_pgp(json.dumps(match_payload), PGP_PUBLIC_KEY_PATH)
+                                                output_payload = {"encrypted": encrypted}
                                                 alert_match(match_payload)
                                                 alert_match({"encrypted": encrypted})
+                                                log_msg = f"[{match_payload['timestamp']}] encrypted_match={encrypted}"
                                             except Exception as pgp_err:
                                                 logger.warning(f"⚠️ PGP failed for {addr}: {pgp_err}")
+                                                if coin == 'btc':
+                                                    log_msg = (
+                                                        f"[{match_payload['timestamp']}] coin=BTC addr={addr} addr_type={atype} "
+                                                        f"witness_ver={match_payload['witness_ver']} privkey_wif={match_payload['privkey_wif']} "
+                                                        f"privkey_hex={match_payload['privkey_hex']} "
+                                                        f"balance={balance if balance is not None else 'unknown'} file={filename} row={rows_scanned}"
+                                                    )
+                                                else:
+                                                    log_msg = (
+                                                        f"[{match_payload['timestamp']}] coin={coin} address={addr} "
+                                                        f"privkey_wif={match_payload['privkey_wif']} privkey_hex={match_payload['privkey_hex']} "
+                                                        f"balance={balance if balance is not None else 'unknown'} file={filename} row={rows_scanned}"
+                                                    )
                                                 alert_match(match_payload)
                                         else:
+                                            if coin == 'btc':
+                                                log_msg = (
+                                                    f"[{match_payload['timestamp']}] coin=BTC addr={addr} addr_type={atype} "
+                                                    f"witness_ver={match_payload['witness_ver']} privkey_wif={match_payload['privkey_wif']} "
+                                                    f"privkey_hex={match_payload['privkey_hex']} "
+                                                    f"balance={balance if balance is not None else 'unknown'} file={filename} row={rows_scanned}"
+                                                )
+                                            else:
+                                                log_msg = (
+                                                    f"[{match_payload['timestamp']}] coin={coin} address={addr} "
+                                                    f"privkey_wif={match_payload['privkey_wif']} privkey_hex={match_payload['privkey_hex']} "
+                                                    f"balance={balance if balance is not None else 'unknown'} file={filename} row={rows_scanned}"
+                                                )
                                             alert_match(match_payload)
+
+                                        print(log_msg)
+                                        logger.info(log_msg)
 
                                         if normalized not in new_matches:
                                             new_matches.add(normalized)
@@ -438,7 +460,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                                 _safe_inc_metric(f"matches_found_lifetime.{atype}", 1)
                                             update_dashboard_stat("matches_found_lifetime", get_metric("matches_found_lifetime"))
                                         row_matches.append(addr)
-                                        all_matches.append(match_payload)
+                                        all_matches.append(output_payload)
                                         logger.debug("[STATUS] CSV Checker continuing without interruption")
                                     except Exception as match_err:
                                         logger.exception(f"Match processing error for {addr}: {match_err}")
