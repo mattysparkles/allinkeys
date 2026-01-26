@@ -56,7 +56,8 @@ def clean_address_file(file_path):
 def load_btc_funded_multi(file_path):
     """Load BTC funded addresses split by type.
 
-    Returns dict with keys 'p2pkh', 'p2sh', 'bech32'. Also returns the union
+    Returns dict with keys 'p2pkh' and 'bech32'. The 'p2sh' key is retained
+    for backward compatibility but is always empty. Also returns the union
     set for backward compatibility as the key 'all'.
     """
     sets = {"p2pkh": set(), "p2sh": set(), "bech32": set()}
@@ -68,14 +69,12 @@ def load_btc_funded_multi(file_path):
                     continue
                 if addr.startswith('1'):
                     sets['p2pkh'].add(addr)
-                elif addr.startswith('3'):
-                    sets['p2sh'].add(addr)
                 elif addr.lower().startswith('bc1'):
                     addr = addr.lower() if NORMALIZE_BECH32_LOWER else addr
                     sets['bech32'].add(addr)
     except Exception as exc:
         log_message(f"⚠️ Failed to load BTC funded addresses: {exc}", "WARN")
-    sets['all'] = sets['p2pkh'] | sets['p2sh'] | sets['bech32']
+    sets['all'] = sets['p2pkh'] | sets['bech32']
     return sets
 
 
@@ -244,13 +243,13 @@ def _download_single_coin(coin: str, urls: list[str]) -> None:
                 lines = []
                 for line in f:
                     addr = line.strip()
-                    if addr.startswith("1") or addr.startswith("3") or addr.lower().startswith("bc1"):
+                    if addr.startswith("1") or addr.lower().startswith("bc1"):
                         if NORMALIZE_BECH32_LOWER and addr.lower().startswith("bc1"):
                             addr = addr.lower()
                         lines.append(addr + "\n")
             with open(output_full, "w", encoding="utf-8") as f:
                 f.writelines(lines)
-            log_message(f"{coin.upper()}: Filtered for addresses starting with '1','3','bc1'")
+            log_message(f"{coin.upper()}: Filtered for addresses starting with '1','bc1'")
 
         clean_address_file(output_full)
 

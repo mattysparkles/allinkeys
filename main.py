@@ -134,6 +134,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--enable-bc1", action="store_true", help="Enable bc1/bech32 address generation"
     )
     parser.add_argument(
+        "--bc1",
+        action="store_true",
+        help="Use bc1/bech32 funded list and force bc1 vanity pattern (disables legacy P2PKH)",
+    )
+    parser.add_argument(
         "--only",
         type=_parse_only,
         dest="only",
@@ -150,6 +155,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--gpu-index", type=int, help="Force use of a specific GPU device index"
+    )
+    parser.add_argument(
+        "-v",
+        "--vanity",
+        dest="vanity_prefix",
+        help="Custom vanity prefix/pattern for VanitySearch (e.g., 1nasty)",
+    )
+    parser.add_argument(
+        "-q",
+        "--case-insensitive",
+        action="store_true",
+        help="Use case-insensitive vanity matching",
     )
     puzzle_group = parser.add_mutually_exclusive_group()
     puzzle_group.add_argument(
@@ -413,6 +430,20 @@ def main(argv: list[str] | None = None) -> int:
             args.mode = "btc_only"
 
     handle_puzzle_mode(args)
+    if getattr(args, "case_insensitive", False):
+        settings.VANITY_CASE_INSENSITIVE = True
+    if getattr(args, "bc1", False):
+        settings.BTC_FUNDED_ADDRESS_MODE = "bech32"
+        settings.ENABLE_P2WPKH = True
+        settings.ENABLE_TAPROOT = True
+        settings.ENABLE_P2PKH = False
+        if not settings.PUZZLE_MODE and not getattr(args, "vanity_prefix", None):
+            settings.VANITY_PATTERN = "bc1**"
+    if getattr(args, "enable_bc1", False):
+        settings.ENABLE_P2WPKH = True
+        settings.ENABLE_TAPROOT = True
+    if getattr(args, "vanity_prefix", None) and not settings.PUZZLE_MODE:
+        settings.VANITY_PATTERN = args.vanity_prefix
 
     if args.mode not in PLUGIN_REGISTRY:
         print(f"Unknown mode '{args.mode}'.", file=sys.stderr)

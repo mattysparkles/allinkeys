@@ -482,9 +482,11 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
 def run_allinkeys(args, shared_metrics=None):
     # Enable bech32 modes when explicitly requested via CLI.  Settings
     # default to legacy P2PKH only.
-    if getattr(args, "enable_bc1", False):
+    if getattr(args, "enable_bc1", False) or getattr(args, "bc1", False):
         settings.ENABLE_P2WPKH = True
         settings.ENABLE_TAPROOT = True
+    if getattr(args, "bc1", False):
+        settings.ENABLE_P2PKH = False
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(CSV_DIR, exist_ok=True)
     start_listener()
