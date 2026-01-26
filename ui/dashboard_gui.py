@@ -22,7 +22,7 @@ translation = gettext.translation(
 )
 _ = translation.gettext
 
-import settings
+from config import settings as settings
 
 SPARKLINE_POINT_COUNT = 50
 SPARKLINE_HEIGHT = 30
@@ -142,12 +142,20 @@ class DashboardGUI:
             "p2pkh" if ENABLE_P2PKH else ("p2wpkh" if ENABLE_P2WPKH else "taproot")
         )
         self.addr_type_var = tk.StringVar(value=initial)
+        try:
+            set_metric("btc_address_mode", initial)
+        except Exception:
+            pass
 
         def _select_addr_type():
             sel = self.addr_type_var.get()
             settings.ENABLE_P2PKH = sel == "p2pkh"
             settings.ENABLE_P2WPKH = sel == "p2wpkh"
             settings.ENABLE_TAPROOT = sel == "taproot"
+            try:
+                set_metric("btc_address_mode", sel)
+            except Exception:
+                pass
             try:
                 from core.dashboard import module_pause_events
 
@@ -638,9 +646,9 @@ class DashboardGUI:
             print(f"[GUI] Failed to load settings: {e}", flush=True)
 
     def handle_pause_resume(self, module_name, display_label=None):
-        from core.dashboard import module_pause_events
+        from core.dashboard import module_pause_events, get_pause_event
 
-        ev = module_pause_events.get(module_name)
+        ev = module_pause_events.get(module_name) or get_pause_event(module_name)
         if not ev:
             print(f"[GUI] ⚠️ No pause event for {module_name}", flush=True)
             return

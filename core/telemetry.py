@@ -67,7 +67,7 @@ from config.telemetry import (
     TELEMETRY_SNAPSHOT_SECONDS,
 )
 from core.logger import get_logger, log_with_context
-from core.worker_bootstrap import _safe_inc_metric
+from core.worker_bootstrap import _safe_inc_metric, _safe_set_metric
 from utils.thread_guard import can_spawn_thread
 from utils.machine_identity import (
     get_machine_id,
@@ -1339,6 +1339,7 @@ class TelemetryClient:
             batch = self._fetch_batch(conn)
             if not batch:
                 self._backoff = self.flush_seconds
+                _safe_set_metric("telemetry_flush_rate", 0)
                 return True
             ids, payloads = zip(*batch)
             try:
@@ -1348,6 +1349,7 @@ class TelemetryClient:
                     f"[Telemetry] Flushing {len(ids)} event(s) to {self.endpoint}",
                     **_telemetry_log_context(endpoint=self.endpoint),
                 )
+                started_at = time.perf_counter()
                 response = self._send_batch([json.loads(p) for p in payloads])
             except Exception as exc:
                 self._backoff = min(self._backoff * 2, self.max_backoff)
@@ -1362,6 +1364,7 @@ class TelemetryClient:
                     )
                 except Exception:
                     pass
+                _safe_set_metric("telemetry_flush_rate", 0)
                 return False
             with conn:
                 conn.execute(
@@ -1369,6 +1372,8 @@ class TelemetryClient:
                     ids,
                 )
             self._backoff = self.flush_seconds
+            duration = max(time.perf_counter() - started_at, 0.001)
+            _safe_set_metric("telemetry_flush_rate", round(len(ids) / duration, 2))
             try:
                 status = getattr(response, "status_code", "?")
                 log_with_context(

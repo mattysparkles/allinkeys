@@ -798,7 +798,8 @@ def start_keygen_loop(
         )
 
     # Initialize dashboard metrics so the GUI never shows N/A
-    set_metric("keys_generated_today", 0)
+    if get_metric("keys_generated_today", None) is None:
+        set_metric("keys_generated_today", 0)
     set_metric("vanity_progress_percent", 0)
     set_metric("current_seed_index", KEYGEN_STATE["index_within_batch"])
     set_metric("current_seed", KEYGEN_STATE.get("last_seed", "0x0"))
@@ -824,9 +825,20 @@ def start_keygen_loop(
         pause_logged = False
         pause_log_ts = 0.0
 
+        last_addr_mode = None
         while True:
             if shutdown_evt and shutdown_evt.is_set():
                 break
+
+            try:
+                addr_mode = get_metric("btc_address_mode", None)
+                if addr_mode and addr_mode != last_addr_mode:
+                    settings.ENABLE_P2PKH = addr_mode == "p2pkh"
+                    settings.ENABLE_P2WPKH = addr_mode == "p2wpkh"
+                    settings.ENABLE_TAPROOT = addr_mode == "taproot"
+                    last_addr_mode = addr_mode
+            except Exception:
+                pass
 
             if pause_evt and pause_evt.is_set():
                 # Emit a heartbeat log every 5s while paused so the user knows it's alive

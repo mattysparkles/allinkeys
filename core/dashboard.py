@@ -22,6 +22,9 @@ from config.settings import (
     GPU_STRATEGY,
     PAUSE_WARNING_RATELIMIT_SECONDS,
     COIN_DOWNLOAD_URLS,
+    ENABLE_P2PKH,
+    ENABLE_P2WPKH,
+    ENABLE_TAPROOT,
 )
 from config.directories import LOG_DIR
 try:
@@ -519,6 +522,9 @@ def _default_metrics():
         "vanitysearch_current_mkeys": 0.0,
         "vanitysearch_backend": "cpu",
         "vanitysearch_device_name": "N/A",
+        "btc_address_mode": (
+            "p2pkh" if ENABLE_P2PKH else ("p2wpkh" if ENABLE_P2WPKH else "taproot")
+        ),
         "keys_per_sec": 0,
         "active_gpus": {},
         "csv_checked_today": 0,
