@@ -115,6 +115,13 @@ BTC_MIN_FILE_AGE_SEC = 2.0  # ignore files newer than this
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
 
+# === Puzzle mode defaults ===
+PUZZLE_MODE = False
+PUZZLE_NUMBER = None
+PUZZLE_START = "0x0"
+PUZZLE_END = "0x0"
+PUZZLE_CHUNK_INDEX = None
+
 
 def _init_api_key(var: str) -> str:
     """Return API key from environment and track missing optional integrations."""
