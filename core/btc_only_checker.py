@@ -14,7 +14,7 @@ from config.settings import (
     BTC_MIN_FILE_AGE_SEC,
 )
 from config.directories import VANITY_OUTPUT_DIR, ALL_BTC_ADDRESSES_DIR
-from core.dashboard import set_metric, increment_metric
+from core.dashboard import set_metric, increment_metric, update_dashboard_stat, get_metric
 from utils.file_utils import find_latest_funded_file
 from core.btc_ranges import (
     ensure_all_btc_ranges_ready,
@@ -349,6 +349,17 @@ def process_pending_vanity_outputs_once(logger) -> None:
         increment_metric("btc_only_matches_found_today", matches)
         increment_metric("addresses_checked_today.btc", rows)
         increment_metric("addresses_checked_lifetime.btc", rows)
+        try:
+            update_dashboard_stat(
+                "addresses_checked_today",
+                get_metric("addresses_checked_today"),
+            )
+            update_dashboard_stat(
+                "addresses_checked_lifetime",
+                get_metric("addresses_checked_lifetime"),
+            )
+        except Exception:
+            pass
         PROCESSED_VANITY.add(name)
         try:
             Path(sorted_path).unlink(missing_ok=True)
