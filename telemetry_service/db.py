@@ -11,6 +11,60 @@ DB_PATH = os.getenv(
     ),
 )
 
+TABLE_COLUMN_DEFINITIONS = {
+    "seed_events": {
+        "machine_id": "TEXT",
+        "machine_name": "TEXT",
+        "range_value": "INTEGER",
+        "range_recent": "TEXT",
+        "range_distribution": "TEXT",
+        "reference_overlays": "TEXT",
+        "user_id": "INTEGER",
+    },
+    "machines": {
+        "gpu_info": "TEXT",
+        "version": "TEXT",
+        "status": "TEXT",
+        "last_seen": "TIMESTAMP",
+        "keys_per_sec": "REAL",
+        "total_keys": "REAL",
+        "uptime_seconds": "REAL",
+        "mode": "TEXT",
+        "process_state": "TEXT",
+        "cpu_percent": "REAL",
+        "ram_percent": "REAL",
+        "disk_free_percent": "REAL",
+        "gpu_load_percent": "REAL",
+        "last_error": "TEXT",
+        "last_activity": "TEXT",
+    },
+    "machine_snapshots": {
+        "payload": "TEXT",
+        "keys_per_sec": "REAL",
+        "total_keys": "REAL",
+        "uptime_seconds": "REAL",
+        "mode": "TEXT",
+        "process_state": "TEXT",
+        "cpu_percent": "REAL",
+        "ram_percent": "REAL",
+        "disk_free_percent": "REAL",
+        "gpu_load_percent": "REAL",
+        "last_error": "TEXT",
+        "last_activity": "TEXT",
+    },
+}
+
+
+def _ensure_table_columns(
+    conn: sqlite3.Connection, table: str, columns: dict[str, str]
+) -> None:
+    existing_columns = {
+        row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    for name, col_type in columns.items():
+        if name not in existing_columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
+
 
 def get_db_connection() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -33,21 +87,7 @@ def get_db_connection() -> sqlite3.Connection:
         );
         """
     )
-    existing_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(seed_events)").fetchall()
-    }
-    optional_columns = {
-        "machine_id": "TEXT",
-        "machine_name": "TEXT",
-        "range_recent": "TEXT",
-        "range_distribution": "TEXT",
-        "reference_overlays": "TEXT",
-    }
-    for name, col_type in optional_columns.items():
-        if name not in existing_cols:
-            conn.execute(f"ALTER TABLE seed_events ADD COLUMN {name} {col_type}")
-    if "user_id" not in existing_cols:
-        conn.execute("ALTER TABLE seed_events ADD COLUMN user_id INTEGER")
+    _ensure_table_columns(conn, "seed_events", TABLE_COLUMN_DEFINITIONS["seed_events"])
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_seed_fingerprint ON seed_events(seed_fingerprint)"
     )
@@ -122,26 +162,7 @@ def get_db_connection() -> sqlite3.Connection:
             row[1]: row[2].upper()
             for row in conn.execute("PRAGMA table_info(machines)").fetchall()
         }
-    optional_machine_columns = {
-        "gpu_info": "TEXT",
-        "version": "TEXT",
-        "status": "TEXT",
-        "last_seen": "TIMESTAMP",
-        "keys_per_sec": "REAL",
-        "total_keys": "REAL",
-        "uptime_seconds": "REAL",
-        "mode": "TEXT",
-        "process_state": "TEXT",
-        "cpu_percent": "REAL",
-        "ram_percent": "REAL",
-        "disk_free_percent": "REAL",
-        "gpu_load_percent": "REAL",
-        "last_error": "TEXT",
-        "last_activity": "TEXT",
-    }
-    for name, col_type in optional_machine_columns.items():
-        if name not in machine_columns:
-            conn.execute(f"ALTER TABLE machines ADD COLUMN {name} {col_type}")
+    _ensure_table_columns(conn, "machines", TABLE_COLUMN_DEFINITIONS["machines"])
     conn.execute("DROP INDEX IF EXISTS idx_machine_user_name")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_machine_user ON machines(user_id)"
@@ -205,30 +226,11 @@ def get_db_connection() -> sqlite3.Connection:
             last_error TEXT,
             last_activity TEXT,
             FOREIGN KEY(machine_id) REFERENCES machines(id),
-            FOREIGN KEY(user_id) REFERENCES users(id)
+        FOREIGN KEY(user_id) REFERENCES users(id)
         );
         """
     )
-    snapshot_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(machine_snapshots)").fetchall()
-    }
-    snapshot_optional_columns = {
-        "payload": "TEXT",
-        "keys_per_sec": "REAL",
-        "total_keys": "REAL",
-        "uptime_seconds": "REAL",
-        "mode": "TEXT",
-        "process_state": "TEXT",
-        "cpu_percent": "REAL",
-        "ram_percent": "REAL",
-        "disk_free_percent": "REAL",
-        "gpu_load_percent": "REAL",
-        "last_error": "TEXT",
-        "last_activity": "TEXT",
-    }
-    for name, col_type in snapshot_optional_columns.items():
-        if name not in snapshot_cols:
-            conn.execute(f"ALTER TABLE machine_snapshots ADD COLUMN {name} {col_type}")
+    _ensure_table_columns(conn, "machine_snapshots", TABLE_COLUMN_DEFINITIONS["machine_snapshots"])
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_machine_snapshots_machine_time

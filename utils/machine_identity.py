@@ -15,61 +15,10 @@ from typing import Any, Dict, Optional, Tuple
 
 import config.settings as settings
 from config.directories import LOG_DIR
+from utils.word_lists import ADJECTIVES, NOUNS, VERBS
 
 STATE_PATH = Path(LOG_DIR) / "machine_identity.json"
 
-_ADJECTIVES = [
-    "Amber",
-    "Brisk",
-    "Cosmic",
-    "Dapper",
-    "Electric",
-    "Frosted",
-    "Golden",
-    "Harbor",
-    "Indigo",
-    "Jolly",
-    "Keen",
-    "Lunar",
-    "Mellow",
-    "Nimble",
-    "Orbit",
-    "Prismatic",
-    "Quirky",
-    "Radiant",
-    "Solar",
-    "Tidal",
-    "Umbral",
-    "Vivid",
-    "Wry",
-    "Zesty",
-]
-
-_NOUNS = [
-    "Aurora",
-    "Beacon",
-    "Comet",
-    "Drift",
-    "Ember",
-    "Falcon",
-    "Gizmo",
-    "Harbor",
-    "Isotope",
-    "Jade",
-    "Kestrel",
-    "Lattice",
-    "Nimbus",
-    "Orbit",
-    "Pulse",
-    "Quartz",
-    "River",
-    "Signal",
-    "Tango",
-    "Union",
-    "Vector",
-    "Whisper",
-    "Zenith",
-]
 
 
 def _ensure_state_dir() -> None:
@@ -183,10 +132,16 @@ def get_machine_id() -> str:
 
 
 def _generate_machine_name(machine_id: str) -> str:
-    digest = hashlib.sha256(machine_id.encode("utf-8")).hexdigest()
-    adj_index = int(digest[:8], 16) % len(_ADJECTIVES)
-    noun_index = int(digest[8:16], 16) % len(_NOUNS)
-    return f"{_ADJECTIVES[adj_index]}-{_NOUNS[noun_index]}"
+    digest = hashlib.sha256(machine_id.encode("utf-8")).digest()
+    if len(digest) < 20:
+        digest = hashlib.sha256(machine_id.encode("utf-8")).digest()
+    variant = digest[0] % 2
+    adj_index = int.from_bytes(digest[1:5], "big") % len(ADJECTIVES)
+    noun_index = int.from_bytes(digest[5:9], "big") % len(NOUNS)
+    verb_index = int.from_bytes(digest[9:13], "big") % len(VERBS)
+    if variant == 0:
+        return f"{ADJECTIVES[adj_index]}-{NOUNS[noun_index]}"
+    return f"{NOUNS[noun_index]}-{VERBS[verb_index]}"
 
 
 def get_machine_name(machine_id: Optional[str] = None) -> str:

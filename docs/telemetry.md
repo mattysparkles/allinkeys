@@ -133,6 +133,36 @@ Example response:
 }
 ```
 
+### `GET /v1/seed/positions`
+
+Returns recent submissions along with their estimated keyspace positions. The
+normalized position (0–1) comes from the ranges recorded around the seed and is
+used to render density charts in the dashboards.
+
+Supports the usual filters (`mode`, `range_id`, `since`) plus `limit`
+(default 20, max 500).
+
+Fields:
+
+| Field | Description |
+| --- | --- |
+| `seed_fingerprint` | Opaque identifier sent by the client |
+| `range_id` | Range bucket covering the submission |
+| `normalized_position` | Estimated location inside the keyspace |
+| `machine_id` / `machine_name` | Source machine metadata |
+| `used` / `match_found` | Flags sent by the uploader |
+| `timestamp` | Last seen time for the seed |
+
+### `GET /v1/seed/lookup`
+
+Look up a fingerprint to highlight where it sits in the distribution and
+retrieve the closest `n` seeds (default 5, max 50) with respect to normalized
+positions. The endpoint accepts `seed_fingerprint`, `limit`, and `since`.
+
+The response includes the requested seed plus a list of neighbors with
+absolute Δ values (percent) so the dashboards can emphasize proximity on the
+graph.
+
 ## Telemetry dashboard endpoints
 
 Dashboard endpoints power the public telemetry UI. If a bearer token is
