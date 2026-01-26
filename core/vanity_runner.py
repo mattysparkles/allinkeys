@@ -309,6 +309,15 @@ def run_vanitysearch(
         logger.info("Keygen paused; skipping VanitySearch job")
         return False
 
+    def _requires_cpu_fallback(vanity_pattern: str, backend_name: str) -> bool:
+        if backend_name not in ("cuda", "opencl"):
+            return False
+        if not vanity_pattern:
+            return False
+        if not vanity_pattern.lower().startswith("bc1"):
+            return False
+        return "*" in vanity_pattern or "?" in vanity_pattern
+
     if backend == "oclvanitygen":
         pattern = seed_args[0] if seed_args else DEFAULT_BTC_PATTERNS[0]
         output_path = _reserve_output_path(
@@ -322,15 +331,23 @@ def run_vanitysearch(
             addr_mode=addr_mode,
         )
 
-    binary = resolve_vanitysearch_binary(backend)
-    base_cmd = [binary] + seed_args
-    logger.info(f"Base VanitySearch command: {' '.join(base_cmd)}")
-
     # Ensure pattern (last element of seed_args) remains final CLI arg
     if seed_args:
         core_args, pattern = seed_args[:-1], seed_args[-1]
     else:
         core_args, pattern = [], ""
+
+    if _requires_cpu_fallback(pattern, backend):
+        _warn_once(
+            "bech32_gpu_unsupported",
+            "Bech32 wildcard patterns are not supported by VanitySearch GPU backend; falling back to CPU.",
+        )
+        backend = "cpu"
+        device_id = None
+
+    binary = resolve_vanitysearch_binary(backend)
+    base_cmd = [binary] + seed_args
+    logger.info(f"Base VanitySearch command: {' '.join(base_cmd)}")
 
     # IMPORTANT: Pass the FINAL output path directly to VanitySearch via -o.
     # Do not introduce Python-side rotation, temp files, or stdout rewriting.
