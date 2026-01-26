@@ -478,6 +478,7 @@ def run_vanitysearch_batch(
     env: Optional[Dict[str, str]] = None,
     timeout: Optional[int] = None,
     pause_event=None,
+    shutdown_event=None,
     stdout_setting=None,
     max_lines: Optional[int] = None,
     max_bytes: Optional[int] = None,
@@ -533,6 +534,10 @@ def run_vanitysearch_batch(
     rotation_before_write = False
     logger.info("Waiting for first output write...")
     while proc.poll() is None and first_write_size is None:
+        if shutdown_event and shutdown_event.is_set():
+            logger.info("Shutdown requested before first output write; stopping VanitySearch.")
+            proc.terminate()
+            break
         try:
             file_size = output_path.stat().st_size
         except FileNotFoundError:
@@ -556,6 +561,14 @@ def run_vanitysearch_batch(
             break
         time.sleep(0.5)
 
+    if shutdown_event and shutdown_event.is_set():
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        return output_path, proc.returncode or 0, rotation_info
+
     if rotation_before_write:
         logger.info("Rotation triggered before first output write; skipping parser attach.")
         try:
@@ -577,8 +590,17 @@ def run_vanitysearch_batch(
 
     while proc.poll() is None:
         if parser is None:
+            if shutdown_event and shutdown_event.is_set():
+                logger.info("Shutdown requested; stopping VanitySearch before parser attach.")
+                proc.terminate()
+                break
             time.sleep(0.5)
             continue
+        if shutdown_event and shutdown_event.is_set():
+            _stop_parser("shutdown", rotation=False)
+            parser_detached = True
+            proc.terminate()
+            break
         if pause_event and pause_event.is_set():
             _stop_parser("pause", rotation=False)
             parser_detached = True
