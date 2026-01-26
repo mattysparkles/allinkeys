@@ -690,7 +690,10 @@ def init_shared_metrics(shared_dict=None):
         return
     if _metrics is not None:
         return
-    use_manager = os.name != "nt"
+    # Use a Manager-backed dict on all platforms so subprocesses share metrics.
+    # This must only be created in the parent process (callers should pass
+    # shared_dict in child processes).
+    use_manager = True
     if shared_dict is not None:
         _manager = None
         _metrics = shared_dict
