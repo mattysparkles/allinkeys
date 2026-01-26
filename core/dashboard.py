@@ -678,9 +678,18 @@ def init_shared_metrics(shared_dict=None):
     dictionary.
     """
     global _manager, _metrics, _metrics_lock, manager, metrics, metrics_lock
+    import multiprocessing as mp
+    if shared_dict is not None:
+        if _metrics is not shared_dict:
+            _manager = None
+            _metrics = shared_dict
+            _metrics_lock = threading.RLock() if os.name == "nt" else mp.RLock()
+            manager = _manager
+            metrics = _metrics
+            metrics_lock = _metrics_lock
+        return
     if _metrics is not None:
         return
-    import multiprocessing as mp
     use_manager = os.name != "nt"
     if shared_dict is not None:
         _manager = None

@@ -471,7 +471,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.mode == "mnemonic":
         logger.info("[Startup] Mnemonic derivation pipeline enabled")
 
-    shared_metrics = None
+    from core.dashboard import init_dashboard_manager
+
+    shared_metrics = init_dashboard_manager()
     result = PLUGIN_REGISTRY[args.mode].start(shared_metrics, args)
     return result if isinstance(result, int) else 0
 
