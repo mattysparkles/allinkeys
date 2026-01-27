@@ -71,6 +71,7 @@ from core.worker_bootstrap import _safe_inc_metric, _safe_set_metric
 from utils.thread_guard import can_spawn_thread
 from utils.machine_identity import (
     get_machine_id,
+    get_machine_identity,
     get_machine_name,
     get_machine_name_state,
     set_machine_name,
@@ -271,6 +272,8 @@ def _snapshot_from_metrics(
     *,
     machine_id: str,
     machine_name: Optional[str],
+    machine_identity: Optional[str],
+    display_name: Optional[str],
     app_instance_id: str,
     client_version: Optional[str],
 ) -> MachineTelemetrySnapshot:
@@ -299,6 +302,8 @@ def _snapshot_from_metrics(
     identity = MachineIdentity(
         machine_id=machine_id,
         machine_name=machine_name,
+        machine_identity=machine_identity,
+        display_name=display_name,
         app_instance_id=app_instance_id,
         client_version=client_version,
     )
@@ -622,6 +627,13 @@ def _telemetry_log_context(*, mode: Optional[str] = None, range_id: Optional[str
     }
 
 
+def _normalize_range_tag(mode: Optional[str], range_id: Optional[str]) -> str:
+    cleaned = str(range_id).strip() if range_id is not None else ""
+    if not cleaned or cleaned == "default":
+        return f"{mode}-global" if mode else "global"
+    return cleaned
+
+
 class TelemetryClient:
     """Durable telemetry queue with background flushing."""
 
@@ -650,10 +662,13 @@ class TelemetryClient:
         self.machine_id_path = Path(machine_id_path)
         self.machine_id = _load_machine_id(self.machine_id_path)
         self.hardware_machine_id = get_machine_id()
-        self.machine_name = get_machine_name(self.hardware_machine_id)
+        self.machine_identity = get_machine_identity(self.hardware_machine_id)
+        self.display_name = get_machine_name(self.hardware_machine_id)
+        self.machine_name = self.display_name
         self.auth_token = _resolve_auth_token(auth_token)
         self._recent_ranges: deque[Dict[str, Any]] = deque(maxlen=RANGE_RECENT_LIMIT)
         self._range_lock = threading.Lock()
+        self._last_range_event: Optional[Dict[str, Any]] = None
         self._backoff = flush_seconds
         self._flusher_thread: Optional[threading.Thread] = None
         self._control_thread: Optional[threading.Thread] = None
@@ -665,6 +680,21 @@ class TelemetryClient:
                     "INFO",
                     f"[Telemetry] Client initialized | endpoint={self.endpoint} | "
                     f"flush={self.flush_seconds}s | batch={self.batch_size} | db={self.db_path}",
+                    **_telemetry_log_context(endpoint=self.endpoint),
+                )
+            except Exception:
+                pass
+            try:
+                range_metadata = self._current_range_metadata(mode=None, range_id=None)
+                log_with_context(
+                    logger,
+                    "INFO",
+                    "[Telemetry] Payload identity | machine_identity=%s | display_name=%s | range_tag=%s | range_start=%s | range_end=%s",
+                    self.machine_identity,
+                    self.display_name,
+                    range_metadata.get("range_tag"),
+                    range_metadata.get("range_start"),
+                    range_metadata.get("range_end"),
                     **_telemetry_log_context(endpoint=self.endpoint),
                 )
             except Exception:
@@ -714,6 +744,34 @@ class TelemetryClient:
     def _snapshot_url(self, machine_id: str) -> str:
         base = _telemetry_base_url(self.endpoint)
         return f"{base}/machines/{machine_id}/snapshot"
+
+    def _current_range_metadata(
+        self,
+        *,
+        mode: Optional[str],
+        range_id: Optional[str],
+    ) -> Dict[str, Optional[Any]]:
+        with self._range_lock:
+            ranges = list(self._recent_ranges)
+            last_range = self._last_range_event
+        selected: Optional[Dict[str, Any]] = None
+        if range_id:
+            for entry in reversed(ranges):
+                if entry.get("range_id") == range_id:
+                    selected = entry
+                    break
+        if selected is None and last_range:
+            selected = last_range
+        selected_range_id = (
+            range_id
+            if range_id is not None
+            else (selected.get("range_id") if selected else None)
+        )
+        return {
+            "range_tag": _normalize_range_tag(mode, selected_range_id),
+            "range_start": selected.get("start") if selected else None,
+            "range_end": selected.get("end") if selected else None,
+        }
 
     def _control_base(self) -> Optional[str]:
         endpoint = (self.control_endpoint or self.endpoint).strip().rstrip("/")
@@ -1024,10 +1082,26 @@ class TelemetryClient:
         if not self.machine_id:
             return False
         url = self._snapshot_url(self.machine_id)
+        range_metadata = self._current_range_metadata(
+            mode=snapshot.runtime.mode,
+            range_id=None,
+        )
+        with self._range_lock:
+            recent_ranges = list(self._recent_ranges)
+        payload = snapshot.dict()
+        payload.update(
+            {
+                "range_tag": range_metadata.get("range_tag"),
+                "range_start": range_metadata.get("range_start"),
+                "range_end": range_metadata.get("range_end"),
+                "range_recent": recent_ranges,
+                "range_distribution": self._range_distribution(recent_ranges),
+            }
+        )
         try:
             response = requests.post(
                 url,
-                json=snapshot.dict(),
+                json=payload,
                 headers=self._authorization_headers(),
                 timeout=10,
             )
@@ -1077,6 +1151,8 @@ class TelemetryClient:
                         metrics,
                         machine_id=self.machine_id or "",
                         machine_name=self.machine_name,
+                        machine_identity=self.machine_identity,
+                        display_name=self.display_name,
                         app_instance_id=self.app_id,
                         client_version=CLIENT_VERSION,
                     )
@@ -1184,6 +1260,7 @@ class TelemetryClient:
         }
         with self._range_lock:
             self._recent_ranges.append(payload)
+            self._last_range_event = payload
 
     def _range_distribution(self, ranges: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         summaries: Dict[str, Dict[str, Any]] = {}
@@ -1246,17 +1323,23 @@ class TelemetryClient:
         fingerprint = hashlib.sha256(seed_bytes + self.app_id.encode()).hexdigest()
         with self._range_lock:
             recent_ranges = list(self._recent_ranges)
+        range_metadata = self._current_range_metadata(mode=mode, range_id=range_id)
         payload = {
             "app_instance_id": self.app_id,
             "client_version": CLIENT_VERSION,
             "mode": mode,
             "range_id": range_id,
+            "range_tag": range_metadata.get("range_tag"),
+            "range_start": range_metadata.get("range_start"),
+            "range_end": range_metadata.get("range_end"),
             "seed_fingerprint": fingerprint,
             "timestamp_iso": datetime.utcnow().isoformat() + "Z",
             "used": used,
             "match_found": match_found,
             "machine_id": self.machine_id,
             "machine_name": self.machine_name,
+            "machine_identity": self.machine_identity,
+            "display_name": self.display_name,
             "range_recent": recent_ranges,
             "range_distribution": self._range_distribution(recent_ranges),
             "reference_overlays": [],
@@ -1310,6 +1393,18 @@ class TelemetryClient:
                 "machine_name",
                 self.machine_name or get_machine_name(self.hardware_machine_id),
             )
+            enriched.setdefault("machine_identity", self.machine_identity)
+            enriched.setdefault("display_name", self.display_name or self.machine_name)
+            range_metadata = self._current_range_metadata(
+                mode=enriched.get("mode"),
+                range_id=enriched.get("range_id"),
+            )
+            if not enriched.get("range_tag") or enriched.get("range_tag") == "default":
+                enriched["range_tag"] = range_metadata.get("range_tag")
+            if enriched.get("range_start") is None:
+                enriched["range_start"] = range_metadata.get("range_start")
+            if enriched.get("range_end") is None:
+                enriched["range_end"] = range_metadata.get("range_end")
             enriched.setdefault("range_recent", [])
             enriched.setdefault("range_distribution", [])
             payload.append(enriched)

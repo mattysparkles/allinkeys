@@ -131,6 +131,26 @@ def get_machine_id() -> str:
     return machine_id
 
 
+def get_machine_identity(machine_id: Optional[str] = None) -> str:
+    """Return a stable, human-friendly machine identity."""
+
+    state = _load_state()
+    if state.get("machine_identity"):
+        return str(state["machine_identity"])
+
+    machine_id = machine_id or get_machine_id()
+    generated = _generate_machine_name(machine_id)
+    state.update(
+        {
+            "machine_identity": generated,
+            "machine_identity_source": "generated",
+            "machine_identity_updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    )
+    _save_state(state)
+    return generated
+
+
 def _generate_machine_name(machine_id: str) -> str:
     digest = hashlib.sha256(machine_id.encode("utf-8")).digest()
     if len(digest) < 20:
@@ -156,7 +176,15 @@ def get_machine_name(machine_id: Optional[str] = None) -> str:
         return str(state["machine_name"])
 
     machine_id = machine_id or get_machine_id()
-    generated = _generate_machine_name(machine_id)
+    generated = str(state.get("machine_identity") or _generate_machine_name(machine_id))
+    if not state.get("machine_identity"):
+        state.update(
+            {
+                "machine_identity": generated,
+                "machine_identity_source": "generated",
+                "machine_identity_updated_at": datetime.utcnow().isoformat() + "Z",
+            }
+        )
     state.update(
         {
             "machine_name": generated,

@@ -20,6 +20,8 @@ class ControlCapabilities(BaseModel):
 class MachineIdentity(BaseModel):
     machine_id: str
     machine_name: Optional[str] = None
+    machine_identity: Optional[str] = None
+    display_name: Optional[str] = None
     app_instance_id: Optional[str] = None
     client_version: Optional[str] = None
 
@@ -48,6 +50,9 @@ class MachineTelemetrySnapshot(BaseModel):
     runtime: RuntimeStats
     resources: ResourceStats
     capabilities: ControlCapabilities = Field(default_factory=ControlCapabilities)
+    range_tag: Optional[str] = None
+    range_start: Optional[int] = None
+    range_end: Optional[int] = None
     timestamp_iso: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
 
 
