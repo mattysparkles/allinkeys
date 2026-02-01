@@ -84,6 +84,8 @@ seed processing statistics are sent to a privacy‑safe central service through 
 See [docs/TELEMETRY.md](docs/TELEMETRY.md) for full details. Disable telemetry at runtime
 with the `--no-telemetry` command-line flag.
 
+You can explore the live telemetry dashboard at [https://telemetry.sparkleserver.site](https://telemetry.sparkleserver.site). The site shows all of your registered machines, live performance metrics, actual seed ranges and their distribution, granular machine controls, and the neighbor lookup map that highlights searched ranges plus the closest peers. Every page links back to the [GitHub repository](https://github.com/mattysparkles/allinkeys) so visitors can download the same code that feeds the dashboard.
+
 ### 📁 Directory Overview
 
 ```

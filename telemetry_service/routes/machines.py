@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from telemetry_service.db import get_db_connection
-from telemetry_service.dependencies import get_current_user, get_machine_for_user
+from telemetry_service.dependencies import get_machine_for_user, get_ui_current_user
 from telemetry_service.error_logging import log_ingest_error, log_raw_snapshot
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
@@ -194,7 +194,7 @@ def _get_machine_for_user_or_admin(
 )
 def register_machine(
     payload: MachineRegisterRequest,
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> MachineRegisterResponse:
     machine_id = str(uuid4())
     now = datetime.utcnow().isoformat() + "Z"
@@ -374,7 +374,7 @@ def _persist_snapshot(
 def ingest_machine_telemetry(
     machine_id: str,
     items: List[TelemetryItem],
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> IngestResponse:
     if not isinstance(items, list) or not items:
         raise HTTPException(status_code=400, detail="Expected non-empty list body")
@@ -418,7 +418,7 @@ def ingest_machine_telemetry(
 async def ingest_machine_snapshot(
     machine_id: str,
     request: Request,
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> MachineSummary:
     machine = get_machine_for_user(machine_id, current_user)
     machine_identity = machine.get("machine_identity") or generate_machine_name(machine_id)
@@ -531,7 +531,7 @@ def list_my_machines(
         False,
         description="Admins only: include all machines in the response.",
     ),
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> List[MachineSummary]:
     now = datetime.utcnow()
     conn = get_db_connection()
@@ -621,7 +621,7 @@ def list_my_machines(
 )
 def get_machine(
     machine_id: str,
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> MachineSummary:
     now = datetime.utcnow()
     machine = _get_machine_for_user_or_admin(machine_id, current_user)
@@ -660,7 +660,7 @@ def get_machine(
     summary="Return aggregate telemetry summary for the current user.",
 )
 def machine_summary(
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> dict:
     conn = get_db_connection()
     try:
@@ -701,7 +701,7 @@ def machine_summary(
 def list_machine_snapshots(
     machine_id: str,
     minutes: int = Query(60, ge=1, le=1440),
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> MachineSnapshotSeries:
     _get_machine_for_user_or_admin(machine_id, current_user)
     cutoff = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat() + "Z"
@@ -741,7 +741,7 @@ def list_machine_snapshots(
 def list_machine_ranges(
     machine_id: str,
     limit: int = Query(20, ge=1, le=200),
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> MachineRangeHistory:
     machine = _get_machine_for_user_or_admin(machine_id, current_user)
     conn = get_db_connection()
@@ -804,7 +804,7 @@ def list_machine_ranges(
 def create_control_command(
     machine_id: str,
     payload: ControlCommandRequest,
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> ControlCommand:
     _get_machine_for_user_or_admin(machine_id, current_user)
     conn = get_db_connection()
@@ -853,7 +853,7 @@ def list_control_commands(
         None, description="Filter commands by status."
     ),
     limit: int = Query(10, ge=1, le=100),
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> ControlCommandList:
     _get_machine_for_user_or_admin(machine_id, current_user)
     conn = get_db_connection()
@@ -899,7 +899,7 @@ def list_control_commands(
 def poll_control_commands(
     machine_id: str,
     limit: int = Query(20, ge=1, le=100),
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> ControlCommandList:
     _get_machine_for_user_or_admin(machine_id, current_user)
     conn = get_db_connection()
@@ -939,7 +939,7 @@ def poll_control_commands(
 def acknowledge_control_command(
     machine_id: str,
     payload: ControlAckRequest,
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> ControlCommand:
     _get_machine_for_user_or_admin(machine_id, current_user)
     conn = get_db_connection()

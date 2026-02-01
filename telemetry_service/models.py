@@ -72,7 +72,7 @@ class IngestResponse(BaseModel):
 
 
 class MachineRegisterRequest(BaseModel):
-    machine_name: str
+    machine_name: Optional[str] = None
     gpu_info: Optional[str] = None
     version: Optional[str] = None
 
@@ -100,6 +100,28 @@ class MachineSummary(BaseModel):
     last_activity: Optional[str] = None
     last_seen: Optional[str] = None
     version: Optional[str] = None
+    range_recent: Optional[List[Dict[str, Any]]] = None
+    range_distribution: Optional[List[Dict[str, Any]]] = None
+    identity_name: Optional[str] = None
+
+class MachineRangeObservation(BaseModel):
+    range_id: Optional[str] = None
+    start: Optional[int] = None
+    end: Optional[int] = None
+    position: Optional[int] = None
+    normalized_position: Optional[float] = None
+    normalized_span: Optional[float] = None
+    space_min: Optional[int] = None
+    space_max: Optional[int] = None
+    timestamp_iso: Optional[str] = None
+    source: Optional[str] = None
+
+
+class MachineRangeHistory(BaseModel):
+    machine_id: str
+    machine_name: Optional[str] = None
+    identity_name: Optional[str] = None
+    ranges: List[MachineRangeObservation] = Field(default_factory=list)
 
 
 class AdminUserSummary(BaseModel):

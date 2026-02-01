@@ -97,12 +97,13 @@ curl -X POST http://localhost:3088/v1/machines/<machine_id>/snapshot \
 
 ## Range metadata visibility
 
-Machine snapshots now persist the client-provided `range_recent` and
+Machine snapshots persist the client-provided `range_recent` and
 `range_distribution` blobs on the `machines` row, so the `/api/machines/*`
 responses expose the parsed JSON. The dashboard UI and API consumers now prefer
 the deterministic `machine_identity` (e.g. Frosted-Quartz) before falling back
-to the opaque `machine_id`, making the friendly labels and range coverage data
-available without silently dropping it.
+to the opaque `machine_id`. Range distribution charts aggregate the
+per-range submissions stored on `seed_events`, so coverage reflects the full
+history of submitted ranges instead of only the latest snapshot window.
 
 ## Seed analytics endpoints
 
@@ -156,7 +157,7 @@ Fields:
 | Field | Description |
 | --- | --- |
 | `seed_fingerprint` | Opaque identifier sent by the client |
-| `range_id` | Range bucket covering the submission |
+| `range_id` | Range bucket covering the submission (typically `0x<start>-0x<end>`) |
 | `normalized_position` | Estimated location inside the keyspace |
 | `machine_id` / `machine_name` | Source machine metadata |
 | `used` / `match_found` | Flags sent by the uploader |
@@ -185,19 +186,30 @@ Returns machine activity buckets (series) plus any cached machine metadata.
 ### `GET /v1/dashboard/{slug}/machines/health`
 
 Returns machine health status and stale markers. Supports
-`stale_minutes=60`.
+`stale_minutes=60`. The response includes `machine_id` + `machine_name`, while
+`app_instance_id` is a display label (prefers the human-readable name).
 
 ### `GET /v1/dashboard/{slug}/ranges/recent`
 
-Returns the most recent ranges, default `limit=50`.
+Returns the most recent ranges, default `limit=50`. The `app_instance_id`
+field is a display label (prefers the human-readable machine name).
 
 ### `GET /v1/dashboard/{slug}/ranges/distribution`
 
-Returns the range distribution snapshot, default `limit=200`.
+Returns the aggregated range distribution (persistent range coverage), default
+`limit=200`.
+
+### `GET /v1/dashboard/{slug}/ranges/search`
+
+Locate a seed or keyspace percent inside the persisted range distribution and
+return the closest ranges above/below the target. Accepts `seed`, `input_type`
+(`seed` or `percent`), `neighbors` (per side), plus the usual `since`/`mode`
+filters. Optional `space_min` / `space_max` override the keyspace bounds.
 
 ### `GET /v1/dashboard/{slug}/contributors/top`
 
-Returns the top contributors by submission count, default `limit=20`.
+Returns the top contributors by submission count, default `limit=20`. Labels
+prefer the human-readable machine name when available.
 
 # Telemetry web UI
 

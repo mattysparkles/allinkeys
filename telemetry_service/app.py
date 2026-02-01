@@ -14,10 +14,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from config.constants import SECP256K1_ORDER
 from config.telemetry import TOKEN_EXPIRY
 from telemetry_service.auth import create_access_token, hash_password, verify_password
 from telemetry_service.db import get_db_connection
-from telemetry_service.dependencies import get_current_user, get_optional_user
+from telemetry_service.dependencies import get_current_user, get_optional_user, get_ui_current_user
 from telemetry_service.error_logging import log_ingest_error
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
@@ -135,6 +136,7 @@ class RangeDistributionEntry(BaseModel):
     position: Optional[float] = None
     normalized_min: Optional[float] = None
     normalized_max: Optional[float] = None
+    last_seen: Optional[str] = None
 
 
 class RangeDistributionResponse(BaseModel):
@@ -148,8 +150,38 @@ class RangeDistributionResponse(BaseModel):
     mode: Optional[str] = None
 
 
+class RangeSearchNeighbor(BaseModel):
+    range_id: Optional[str] = None
+    range_value: Optional[str] = None
+    submissions: int
+    submission_percent: float
+    position: Optional[float] = None
+    normalized_min: Optional[float] = None
+    normalized_max: Optional[float] = None
+    distance_percent: Optional[float] = None
+
+
+class RangeSearchResponse(BaseModel):
+    slug: str
+    input: str
+    input_type: str
+    seed_value: Optional[str] = None
+    seed_hex: Optional[str] = None
+    normalized_position: float
+    position_percent: float
+    neighbors_per_side: int
+    lower: List[RangeSearchNeighbor] = Field(default_factory=list)
+    upper: List[RangeSearchNeighbor] = Field(default_factory=list)
+    space_min: str
+    space_max: str
+    since: Optional[str] = None
+    mode: Optional[str] = None
+
+
 class MachineHealthEntry(BaseModel):
     app_instance_id: str
+    machine_id: Optional[str] = None
+    machine_name: Optional[str] = None
     last_seen: Optional[str] = None
     stale: bool
 
@@ -341,7 +373,148 @@ def _safe_load_json(payload: Optional[str]) -> List[Dict[str, Any]]:
         return []
     if isinstance(parsed, list):
         return [entry for entry in parsed if isinstance(entry, dict)]
+    if isinstance(parsed, dict):
+        return [parsed]
     return []
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _parse_seed_number(value: str) -> int:
+    cleaned = value.strip().lower().replace("_", "").replace(",", "")
+    if not cleaned:
+        raise ValueError("Empty seed value")
+    if cleaned.startswith("0x"):
+        return int(cleaned, 16)
+    return int(cleaned, 10)
+
+
+def _derive_range_id(entry: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    range_id = entry.get("range_id")
+    range_value = entry.get("range_value")
+    if isinstance(range_value, str) and range_value.strip():
+        range_value = range_value.strip()
+    else:
+        range_value = None
+    start = entry.get("start")
+    end = entry.get("end")
+    if isinstance(start, int) and isinstance(end, int):
+        start_val, end_val = (start, end) if start <= end else (end, start)
+        derived = f"0x{start_val:064x}-0x{end_val:064x}"
+    else:
+        derived = None
+    if not isinstance(range_id, str) or not range_id.strip():
+        range_id = derived or range_value
+    else:
+        range_id = range_id.strip()
+        if range_id.lower() == "default" and derived:
+            range_id = derived
+    if range_value is None and derived:
+        range_value = derived
+    return range_id, range_value
+
+
+def _aggregate_range_distribution(
+    rows: List[tuple[Any, Any, Any]],
+) -> tuple[Dict[str, Dict[str, Any]], int, Optional[int], Optional[int]]:
+    distribution_map: Dict[str, Dict[str, Any]] = {}
+    total_submissions = 0
+    min_space: Optional[int] = None
+    max_space: Optional[int] = None
+
+    def _update_summary(
+        entry: Dict[str, Any], *, count_hint: int, last_seen_value: Optional[str]
+    ) -> None:
+        nonlocal total_submissions, min_space, max_space
+        range_id, range_value = _derive_range_id(entry)
+        if not range_id:
+            return
+        summary = distribution_map.setdefault(
+            range_id,
+            {
+                "range_id": range_id,
+                "range_value": None,
+                "submissions": 0,
+                "normalized_min": None,
+                "normalized_max": None,
+                "last_seen": None,
+            },
+        )
+        if range_value and not summary.get("range_value"):
+            summary["range_value"] = range_value
+        summary["submissions"] += count_hint
+        total_submissions += count_hint
+        if last_seen_value:
+            current_seen = summary.get("last_seen")
+            if not current_seen or str(last_seen_value) > str(current_seen):
+                summary["last_seen"] = str(last_seen_value)
+
+        normalized_min = _coerce_float(entry.get("normalized_min"))
+        normalized_max = _coerce_float(entry.get("normalized_max"))
+        if normalized_min is None or normalized_max is None:
+            normalized_position = _coerce_float(entry.get("normalized_position"))
+            normalized_span = _coerce_float(entry.get("normalized_span"))
+            if normalized_position is not None:
+                if normalized_span is not None and normalized_span > 0:
+                    half_span = normalized_span / 2
+                    fallback_min = normalized_position - half_span
+                    fallback_max = normalized_position + half_span
+                else:
+                    fallback_min = normalized_position
+                    fallback_max = normalized_position
+                normalized_min = (
+                    normalized_min if normalized_min is not None else fallback_min
+                )
+                normalized_max = (
+                    normalized_max if normalized_max is not None else fallback_max
+                )
+        if normalized_min is not None:
+            normalized_min = max(0.0, min(1.0, normalized_min))
+            summary["normalized_min"] = (
+                normalized_min
+                if summary["normalized_min"] is None
+                else min(summary["normalized_min"], normalized_min)
+            )
+        if normalized_max is not None:
+            normalized_max = max(0.0, min(1.0, normalized_max))
+            summary["normalized_max"] = (
+                normalized_max
+                if summary["normalized_max"] is None
+                else max(summary["normalized_max"], normalized_max)
+            )
+        space_min = entry.get("space_min")
+        space_max = entry.get("space_max")
+        if isinstance(space_min, int):
+            min_space = space_min if min_space is None else min(min_space, space_min)
+        if isinstance(space_max, int):
+            max_space = space_max if max_space is None else max(max_space, space_max)
+
+    for range_payload, recent_payload, last_seen in rows:
+        for entry in _safe_load_json(range_payload):
+            entry_range_id = entry.get("range_id")
+            if isinstance(entry_range_id, str) and entry_range_id.strip().lower() == "default":
+                continue
+            observed_count = entry.get("observed_count")
+            count_value = int(observed_count) if isinstance(observed_count, (int, float)) else 0
+            if count_value:
+                _update_summary(
+                    entry,
+                    count_hint=count_value,
+                    last_seen_value=str(last_seen) if last_seen else None,
+                )
+        recent_entries = _safe_load_json(recent_payload)
+        if recent_entries:
+            _update_summary(
+                recent_entries[-1],
+                count_hint=1,
+                last_seen_value=str(last_seen) if last_seen else None,
+            )
+
+    return distribution_map, total_submissions, min_space, max_space
 
 
 def _extract_normalized_position(payload: Optional[str]) -> Optional[float]:
@@ -554,7 +727,7 @@ def machine_health(
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         rows = conn.execute(
             f"""
-            SELECT id, last_seen
+            SELECT id, machine_name, last_seen
             FROM machines
             {where_clause}
             ORDER BY last_seen DESC
@@ -565,14 +738,17 @@ def machine_health(
         conn.close()
     machines: List[MachineHealthEntry] = []
     stale_ids: List[str] = []
-    for machine_id, last_seen in rows:
+    for machine_id, machine_name, last_seen in rows:
         last_seen_dt = _parse_iso_datetime(last_seen)
         stale = bool(last_seen_dt and last_seen_dt < cutoff)
         if last_seen_dt is None:
             stale = True
+        display_name = machine_name or machine_id
         machines.append(
             MachineHealthEntry(
-                app_instance_id=machine_id,
+                app_instance_id=display_name,
+                machine_id=machine_id,
+                machine_name=machine_name,
                 last_seen=last_seen,
                 stale=stale,
             )
@@ -598,36 +774,63 @@ def recent_ranges(
     current_user: Optional[UserPublic] = Depends(get_optional_user),
 ) -> RecentRangesResponse:
     del slug
-    filters = ["range_id IS NOT NULL"]
+    filters = ["range_recent IS NOT NULL"]
     params: List[Any] = []
     if current_user is not None:
         filters.append("user_id = ?")
         params.append(current_user.id)
-    params.append(limit)
+    row_limit = max(1, min(limit * 3, 500))
     where_clause = f"WHERE {' AND '.join(filters)}"
     conn = get_db_connection()
     try:
         rows = conn.execute(
             f"""
-            SELECT range_id, mode, COALESCE(machine_id, app_instance_id), last_seen
-            FROM seed_events
+            SELECT id, machine_name, mode, last_seen, range_recent
+            FROM machines
             {where_clause}
             ORDER BY last_seen DESC
             LIMIT ?
             """,
-            params,
+            (*params, row_limit),
         ).fetchall()
     finally:
         conn.close()
-    ranges = [
-        RecentRangeEntry(
-            range_id=row[0],
-            mode=row[1],
-            app_instance_id=row[2],
-            timestamp=row[3],
-        )
-        for row in rows
-    ]
+    ranges: list[RecentRangeEntry] = []
+    for machine_id, machine_name, machine_mode, last_seen, payload in rows:
+        if not payload:
+            continue
+        display_name = machine_name or machine_id
+        for entry in _safe_load_json(payload):
+            range_id = entry.get("range_id")
+            range_value = entry.get("range_value")
+            if not isinstance(range_value, str) or not range_value.strip():
+                start = entry.get("start")
+                end = entry.get("end")
+                if isinstance(start, int) and isinstance(end, int):
+                    start_val, end_val = (start, end) if start <= end else (end, start)
+                    range_value = f"0x{start_val:064x}-0x{end_val:064x}"
+                else:
+                    range_value = None
+            display_range = range_id
+            if isinstance(range_value, str) and range_value.strip():
+                if not display_range or str(display_range).strip().lower() == "default":
+                    display_range = range_value
+            if not display_range:
+                continue
+            entry_mode = entry.get("mode") or machine_mode
+            timestamp = entry.get("timestamp_iso") or last_seen
+            ranges.append(
+                RecentRangeEntry(
+                    range_id=display_range,
+                    mode=entry_mode,
+                    app_instance_id=display_name,
+                    timestamp=timestamp,
+                )
+            )
+            if len(ranges) >= limit:
+                break
+        if len(ranges) >= limit:
+            break
     return RecentRangesResponse(limit=limit, ranges=ranges)
 
 
@@ -654,7 +857,7 @@ def top_contributors(
     try:
         rows = conn.execute(
             f"""
-            SELECT COALESCE(machine_id, app_instance_id) AS app_id,
+            SELECT COALESCE(machine_name, machine_id, app_instance_id) AS app_id,
                    COUNT(*) AS submissions
             FROM seed_events
             {where_clause}
@@ -820,10 +1023,13 @@ def seed_positions(
     mode: Optional[str] = Query(None),
     range_id: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=500),
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> SeedPositionResponse:
     parsed_since = _parse_since(since)
-    filters = ["user_id = ?", "range_recent IS NOT NULL"]
+    filters = [
+        "user_id = ?",
+        "(range_distribution IS NOT NULL OR range_recent IS NOT NULL)",
+    ]
     params: List[Any] = [current_user.id]
     if mode:
         filters.append("mode = ?")
@@ -843,7 +1049,7 @@ def seed_positions(
         rows = conn.execute(
             f"""
             SELECT seed_fingerprint, range_id, mode, machine_id, machine_name, last_seen,
-                   used, match_found, range_recent
+                   used, match_found, range_distribution, range_recent
             FROM seed_events
             {where_clause}
             ORDER BY last_seen DESC
@@ -864,7 +1070,7 @@ def seed_positions(
             timestamp=row[5],
             used=bool(row[6]),
             match_found=bool(row[7]),
-            normalized_position=_extract_normalized_position(row[8]),
+            normalized_position=_extract_normalized_position(row[8] or row[9]),
         )
         for row in rows
     ]
@@ -881,7 +1087,7 @@ def seed_lookup(
     seed_fingerprint: str = Query(...),
     limit: int = Query(5, ge=1, le=50),
     since: Optional[str] = Query(None),
-    current_user: UserPublic = Depends(get_current_user),
+    current_user: UserPublic = Depends(get_ui_current_user),
 ) -> SeedLookupResponse:
     parsed_since = _parse_since(since)
     conn = get_db_connection()
@@ -889,7 +1095,7 @@ def seed_lookup(
         target_row = conn.execute(
             """
             SELECT seed_fingerprint, range_id, mode, machine_id, machine_name,
-                   last_seen, range_recent
+                   last_seen, range_distribution, range_recent
             FROM seed_events
             WHERE seed_fingerprint = ? AND user_id = ?
             ORDER BY last_seen DESC
@@ -902,9 +1108,12 @@ def seed_lookup(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Seed not found",
             )
-        normalized_target = _extract_normalized_position(target_row[6])
+        normalized_target = _extract_normalized_position(target_row[6] or target_row[7])
 
-        neighbor_filters = ["user_id = ?", "range_recent IS NOT NULL"]
+        neighbor_filters = [
+            "user_id = ?",
+            "(range_distribution IS NOT NULL OR range_recent IS NOT NULL)",
+        ]
         neighbor_params: List[Any] = [current_user.id]
         if parsed_since:
             neighbor_filters.append("last_seen >= ?")
@@ -913,7 +1122,7 @@ def seed_lookup(
         neighbor_limit = min(max(limit * 25, 50), 1000)
         neighbor_rows = conn.execute(
             f"""
-            SELECT seed_fingerprint, range_id, last_seen, range_recent
+            SELECT seed_fingerprint, range_id, last_seen, range_distribution, range_recent
             FROM seed_events
             {where_clause} AND seed_fingerprint != ?
             ORDER BY last_seen DESC
@@ -928,7 +1137,7 @@ def seed_lookup(
     if normalized_target is not None:
         candidates = []
         for row in neighbor_rows:
-            entry_pos = _extract_normalized_position(row[3])
+            entry_pos = _extract_normalized_position(row[3] or row[4])
             if entry_pos is None:
                 continue
             diff = abs(entry_pos - normalized_target)
@@ -951,7 +1160,7 @@ def seed_lookup(
                 seed_fingerprint=row[0],
                 range_id=row[1],
                 timestamp=row[2],
-                normalized_position=_extract_normalized_position(row[3]),
+                normalized_position=_extract_normalized_position(row[3] or row[4]),
                 difference=None,
             )
             for row in neighbor_rows[:limit]
@@ -979,7 +1188,7 @@ def range_distribution(
     slug: str,
     since: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
-    limit: int = Query(200, ge=1, le=500),
+    limit: int = Query(200, ge=1, le=500000),
     current_user: Optional[UserPublic] = Depends(get_optional_user),
 ) -> RangeDistributionResponse:
     """Aggregate distribution metrics for range coverage charts.
@@ -991,96 +1200,63 @@ def range_distribution(
     parsed_since = _parse_since(since)
     conn = get_db_connection()
     try:
-        filters = ["se.range_id IS NOT NULL"]
+        filters = ["range_distribution IS NOT NULL"]
         params: List[Any] = []
         if current_user is not None:
-            filters.append("se.user_id = ?")
+            filters.append("user_id = ?")
             params.append(current_user.id)
         if parsed_since:
-            filters.append("se.last_seen >= ?")
+            filters.append("last_seen >= ?")
             params.append(parsed_since)
         if mode:
-            filters.append("se.mode = ?")
+            filters.append("mode = ?")
             params.append(mode)
         where_clause = f"WHERE {' AND '.join(filters)}"
-        counts = conn.execute(
+        rows = conn.execute(
             f"""
-            SELECT se.range_id, COUNT(*) AS count
-            FROM seed_events AS se
+            SELECT range_distribution, range_recent, last_seen
+            FROM seed_events
             {where_clause}
-            GROUP BY se.range_id
+            ORDER BY last_seen DESC
             """,
             params,
         ).fetchall()
-        total_submissions = sum(row[1] for row in counts) if counts else 0
-        counts = sorted(counts, key=lambda row: row[1], reverse=True)
+        distribution_map, total_submissions, _, _ = _aggregate_range_distribution(rows)
+        sorted_ranges = sorted(
+            distribution_map.values(),
+            key=lambda entry: entry["submissions"],
+            reverse=True,
+        )
         if limit:
-            counts = counts[:limit]
-        distribution_rows = conn.execute(
-            f"""
-            SELECT se.range_distribution
-            FROM seed_events AS se
-            {where_clause} AND se.range_distribution IS NOT NULL
-            """,
-            params,
-        ).fetchall()
-        position_map: Dict[str, Dict[str, Optional[float]]] = {}
-        for row in distribution_rows:
-            for entry in _safe_load_json(row[0]):
-                range_key = entry.get("range_id") or "default"
-                normalized_min = entry.get("normalized_min")
-                normalized_max = entry.get("normalized_max")
-                if not isinstance(normalized_min, (int, float)) or not isinstance(
-                    normalized_max, (int, float)
-                ):
-                    continue
-                summary = position_map.setdefault(
-                    range_key, {"normalized_min": None, "normalized_max": None}
-                )
-                summary["normalized_min"] = (
-                    normalized_min
-                    if summary["normalized_min"] is None
-                    else min(summary["normalized_min"], normalized_min)
-                )
-                summary["normalized_max"] = (
-                    normalized_max
-                    if summary["normalized_max"] is None
-                    else max(summary["normalized_max"], normalized_max)
-                )
+            sorted_ranges = sorted_ranges[:limit]
         ranges: List[Dict[str, Any]] = []
-        for range_id, count in counts:
-            position_summary = position_map.get(range_id)
-            normalized_min = (
-                position_summary.get("normalized_min")
-                if position_summary
+        for entry in sorted_ranges:
+            submissions = entry["submissions"]
+            normalized_min = entry["normalized_min"]
+            normalized_max = entry["normalized_max"]
+            position = (
+                (normalized_min + normalized_max) / 2 * 100
+                if normalized_min is not None and normalized_max is not None
                 else None
             )
-            normalized_max = (
-                position_summary.get("normalized_max")
-                if position_summary
-                else None
-            )
-            position = None
-            if normalized_min is not None and normalized_max is not None:
-                position = (normalized_min + normalized_max) / 2 * 100
-            percent = (count / total_submissions * 100) if total_submissions else 0
+            percent = (submissions / total_submissions * 100) if total_submissions else 0
             ranges.append(
                 {
-                    "range_id": range_id,
-                    "submissions": count,
-                    "range_value": range_id,
-                    "submission_count": count,
+                    "range_id": entry["range_id"],
+                    "submissions": submissions,
+                    "range_value": entry.get("range_value") or entry["range_id"],
+                    "submission_count": submissions,
                     "submission_percent": percent,
                     "position": position,
                     "normalized_min": normalized_min,
                     "normalized_max": normalized_max,
+                    "last_seen": entry.get("last_seen"),
                 }
             )
         intervals = [
             (entry["normalized_min"], entry["normalized_max"])
             for entry in ranges
-            if entry["normalized_min"] is not None
-            and entry["normalized_max"] is not None
+            if entry["normalized_min"] is not None and entry["normalized_max"] is not None
         ]
         merged = _merge_intervals(intervals)
         coverage = sum(end - start for start, end in merged) * 100 if merged else 0
@@ -1096,6 +1272,163 @@ def range_distribution(
         )
     finally:
         conn.close()
+
+
+@app.get(
+    "/v1/dashboard/{slug}/ranges/search",
+    response_model=RangeSearchResponse,
+    tags=["Admin"],
+    description="Locate a seed value within the range distribution and return nearby ranges.",
+)
+def range_search(
+    slug: str,
+    seed: str = Query(..., description="Seed value (decimal or 0x hex) or percent."),
+    input_type: str = Query(
+        "seed",
+        description="Interpret the input as a raw seed or percent (seed|percent).",
+    ),
+    neighbors: int = Query(3, ge=1, le=50),
+    since: Optional[str] = Query(None),
+    mode: Optional[str] = Query(None),
+    space_min: Optional[str] = Query(None),
+    space_max: Optional[str] = Query(None),
+    current_user: Optional[UserPublic] = Depends(get_optional_user),
+) -> RangeSearchResponse:
+    input_value = seed.strip()
+    if not input_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Seed value is required",
+        )
+    input_kind = input_type.strip().lower()
+    if input_kind not in {"seed", "percent"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="input_type must be 'seed' or 'percent'",
+        )
+
+    parsed_since = _parse_since(since)
+    conn = get_db_connection()
+    try:
+        filters = ["range_distribution IS NOT NULL"]
+        params: List[Any] = []
+        if current_user is not None:
+            filters.append("user_id = ?")
+            params.append(current_user.id)
+        if parsed_since:
+            filters.append("last_seen >= ?")
+            params.append(parsed_since)
+        if mode:
+            filters.append("mode = ?")
+            params.append(mode)
+        where_clause = f"WHERE {' AND '.join(filters)}"
+        rows = conn.execute(
+            f"""
+            SELECT range_distribution, range_recent, last_seen
+            FROM seed_events
+            {where_clause}
+            ORDER BY last_seen DESC
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    distribution_map, total_submissions, min_space, max_space = _aggregate_range_distribution(rows)
+    if space_min:
+        min_space = _parse_seed_number(space_min)
+    if space_max:
+        max_space = _parse_seed_number(space_max)
+    if min_space is None:
+        min_space = 0
+    if max_space is None:
+        max_space = SECP256K1_ORDER - 1
+    if max_space <= min_space:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid space bounds",
+        )
+    space_span = max_space - min_space
+
+    if input_kind == "percent":
+        try:
+            percent_value = float(input_value.strip().rstrip("%"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid percent input",
+            ) from exc
+        if percent_value < 0 or percent_value > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Percent must be between 0 and 100",
+            )
+        normalized_position = percent_value / 100.0
+        seed_value = int(min_space + normalized_position * space_span)
+    else:
+        try:
+            seed_value = _parse_seed_number(input_value)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid seed value",
+            ) from exc
+        normalized_position = (seed_value - min_space) / space_span
+    if seed_value < min_space:
+        seed_value = min_space
+    if seed_value > max_space:
+        seed_value = max_space
+    normalized_position = max(0.0, min(1.0, float(normalized_position)))
+
+    lower: List[RangeSearchNeighbor] = []
+    upper: List[RangeSearchNeighbor] = []
+    for entry in distribution_map.values():
+        normalized_min = entry.get("normalized_min")
+        normalized_max = entry.get("normalized_max")
+        if not isinstance(normalized_min, (int, float)) or not isinstance(
+            normalized_max, (int, float)
+        ):
+            continue
+        midpoint = (float(normalized_min) + float(normalized_max)) / 2
+        distance_percent = abs(midpoint - normalized_position) * 100
+        submissions = int(entry.get("submissions") or 0)
+        submission_percent = (
+            (submissions / total_submissions * 100) if total_submissions else 0
+        )
+        neighbor = RangeSearchNeighbor(
+            range_id=entry.get("range_id"),
+            range_value=entry.get("range_value") or entry.get("range_id"),
+            submissions=submissions,
+            submission_percent=submission_percent,
+            position=midpoint * 100,
+            normalized_min=float(normalized_min),
+            normalized_max=float(normalized_max),
+            distance_percent=round(distance_percent, 2),
+        )
+        if midpoint < normalized_position:
+            lower.append(neighbor)
+        else:
+            upper.append(neighbor)
+
+    lower.sort(key=lambda item: item.distance_percent or 0)
+    upper.sort(key=lambda item: item.distance_percent or 0)
+
+    return RangeSearchResponse(
+        slug=slug,
+        input=input_value,
+        input_type=input_kind,
+        seed_value=str(seed_value),
+        seed_hex=f"0x{seed_value:064x}",
+        normalized_position=normalized_position,
+        position_percent=round(normalized_position * 100, 4),
+        neighbors_per_side=neighbors,
+        lower=lower[:neighbors],
+        upper=upper[:neighbors],
+        space_min=str(min_space),
+        space_max=str(max_space),
+        since=since,
+        mode=mode,
+    )
 
 
 @app.get(

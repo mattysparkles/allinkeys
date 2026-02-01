@@ -60,7 +60,7 @@ addresses.
 | `app_instance_id`  | Random UUIDv4 stored on disk to distinguish installations    |
 | `client_version`   | Version string from `config.settings`                         |
 | `mode`             | One of `mnemonic`, `only_btc`, `puzzle`, `vanity`, `altcoin_derive` |
-| `range_id`         | Optional range bucket identifier                              |
+| `range_id`         | Optional range bucket identifier (e.g. `0x<start>-0x<end>`)    |
 | `seed_fingerprint` | `SHA256(seed_bytes || app_instance_id)`                      |
 | `timestamp_iso`    | ISO‑8601 timestamp of the event                               |
 | `used`             | Whether the seed was previously seen                          |
@@ -102,10 +102,11 @@ still associated by the stable `machine_id`.
 
 Machine snapshots persist the client-provided `range_recent` and
 `range_distribution` blobs on each `machines` row, and the `/api/machines/*`
-responses surface the parsed JSON. Dashboards now prefer the deterministic
+responses surface the parsed JSON. Dashboards prefer the deterministic
 `machine_identity` (e.g. Frosted-Quartz) before falling back to the opaque
-`machine_id`, so the generated labels and range coverage data stay visible
-instead of being silently dropped.
+`machine_id`. Range coverage charts aggregate per-range submissions stored on
+`seed_events`, keeping the distribution persistent across runs instead of only
+the latest snapshot window.
 
 ## Opt‑out
 
@@ -212,7 +213,16 @@ is aggregated across all users.
 - `GET /v1/dashboard/{slug}/machines/health`
 - `GET /v1/dashboard/{slug}/ranges/recent`
 - `GET /v1/dashboard/{slug}/ranges/distribution`
+- `GET /v1/dashboard/{slug}/ranges/search`
 - `GET /v1/dashboard/{slug}/contributors/top`
+
+For dashboard-friendly labels, `/machines/health`, `/ranges/recent`, and
+`/contributors/top` now prefer human-readable machine names when available.
+The raw machine id is still included where applicable for programmatic use.
+Range distribution aggregates per-range submissions stored on `seed_events`
+so the cluster map reflects the full history of submitted ranges.
+Use `/v1/dashboard/{slug}/ranges/search` to plot a seed value (or percent) and
+fetch the closest ranges above and below the target for observer lookups.
 
 ## Seed analytics endpoints
 

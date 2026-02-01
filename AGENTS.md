@@ -13,3 +13,4 @@
 - 2026-01-18 20:48:12Z: Logged telemetry control command application results in `core/telemetry.py` for pause/resume/set_mode/set_range handling.
 - 2026-01-18 21:05:22Z: Allowed `/v1/dashboard` requests through API key middleware in `telemetry_service/app.py` to unblock dashboard UI.
 - 2026-01-18 21:23:55Z: Added public `/v1/dashboard` API responses (health, recent ranges, contributors, machine series) with optional user scoping and updated telemetry docs.
+- 2026-01-30 06:53:48Z: Updated public dashboard endpoints to prefer human-readable machine names in health/recent ranges/top contributors, documented the label changes, and restarted `allinkeys-telemetry.service` to make the updates live.

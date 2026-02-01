@@ -303,8 +303,8 @@
 {% endblock %}
 {% block scripts %}
     <script>
-      const apiEndpoint = "/api/machines/me";
-      const controlEndpoint = "/api/machines";
+      const apiEndpoint = "/v1/machines/me";
+      const controlEndpoint = "/v1/machines";
       const authTokenFromHeader = "{{ auth_token | e }}";
       const tokenInput = document.getElementById("tokenInput");
       const saveTokenButton = document.getElementById("saveTokenButton");
@@ -336,26 +336,16 @@
 
       async function fetchMachines() {
         const token = getStoredToken();
-        if (!token) {
-          machineContainer.innerHTML = "";
-          emptyState.hidden = false;
-          emptyMessage.textContent =
-            "Add a valid access token to load your machines.";
-          summaryBar.innerHTML = "";
-          bulkActions.hidden = true;
-          return;
-        }
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
         try {
           const [machinesResponse, summaryResponse] = await Promise.all([
             fetch(apiEndpoint, {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
+              headers,
+              credentials: "same-origin",
             }),
-            fetch("/api/machines/summary", {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
+            fetch("/v1/machines/summary", {
+              headers,
+              credentials: "same-origin",
             }),
           ]);
           if (!machinesResponse.ok) {
@@ -373,7 +363,7 @@
           machineContainer.innerHTML = "";
           emptyState.hidden = false;
           emptyMessage.textContent =
-            "Unable to load machines. Check your token and try again.";
+            "Unable to load machines. Check your session or access token.";
           summaryBar.innerHTML = "";
           bulkActions.hidden = true;
         }
@@ -411,6 +401,7 @@
               "Content-Type": "application/json",
               ...getAuthHeaders(),
             },
+            credentials: "same-origin",
             body: JSON.stringify({ command, value }),
           });
           if (!response.ok) {
@@ -476,7 +467,7 @@
         try {
           const response = await fetch(
             `${controlEndpoint}/${machineId}/control?limit=5`,
-            { headers: getAuthHeaders() }
+            { headers: getAuthHeaders(), credentials: "same-origin" }
           );
           if (!response.ok) {
             throw new Error("Failed to load commands");

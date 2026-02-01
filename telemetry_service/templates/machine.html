@@ -421,7 +421,7 @@
 {% block scripts %}
     <script>
       const machineId = "{{ machine_id }}";
-      const apiBase = "/api/machines";
+      const apiBase = "/v1/machines";
       const authTokenFromHeader = "{{ auth_token | e }}";
 
       const tokenInput = document.getElementById("tokenInput");
@@ -499,6 +499,7 @@
         try {
           const response = await fetch(`/v1/seed/positions?limit=${seedPositionsLimit}`, {
             headers: getAuthHeaders(),
+            credentials: "same-origin",
           });
           if (!response.ok) {
             throw new Error("Failed to load seeds");
@@ -601,6 +602,7 @@
           });
           const response = await fetch(`/v1/seed/lookup?${params.toString()}`, {
             headers: getAuthHeaders(),
+            credentials: "same-origin",
           });
           if (!response.ok) {
             throw new Error("Lookup failed");
@@ -622,14 +624,10 @@
       }
 
       async function fetchMachine() {
-        const token = getStoredToken();
-        if (!token) {
-          machineSubtitle.textContent = "Add a valid access token to load details.";
-          return;
-        }
         try {
           const response = await fetch(`${apiBase}/${machineId}`, {
             headers: getAuthHeaders(),
+            credentials: "same-origin",
           });
           if (!response.ok) {
             throw new Error(`Request failed: ${response.status}`);
@@ -692,7 +690,7 @@
           `;
         } catch (error) {
           machineSubtitle.textContent =
-            "Unable to load machine details. Check your token.";
+            "Unable to load machine details. Check your session or access token.";
         }
       }
 
@@ -730,6 +728,7 @@
         try {
           const response = await fetch(`${apiBase}/${machineId}/snapshots?minutes=120`, {
             headers: getAuthHeaders(),
+            credentials: "same-origin",
           });
           if (!response.ok) {
             throw new Error("Failed to load snapshots");
@@ -762,6 +761,7 @@
         try {
           const response = await fetch(`${apiBase}/${machineId}/control?limit=10`, {
             headers: getAuthHeaders(),
+            credentials: "same-origin",
           });
           if (!response.ok) {
             throw new Error("Failed to load commands");
@@ -800,6 +800,7 @@
               "Content-Type": "application/json",
               ...getAuthHeaders(),
             },
+            credentials: "same-origin",
             body: JSON.stringify({ command, value }),
           });
           if (!response.ok) {

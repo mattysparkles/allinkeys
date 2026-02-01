@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -54,6 +54,9 @@ class MachineTelemetrySnapshot(BaseModel):
     range_start: Optional[int] = None
     range_end: Optional[int] = None
     timestamp_iso: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    range_recent: Optional[List[Dict[str, Any]]] = None
+    range_distribution: Optional[List[Dict[str, Any]]] = None
+    reference_overlays: Optional[List[Dict[str, Any]]] = None
 
 
 class MachineTelemetrySummary(BaseModel):

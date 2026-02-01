@@ -21,12 +21,6 @@ def _serialize_range_field(
 ) -> Optional[str]:
     source_id = machine_key or "unknown"
     if payload is None:
-        logger.warning(
-            "%s missing for machine_id=%s user_id=%s; nothing to store",
-            name,
-            source_id,
-            user_id,
-        )
         return None
     if not isinstance(payload, list):
         logger.warning(

@@ -158,6 +158,7 @@ def login_action(
         httponly=True,
         samesite="lax",
         secure=_secure_cookie(request),
+        path="/",
     )
     return response
 
@@ -265,6 +266,7 @@ def signup_action(
         httponly=True,
         samesite="lax",
         secure=_secure_cookie(request),
+        path="/",
     )
     return response
 
@@ -279,5 +281,5 @@ def logout_action(
         safe_next,
         status_code=status.HTTP_303_SEE_OTHER,
     )
-    response.delete_cookie(AUTH_COOKIE_NAME)
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
     return response

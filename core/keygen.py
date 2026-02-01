@@ -216,6 +216,14 @@ def _range_space() -> tuple[int, int]:
     return 0, SECP256K1_ORDER - 1
 
 
+def _format_range_id(start: int, end: int) -> str:
+    """Return a stable, human-readable range identifier from bounds."""
+    start_val, end_val = int(start), int(end)
+    if end_val < start_val:
+        start_val, end_val = end_val, start_val
+    return f"0x{start_val:064x}-0x{end_val:064x}"
+
+
 def _get_cached_seed_check(fingerprint: str, now: float) -> bool | None:
     with _TELEMETRY_SEED_CACHE_LOCK:
         entry = telemetry_seed_cache.get(fingerprint)
@@ -651,15 +659,18 @@ def run_vanitysearch_stream(
                 "addresses_generated_lifetime",
                 get_metric("addresses_generated_lifetime"),
             )
+            range_id_override = None
+            range_observation = None
             if first_seed is not None and last_seed is not None:
                 record_seed_range(first_seed, last_seed)
+                range_id_override = _format_range_id(first_seed, last_seed)
                 if telemetry_enabled():
                     try:
-                        mode, range_id = _telemetry_context()
+                        mode, _ = _telemetry_context()
                         space_min, space_max = _range_space()
-                        record_range_event(
+                        range_observation = record_range_event(
                             mode=mode,
-                            range_id=range_id,
+                            range_id=range_id_override,
                             start=first_seed,
                             end=last_seed,
                             space_min=space_min,
@@ -670,13 +681,14 @@ def run_vanitysearch_stream(
 
             if telemetry_enabled():
                 try:
-                    mode, range_id = _telemetry_context()
+                    mode, default_range_id = _telemetry_context()
                     record_seed_event(
                         int(initial_seed_int).to_bytes(32, "big"),
                         mode=mode,
-                        range_id=range_id,
+                        range_id=range_id_override or default_range_id,
                         used=True,
                         match_found=False,
+                        range_observation=range_observation,
                     )
                 except Exception:
                     pass

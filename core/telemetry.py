@@ -267,6 +267,85 @@ def _infer_process_state(metrics: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def build_range_distribution(ranges: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    summaries: Dict[str, Dict[str, Any]] = {}
+    for entry in ranges:
+        range_id = entry.get("range_id")
+        if not isinstance(range_id, str) or not range_id.strip():
+            continue
+        range_value = entry.get("range_value")
+        summary = summaries.setdefault(
+            range_id,
+            {
+                "range_id": range_id,
+                "range_value": range_value if isinstance(range_value, str) else None,
+                "observed_count": 0,
+                "observed_min": None,
+                "observed_max": None,
+                "normalized_min": None,
+                "normalized_max": None,
+                "space_min": entry.get("space_min"),
+                "space_max": entry.get("space_max"),
+            },
+        )
+        if summary.get("range_value") is None:
+            start = entry.get("start")
+            end = entry.get("end")
+            if isinstance(start, int) and isinstance(end, int):
+                start_val, end_val = (start, end) if start <= end else (end, start)
+                summary["range_value"] = (
+                    f"0x{start_val:064x}-0x{end_val:064x}"
+                )
+        position = entry.get("position")
+        normalized = entry.get("normalized_position")
+        if isinstance(position, int):
+            summary["observed_count"] += 1
+            summary["observed_min"] = (
+                position
+                if summary["observed_min"] is None
+                else min(summary["observed_min"], position)
+            )
+            summary["observed_max"] = (
+                position
+                if summary["observed_max"] is None
+                else max(summary["observed_max"], position)
+            )
+        normalized_min = entry.get("normalized_min")
+        normalized_max = entry.get("normalized_max")
+        normalized_span = entry.get("normalized_span")
+        if isinstance(normalized_min, (float, int)) and isinstance(
+            normalized_max, (float, int)
+        ):
+            min_val = float(normalized_min)
+            max_val = float(normalized_max)
+        elif isinstance(normalized, (float, int)):
+            normalized_val = float(normalized)
+            if isinstance(normalized_span, (float, int)) and normalized_span > 0:
+                half_span = float(normalized_span) / 2
+                min_val = normalized_val - half_span
+                max_val = normalized_val + half_span
+            else:
+                min_val = normalized_val
+                max_val = normalized_val
+        else:
+            min_val = None
+            max_val = None
+        if min_val is not None and max_val is not None:
+            min_val = max(0.0, min(1.0, min_val))
+            max_val = max(0.0, min(1.0, max_val))
+            summary["normalized_min"] = (
+                min_val
+                if summary["normalized_min"] is None
+                else min(summary["normalized_min"], min_val)
+            )
+            summary["normalized_max"] = (
+                max_val
+                if summary["normalized_max"] is None
+                else max(summary["normalized_max"], max_val)
+            )
+    return list(summaries.values())
+
+
 def _snapshot_from_metrics(
     metrics: Dict[str, Any],
     *,
@@ -276,6 +355,7 @@ def _snapshot_from_metrics(
     display_name: Optional[str],
     app_instance_id: str,
     client_version: Optional[str],
+    recent_ranges: Optional[List[Dict[str, Any]]] = None,
 ) -> MachineTelemetrySnapshot:
     last_activity = metrics.get("last_activity_ts")
     if not last_activity:
@@ -307,11 +387,15 @@ def _snapshot_from_metrics(
         app_instance_id=app_instance_id,
         client_version=client_version,
     )
+    distribution = build_range_distribution(recent_ranges or [])
     return MachineTelemetrySnapshot(
         identity=identity,
         runtime=runtime,
         resources=resources,
         capabilities=ControlCapabilities(),
+        range_recent=recent_ranges or None,
+        range_distribution=distribution or None,
+        reference_overlays=[],
     )
 
 
@@ -1147,6 +1231,7 @@ class TelemetryClient:
                         shutdown_event.wait(TELEMETRY_SNAPSHOT_SECONDS)
                         continue
                     metrics = get_current_metrics()
+                    recent_ranges = self._collect_recent_ranges()
                     snapshot = _snapshot_from_metrics(
                         metrics,
                         machine_id=self.machine_id or "",
@@ -1155,6 +1240,7 @@ class TelemetryClient:
                         display_name=self.display_name,
                         app_instance_id=self.app_id,
                         client_version=CLIENT_VERSION,
+                        recent_ranges=recent_ranges,
                     )
                     self.send_snapshot(snapshot)
                 except Exception:
@@ -1224,11 +1310,11 @@ class TelemetryClient:
         end: int,
         space_min: Optional[int] = None,
         space_max: Optional[int] = None,
-    ) -> None:
+    ) -> Optional[Dict[str, Any]]:
         """Record a bounded recent range observation for telemetry payloads."""
 
         if not self.enabled:
-            return
+            return None
 
         start_val, end_val = int(start), int(end)
         if end_val < start_val:
@@ -1261,50 +1347,14 @@ class TelemetryClient:
         with self._range_lock:
             self._recent_ranges.append(payload)
             self._last_range_event = payload
+        return payload
 
     def _range_distribution(self, ranges: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        summaries: Dict[str, Dict[str, Any]] = {}
-        for entry in ranges:
-            range_key = entry.get("range_id") or "default"
-            summary = summaries.setdefault(
-                range_key,
-                {
-                    "range_id": range_key,
-                    "observed_count": 0,
-                    "observed_min": None,
-                    "observed_max": None,
-                    "normalized_min": None,
-                    "normalized_max": None,
-                    "space_min": entry.get("space_min"),
-                    "space_max": entry.get("space_max"),
-                },
-            )
-            position = entry.get("position")
-            normalized = entry.get("normalized_position")
-            if isinstance(position, int):
-                summary["observed_count"] += 1
-                summary["observed_min"] = (
-                    position
-                    if summary["observed_min"] is None
-                    else min(summary["observed_min"], position)
-                )
-                summary["observed_max"] = (
-                    position
-                    if summary["observed_max"] is None
-                    else max(summary["observed_max"], position)
-                )
-            if isinstance(normalized, (float, int)):
-                summary["normalized_min"] = (
-                    normalized
-                    if summary["normalized_min"] is None
-                    else min(summary["normalized_min"], normalized)
-                )
-                summary["normalized_max"] = (
-                    normalized
-                    if summary["normalized_max"] is None
-                    else max(summary["normalized_max"], normalized)
-                )
-        return list(summaries.values())
+        return build_range_distribution(ranges)
+
+    def _collect_recent_ranges(self) -> List[Dict[str, Any]]:
+        with self._range_lock:
+            return list(self._recent_ranges)
 
     def record_event(
         self,
@@ -1314,6 +1364,7 @@ class TelemetryClient:
         range_id: Optional[str],
         used: bool,
         match_found: bool,
+        range_observation: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Persist a telemetry event to the queue."""
 
@@ -1324,6 +1375,10 @@ class TelemetryClient:
         with self._range_lock:
             recent_ranges = list(self._recent_ranges)
         range_metadata = self._current_range_metadata(mode=mode, range_id=range_id)
+        distribution_source = [range_observation] if range_observation else None
+        range_distribution = (
+            build_range_distribution(distribution_source) if distribution_source else None
+        )
         payload = {
             "app_instance_id": self.app_id,
             "client_version": CLIENT_VERSION,
@@ -1341,7 +1396,7 @@ class TelemetryClient:
             "machine_identity": self.machine_identity,
             "display_name": self.display_name,
             "range_recent": recent_ranges,
-            "range_distribution": self._range_distribution(recent_ranges),
+            "range_distribution": range_distribution,
             "reference_overlays": [],
             **_system_metrics_payload(),
         }
@@ -1788,6 +1843,7 @@ def record_seed_event(
     range_id: Optional[str],
     used: bool,
     match_found: bool,
+    range_observation: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Record a telemetry event if the global client is active."""
 
@@ -1799,6 +1855,7 @@ def record_seed_event(
         range_id=range_id,
         used=used,
         match_found=match_found,
+        range_observation=range_observation,
     )
 
 
@@ -1810,12 +1867,12 @@ def record_range_event(
     end: int,
     space_min: Optional[int] = None,
     space_max: Optional[int] = None,
-) -> None:
+) -> Optional[Dict[str, Any]]:
     """Record a range observation for telemetry payload enrichment."""
 
     if _CLIENT is None:
-        return
-    _CLIENT.record_range_event(
+        return None
+    return _CLIENT.record_range_event(
         mode=mode,
         range_id=range_id,
         start=start,
