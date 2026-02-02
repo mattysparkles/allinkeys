@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish (e.g., v0.1.0)"
+        required: false
+        default: "v0.1.0"
 
 permissions:
   contents: write
@@ -12,6 +17,8 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,8 +49,8 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}"
-          if (-not $version) { $version = "0.0.0" }
+          $version = "${{ env.RELEASE_TAG }}"
+          if (-not $version) { $version = "v0.1.0" }
           $version = $version -replace '^v',''
           $env:APP_VERSION = $version
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:APP_VERSION packaging\windows-installer.iss
@@ -51,6 +58,8 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           files: |
             dist/installer/AllInKeys-Setup-*.exe
           draft: false

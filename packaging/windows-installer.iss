@@ -12,7 +12,7 @@ AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\{#AppName}
 DisableProgramGroupPage=yes
-OutputDir=dist\installer
+OutputDir=..\dist\installer
 OutputBaseFilename=AllInKeys-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
@@ -20,7 +20,7 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\{#AppExeName}
 
 [Files]
-Source: "dist\AllInKeys\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+Source: "..\dist\AllInKeys\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
