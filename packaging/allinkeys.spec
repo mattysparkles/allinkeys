@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
-project_root = Path(SPECPATH).resolve().parents[1]
+project_root = Path(SPECPATH).resolve().parents[0]
 
 datas = [
     (str(project_root / "alerts" / "sounds"), "alerts/sounds"),
