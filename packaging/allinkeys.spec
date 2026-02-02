@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
-project_root = Path(SPECPATH).resolve().parents[0]
+project_root = Path(SPECPATH).resolve().parents[1]
 
 datas = [
     (str(project_root / "alerts" / "sounds"), "alerts/sounds"),
@@ -16,7 +16,7 @@ datas = [
 ]
 
 a = Analysis(
-    ["main.py"],
+    [str(project_root / "main.py")],
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
