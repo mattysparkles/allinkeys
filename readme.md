@@ -429,12 +429,18 @@ PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
 
 ## 📦 Building into `.exe`
 
+You can download the Windows installer from GitHub Releases (starting with `v0.1.0`).
+The release build bundles all required assets (VanitySearch binaries, wordlists,
+sounds, plugins, etc.) so it runs out of the box.
+
 ```bash
 pip install pyinstaller
 pyinstaller --onefile main.py
 ```
 
 Produces `dist/main.exe` — a standalone binary.
+For the official Windows installer, the GitHub Actions workflow packages a full
+`dist/AllInKeys` directory and builds an Inno Setup installer.
 
 ---
 
@@ -466,6 +472,13 @@ Produces `dist/main.exe` — a standalone binary.
 - Added processing throughput metrics and SQLite fallback for funded address lookup
 - Stream VanitySearch output to track seeds and expanded binary detection
 - Enhanced mnemonic mode with full BIP-39 language support and multilingual output
+
+### v0.1.0
+
+- Shipped the first Windows release build and installer via GitHub Releases.
+- Added public telemetry observer range distribution search with neighbor lookup and multiple visualizations.
+- Normalized range distribution ingest so ranges show real IDs and persist across submissions.
+- Expanded user machine dashboard controls, machine detail view, and live metrics snapshot.
 
 ---
 
