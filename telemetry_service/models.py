@@ -197,3 +197,9 @@ class MachineSnapshotPoint(BaseModel):
 class MachineSnapshotSeries(BaseModel):
     machine_id: str
     points: List[MachineSnapshotPoint]
+
+
+class MachineMetricsResponse(BaseModel):
+    machine_id: str
+    timestamp: Optional[str] = None
+    metrics: Dict[str, Any] = Field(default_factory=dict)

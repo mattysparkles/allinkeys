@@ -306,6 +306,38 @@
         color: #9fa4b4;
         font-size: 11px;
       }
+      .metrics-panel {
+        margin-top: 28px;
+      }
+      .metrics-section {
+        display: grid;
+        gap: 16px;
+      }
+      .metrics-table {
+        display: grid;
+        grid-template-columns: minmax(180px, 1fr) 2fr;
+        gap: 8px 16px;
+        font-size: 13px;
+        color: #c6ccda;
+      }
+      .metrics-key {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #7d8597;
+      }
+      .metrics-value {
+        word-break: break-word;
+      }
+      .metrics-raw {
+        background: #0f1424;
+        border-radius: 12px;
+        border: 1px solid #232b41;
+        padding: 12px;
+        font-size: 12px;
+        color: #c6ccda;
+        white-space: pre-wrap;
+      }
     </style>
 {% endblock %}
 {% block content %}
@@ -369,6 +401,20 @@
       <canvas id="kpsChart" width="560" height="140"></canvas>
       <canvas id="cpuChart" width="560" height="140"></canvas>
       <canvas id="ramChart" width="560" height="140"></canvas>
+    </section>
+
+    <section class="panel metrics-panel">
+      <div class="metrics-section">
+        <div>
+          <h2>Full Metrics</h2>
+          <p class="subtitle" id="metricsSubtitle">Loading metrics...</p>
+        </div>
+        <div id="metricsTable" class="metrics-table"></div>
+        <details>
+          <summary>Raw metrics JSON</summary>
+          <pre id="metricsRaw" class="metrics-raw"></pre>
+        </details>
+      </div>
     </section>
 
     <section class="panel seed-panel">
@@ -443,6 +489,9 @@
       const seedLookupInput = document.getElementById("seedLookupInput");
       const seedLookupLimit = document.getElementById("seedLookupLimit");
       const seedLookupResult = document.getElementById("seedLookupResult");
+      const metricsTable = document.getElementById("metricsTable");
+      const metricsRaw = document.getElementById("metricsRaw");
+      const metricsSubtitle = document.getElementById("metricsSubtitle");
       const seedPositionsLimit = 12;
 
       const numberFormatter = new Intl.NumberFormat(undefined, {
@@ -494,6 +543,69 @@
         return value;
       }
 
+      function flattenMetrics(obj, prefix = "") {
+        const entries = [];
+        if (!obj || typeof obj !== "object") return entries;
+        Object.keys(obj)
+          .sort()
+          .forEach((key) => {
+            const value = obj[key];
+            const nextKey = prefix ? `${prefix}.${key}` : key;
+            if (
+              value &&
+              typeof value === "object" &&
+              !Array.isArray(value)
+            ) {
+              entries.push(...flattenMetrics(value, nextKey));
+            } else {
+              entries.push([nextKey, value]);
+            }
+          });
+        return entries;
+      }
+
+      function formatMetricValue(value) {
+        if (value === null || value === undefined) return "—";
+        if (typeof value === "string") return value;
+        if (typeof value === "number" || typeof value === "boolean") {
+          return String(value);
+        }
+        try {
+          const text = JSON.stringify(value);
+          if (text.length > 500) {
+            return `${text.slice(0, 500)}…`;
+          }
+          return text;
+        } catch (error) {
+          return String(value);
+        }
+      }
+
+      function renderMetrics(metrics, timestamp) {
+        metricsTable.innerHTML = "";
+        if (!metrics || !Object.keys(metrics).length) {
+          metricsTable.innerHTML = '<div class="text-slate">No metrics reported yet.</div>';
+          metricsRaw.textContent = "";
+          metricsSubtitle.textContent = "No metrics data reported yet.";
+          return;
+        }
+        const entries = flattenMetrics(metrics);
+        entries.forEach(([key, value]) => {
+          const keyEl = document.createElement("div");
+          keyEl.className = "metrics-key";
+          keyEl.textContent = key;
+          const valueEl = document.createElement("div");
+          valueEl.className = "metrics-value";
+          valueEl.textContent = formatMetricValue(value);
+          metricsTable.appendChild(keyEl);
+          metricsTable.appendChild(valueEl);
+        });
+        metricsRaw.textContent = JSON.stringify(metrics, null, 2);
+        metricsSubtitle.textContent = timestamp
+          ? `Last updated ${formatDate(timestamp)}`
+          : "Latest metrics snapshot";
+      }
+
       async function loadSeedPositions() {
         seedList.innerHTML = '<tr><td colspan="6">Loading seed activity…</td></tr>';
         try {
@@ -526,6 +638,26 @@
             .join("");
         } catch (error) {
           seedList.innerHTML = '<tr><td colspan="6">Unable to load seed activity.</td></tr>';
+        }
+      }
+
+      async function loadMetrics() {
+        metricsSubtitle.textContent = "Loading metrics...";
+        try {
+          const response = await fetch(`${apiBase}/${machineId}/metrics`, {
+            headers: getAuthHeaders(),
+            credentials: "same-origin",
+          });
+          if (!response.ok) {
+            throw new Error("Failed to load metrics");
+          }
+          const data = await response.json();
+          renderMetrics(data.metrics || {}, data.timestamp);
+        } catch (error) {
+          metricsSubtitle.textContent =
+            "Unable to load metrics. Check your session or access token.";
+          metricsTable.innerHTML = "";
+          metricsRaw.textContent = "";
         }
       }
 
@@ -819,6 +951,7 @@
         setStoredToken(value);
         fetchMachine();
         loadCommands();
+        loadMetrics();
       });
 
       refreshButton.addEventListener("click", () => {
@@ -826,6 +959,7 @@
         loadCommands();
         loadSnapshots();
         loadSeedPositions();
+        loadMetrics();
       });
 
       controlForm.addEventListener("submit", async (event) => {
@@ -865,11 +999,13 @@
       loadCommands();
       loadSnapshots();
       loadSeedPositions();
+      loadMetrics();
       setInterval(() => {
         fetchMachine();
         loadCommands();
         loadSnapshots();
         loadSeedPositions();
+        loadMetrics();
       }, 10000);
     </script>
 {% endblock %}

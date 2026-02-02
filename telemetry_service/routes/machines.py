@@ -27,6 +27,7 @@ from telemetry_service.models import (
     MachineRegisterResponse,
     MachineSnapshotPoint,
     MachineSnapshotSeries,
+    MachineMetricsResponse,
     MachineSummary,
     TelemetryItem,
     UserPublic,
@@ -730,6 +731,47 @@ def list_machine_snapshots(
             )
             for row in rows
         ],
+    )
+
+
+@router.get(
+    "/{machine_id}/metrics",
+    response_model=MachineMetricsResponse,
+    summary="Return the latest full metrics payload for a machine.",
+)
+def machine_metrics(
+    machine_id: str,
+    current_user: UserPublic = Depends(get_ui_current_user),
+) -> MachineMetricsResponse:
+    _get_machine_for_user_or_admin(machine_id, current_user)
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT timestamp, payload
+            FROM machine_snapshots
+            WHERE machine_id = ?
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (machine_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return MachineMetricsResponse(machine_id=machine_id, timestamp=None, metrics={})
+    snapshot_ts, payload = row
+    parsed = _parse_json_field(payload)
+    if not isinstance(parsed, dict):
+        return MachineMetricsResponse(machine_id=machine_id, timestamp=snapshot_ts, metrics={})
+    metrics = parsed.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    timestamp = parsed.get("timestamp_iso") or snapshot_ts
+    return MachineMetricsResponse(
+        machine_id=machine_id,
+        timestamp=timestamp,
+        metrics=metrics,
     )
 
 

@@ -17,6 +17,7 @@ addresses or WIFs:
 ``used`` / ``match_found`` – Result flags.
 ``machine_id`` – Stable per-machine identifier (opaque).
 ``machine_name`` – Human-friendly display name (mutable).
+``metrics`` – Full dashboard metric snapshot.
 ``range_recent`` – Bounded list of recently checked ranges.
 ``range_distribution`` – Normalized range metadata for density visualization.
 ``reference_overlays`` – Reserved stub for future range correlation.
@@ -252,6 +253,27 @@ def _coerce_float(value: Any) -> Optional[float]:
         return None
 
 
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, deque)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8", errors="replace")
+        except Exception:
+            return str(value)
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        try:
+            return iso()
+        except Exception:
+            return str(value)
+    return str(value)
+
+
 def _infer_process_state(metrics: Dict[str, Any]) -> Optional[str]:
     state = metrics.get("global_run_state")
     if isinstance(state, str) and state.strip():
@@ -388,6 +410,7 @@ def _snapshot_from_metrics(
         client_version=client_version,
     )
     distribution = build_range_distribution(recent_ranges or [])
+    metrics_payload = _json_safe(metrics) if metrics else None
     return MachineTelemetrySnapshot(
         identity=identity,
         runtime=runtime,
@@ -396,6 +419,7 @@ def _snapshot_from_metrics(
         range_recent=recent_ranges or None,
         range_distribution=distribution or None,
         reference_overlays=[],
+        metrics=metrics_payload,
     )
 
 
