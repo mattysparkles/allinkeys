@@ -24,7 +24,8 @@ from utils.thread_guard import can_spawn_thread
 
 import gettext
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+ASSETS_DIR = os.getenv("ALLINKEYS_ASSETS_DIR")
+BASE_DIR = ASSETS_DIR or os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 locale_dir = os.path.join(BASE_DIR, 'locale')
 lang = os.environ.get('LANG', 'en')[:2]
 translation = gettext.translation('allinkeys', localedir=locale_dir, languages=[lang], fallback=True)

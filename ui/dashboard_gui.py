@@ -11,7 +11,8 @@ from ttkbootstrap.constants import *
 import gettext
 
 # Add repo root so `config` package can be imported reliably
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ASSETS_DIR = os.getenv("ALLINKEYS_ASSETS_DIR")
+BASE_DIR = ASSETS_DIR or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, "config"))
 

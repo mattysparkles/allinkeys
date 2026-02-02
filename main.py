@@ -5,6 +5,17 @@ import io
 import sys
 import argparse
 import subprocess
+from pathlib import Path
+
+# Ensure writable base/log directories when running as a frozen Windows exe.
+if getattr(sys, "frozen", False):
+    install_dir = Path(sys.executable).resolve().parent
+    os.environ.setdefault("ALLINKEYS_ASSETS_DIR", str(install_dir))
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    base_path = Path(local_app_data) if local_app_data else Path.home()
+    base_dir = str(base_path / "AllInKeys")
+    os.environ.setdefault("ALLINKEYS_BASE_DIR", base_dir)
+    os.environ.setdefault("ALLINKEYS_LOG_DIR", str(Path(base_dir) / "logs"))
 
 import config.settings as settings
 from config.settings import find_vanitysearch_binary

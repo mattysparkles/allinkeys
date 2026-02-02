@@ -14,6 +14,7 @@ from config.directories import (
     ALERT_SOUND_FILE,
     ALL_BTC_ADDRESSES_DIR,
     ALL_BTC_GZ_LOCAL,
+    ASSETS_DIR,
     BASE_DIR,
     CHECKED_CSV_LOG,
     CHECKPOINT_FILE,
@@ -142,7 +143,7 @@ def find_vanitysearch_binary():
     can execute either variant, so we search for both forms regardless of
     platform with OS-preferred names checked first.
     """
-    bin_dir = os.path.join(BASE_DIR, "bin")
+    bin_dir = os.path.join(ASSETS_DIR, "bin")
 
     exe_candidates = [
         os.path.join(bin_dir, "VanitySearch.exe"),
@@ -188,7 +189,7 @@ def find_vanitysearch_binary():
 
 def find_oclvanity_binary(base_name: str):
     """Return path to ``base_name`` for the host OS."""
-    bin_dir = os.path.join(BASE_DIR, "bin")
+    bin_dir = os.path.join(ASSETS_DIR, "bin")
     if os.name == "nt":
         candidates = [
             os.path.join(bin_dir, f"{base_name}.exe"),
