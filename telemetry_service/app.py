@@ -18,7 +18,12 @@ from config.constants import SECP256K1_ORDER
 from config.telemetry import TOKEN_EXPIRY
 from telemetry_service.auth import create_access_token, hash_password, verify_password
 from telemetry_service.db import get_db_connection
-from telemetry_service.dependencies import get_current_user, get_optional_user, get_ui_current_user
+from telemetry_service.dependencies import (
+    get_current_user,
+    get_machine_for_user,
+    get_ui_current_user,
+    get_ui_optional_user,
+)
 from telemetry_service.error_logging import log_ingest_error
 from telemetry_service.ingest import ingest_seed_events
 from telemetry_service.machine_registry import MACHINE_REGISTRY, MACHINE_REGISTRY_LOCK
@@ -147,7 +152,11 @@ class RangeDistributionResponse(BaseModel):
     ranges: List[RangeDistributionEntry]
     limit: Optional[int] = None
     since: Optional[str] = None
+    until: Optional[str] = None
     mode: Optional[str] = None
+    range_id: Optional[str] = None
+    scope: Optional[str] = None
+    machine_id: Optional[str] = None
 
 
 class RangeSearchNeighbor(BaseModel):
@@ -175,7 +184,40 @@ class RangeSearchResponse(BaseModel):
     space_min: str
     space_max: str
     since: Optional[str] = None
+    until: Optional[str] = None
     mode: Optional[str] = None
+    range_id: Optional[str] = None
+    scope: Optional[str] = None
+    machine_id: Optional[str] = None
+
+
+class RangeIdSummary(BaseModel):
+    range_id: Optional[str] = None
+    count: int
+    match_found: int
+    unique_seed_count: int
+    last_seen: Optional[str] = None
+
+
+class RangeIdSummaryResponse(BaseModel):
+    slug: str
+    ranges: List[RangeIdSummary]
+    since: Optional[str] = None
+    until: Optional[str] = None
+    mode: Optional[str] = None
+    scope: Optional[str] = None
+    machine_id: Optional[str] = None
+
+
+class MetricAggregateResponse(BaseModel):
+    slug: str
+    scope: str
+    machine_id: Optional[str] = None
+    machines: int
+    timestamp: Optional[str] = None
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    btc_address_types_today: Dict[str, float] = Field(default_factory=dict)
+    btc_address_types_lifetime: Dict[str, float] = Field(default_factory=dict)
 
 
 class MachineHealthEntry(BaseModel):
@@ -378,9 +420,34 @@ def _safe_load_json(payload: Optional[str]) -> List[Dict[str, Any]]:
     return []
 
 
+def _safe_load_dict(payload: Optional[str]) -> Dict[str, Any]:
+    if not payload:
+        return {}
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _coerce_float(value: Any) -> Optional[float]:
     if isinstance(value, (int, float)):
         return float(value)
+    return None
+
+
+def _coerce_metric_number(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "")
+        if not cleaned or cleaned.upper() == "N/A":
+            return None
+        cleaned = cleaned.rstrip("%")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
     return None
 
 
@@ -575,6 +642,70 @@ def _parse_since(value: Optional[str]) -> Optional[str]:
     return value
 
 
+def _parse_until(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    value = value.strip()
+    relative_match = re.fullmatch(r"(\d+)([mh])", value)
+    if relative_match:
+        amount = int(relative_match.group(1))
+        unit = relative_match.group(2)
+        delta = timedelta(minutes=amount) if unit == "m" else timedelta(hours=amount)
+        return (datetime.utcnow() - delta).isoformat() + "Z"
+    if value.endswith("Z"):
+        try:
+            datetime.fromisoformat(value[:-1])
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail="Invalid until timestamp"
+            ) from exc
+        return value
+    try:
+        datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid until timestamp"
+        ) from exc
+    return value
+
+
+def _normalize_scope(scope: Optional[str]) -> str:
+    if not scope:
+        return "global"
+    scope_value = scope.strip().lower()
+    if scope_value in {"global", "user", "machine"}:
+        return scope_value
+    raise HTTPException(status_code=400, detail="Invalid scope")
+
+
+def _scope_filters(
+    *,
+    current_user: Optional[UserPublic],
+    scope: Optional[str],
+    machine_id: Optional[str],
+    machine_column: str = "machine_id",
+    user_column: str = "user_id",
+) -> tuple[str, List[str], List[Any]]:
+    scope_value = _normalize_scope(scope)
+    filters: List[str] = []
+    params: List[Any] = []
+    if scope_value == "user":
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        filters.append(f"{user_column} = ?")
+        params.append(current_user.id)
+    elif scope_value == "machine":
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        if not machine_id:
+            raise HTTPException(status_code=400, detail="machine_id is required")
+        if not current_user.is_admin:
+            get_machine_for_user(machine_id, current_user)
+        filters.append(f"{machine_column} = ?")
+        params.append(machine_id)
+    return scope_value, filters, params
+
+
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -635,7 +766,9 @@ def ingest(
 )
 def machine_stats(
     slug: str,
-    current_user: Optional[UserPublic] = Depends(get_optional_user),
+    scope: Optional[str] = Query(None, description="global|user|machine"),
+    machine_id: Optional[str] = Query(None),
+    current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
 ) -> MachineStatsResponse:
     """Return machine telemetry for dashboard views.
 
@@ -643,12 +776,23 @@ def machine_stats(
         curl -H "X-API-Key: changeme" \\
           http://localhost:3088/v1/dashboard/demo/machines
     """
+    scope_value = _normalize_scope(scope)
+    if scope_value in {"user", "machine"} and current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if scope_value == "machine" and not machine_id:
+        raise HTTPException(status_code=400, detail="machine_id is required")
+    if scope_value == "machine" and current_user and not current_user.is_admin:
+        get_machine_for_user(machine_id, current_user)
     with MACHINE_REGISTRY_LOCK:
-        machines = [
-            entry
-            for entry in MACHINE_REGISTRY.values()
-            if current_user is None or entry.get("user_id") == current_user.id
-        ]
+        machines = list(MACHINE_REGISTRY.values())
+        if scope_value == "user" and current_user is not None:
+            machines = [
+                entry for entry in machines if entry.get("user_id") == current_user.id
+            ]
+        elif scope_value == "machine" and machine_id:
+            machines = [
+                entry for entry in machines if entry.get("machine_id") == machine_id
+            ]
     machines.sort(
         key=lambda entry: (
             entry.get("machine_name") or "",
@@ -664,9 +808,15 @@ def machine_stats(
         "COALESCE(machine_id, app_instance_id) IS NOT NULL",
     ]
     params: List[Any] = [window_start.isoformat() + "Z"]
-    if current_user is not None:
-        filters.append("user_id = ?")
-        params.append(current_user.id)
+    _, scope_filters, scope_params = _scope_filters(
+        current_user=current_user,
+        scope=scope_value,
+        machine_id=machine_id,
+        machine_column="machine_id",
+        user_column="user_id",
+    )
+    filters.extend(scope_filters)
+    params.extend(scope_params)
     where_clause = f"WHERE {' AND '.join(filters)}"
     conn = get_db_connection()
     try:
@@ -713,18 +863,22 @@ def machine_stats(
 def machine_health(
     slug: str,
     stale_minutes: int = Query(60, ge=1, le=1440),
-    current_user: Optional[UserPublic] = Depends(get_optional_user),
+    scope: Optional[str] = Query(None, description="global|user|machine"),
+    machine_id: Optional[str] = Query(None),
+    current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
 ) -> MachineHealthResponse:
     del slug
     cutoff = datetime.utcnow() - timedelta(minutes=stale_minutes)
+    scope_value, scope_filters, scope_params = _scope_filters(
+        current_user=current_user,
+        scope=scope,
+        machine_id=machine_id,
+        machine_column="id",
+        user_column="user_id",
+    )
     conn = get_db_connection()
     try:
-        filters: List[str] = []
-        params: List[Any] = []
-        if current_user is not None:
-            filters.append("user_id = ?")
-            params.append(current_user.id)
-        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        where_clause = f"WHERE {' AND '.join(scope_filters)}" if scope_filters else ""
         rows = conn.execute(
             f"""
             SELECT id, machine_name, last_seen
@@ -732,7 +886,7 @@ def machine_health(
             {where_clause}
             ORDER BY last_seen DESC
             """,
-            params,
+            scope_params,
         ).fetchall()
     finally:
         conn.close()
@@ -771,14 +925,22 @@ def machine_health(
 def recent_ranges(
     slug: str,
     limit: int = Query(50, ge=1, le=200),
-    current_user: Optional[UserPublic] = Depends(get_optional_user),
+    scope: Optional[str] = Query(None, description="global|user|machine"),
+    machine_id: Optional[str] = Query(None),
+    current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
 ) -> RecentRangesResponse:
     del slug
     filters = ["range_recent IS NOT NULL"]
     params: List[Any] = []
-    if current_user is not None:
-        filters.append("user_id = ?")
-        params.append(current_user.id)
+    _, scope_filters, scope_params = _scope_filters(
+        current_user=current_user,
+        scope=scope,
+        machine_id=machine_id,
+        machine_column="id",
+        user_column="user_id",
+    )
+    filters.extend(scope_filters)
+    params.extend(scope_params)
     row_limit = max(1, min(limit * 3, 500))
     where_clause = f"WHERE {' AND '.join(filters)}"
     conn = get_db_connection()
@@ -843,14 +1005,22 @@ def recent_ranges(
 def top_contributors(
     slug: str,
     limit: int = Query(20, ge=1, le=100),
-    current_user: Optional[UserPublic] = Depends(get_optional_user),
+    scope: Optional[str] = Query(None, description="global|user|machine"),
+    machine_id: Optional[str] = Query(None),
+    current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
 ) -> ContributorsResponse:
     del slug
     filters = ["COALESCE(machine_id, app_instance_id) IS NOT NULL"]
     params: List[Any] = []
-    if current_user is not None:
-        filters.append("user_id = ?")
-        params.append(current_user.id)
+    _, scope_filters, scope_params = _scope_filters(
+        current_user=current_user,
+        scope=scope,
+        machine_id=machine_id,
+        machine_column="machine_id",
+        user_column="user_id",
+    )
+    filters.extend(scope_filters)
+    params.extend(scope_params)
     params.append(limit)
     where_clause = f"WHERE {' AND '.join(filters)}"
     conn = get_db_connection()
@@ -1187,9 +1357,13 @@ def seed_lookup(
 def range_distribution(
     slug: str,
     since: Optional[str] = Query(None),
+    until: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
+    range_id: Optional[str] = Query(None),
+    scope: Optional[str] = Query(None, description="global|user|machine"),
+    machine_id: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=500000),
-    current_user: Optional[UserPublic] = Depends(get_optional_user),
+    current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
 ) -> RangeDistributionResponse:
     """Aggregate distribution metrics for range coverage charts.
 
@@ -1198,19 +1372,32 @@ def range_distribution(
           "http://localhost:3088/v1/dashboard/demo/ranges/distribution"
     """
     parsed_since = _parse_since(since)
+    parsed_until = _parse_until(until)
     conn = get_db_connection()
     try:
         filters = ["range_distribution IS NOT NULL"]
         params: List[Any] = []
-        if current_user is not None:
-            filters.append("user_id = ?")
-            params.append(current_user.id)
+        _, scope_filters, scope_params = _scope_filters(
+            current_user=current_user,
+            scope=scope,
+            machine_id=machine_id,
+            machine_column="machine_id",
+            user_column="user_id",
+        )
+        filters.extend(scope_filters)
+        params.extend(scope_params)
         if parsed_since:
             filters.append("last_seen >= ?")
             params.append(parsed_since)
+        if parsed_until:
+            filters.append("last_seen <= ?")
+            params.append(parsed_until)
         if mode:
             filters.append("mode = ?")
             params.append(mode)
+        if range_id:
+            filters.append("range_id = ?")
+            params.append(range_id)
         where_clause = f"WHERE {' AND '.join(filters)}"
         rows = conn.execute(
             f"""
@@ -1269,6 +1456,10 @@ def range_distribution(
             limit=limit,
             since=since,
             mode=mode,
+            range_id=range_id,
+            scope=_normalize_scope(scope),
+            machine_id=machine_id,
+            until=until,
         )
     finally:
         conn.close()
@@ -1289,10 +1480,14 @@ def range_search(
     ),
     neighbors: int = Query(3, ge=1, le=50),
     since: Optional[str] = Query(None),
+    until: Optional[str] = Query(None),
     mode: Optional[str] = Query(None),
+    range_id: Optional[str] = Query(None),
+    scope: Optional[str] = Query(None, description="global|user|machine"),
+    machine_id: Optional[str] = Query(None),
     space_min: Optional[str] = Query(None),
     space_max: Optional[str] = Query(None),
-    current_user: Optional[UserPublic] = Depends(get_optional_user),
+    current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
 ) -> RangeSearchResponse:
     input_value = seed.strip()
     if not input_value:
@@ -1308,19 +1503,32 @@ def range_search(
         )
 
     parsed_since = _parse_since(since)
+    parsed_until = _parse_until(until)
     conn = get_db_connection()
     try:
         filters = ["range_distribution IS NOT NULL"]
         params: List[Any] = []
-        if current_user is not None:
-            filters.append("user_id = ?")
-            params.append(current_user.id)
+        _, scope_filters, scope_params = _scope_filters(
+            current_user=current_user,
+            scope=scope,
+            machine_id=machine_id,
+            machine_column="machine_id",
+            user_column="user_id",
+        )
+        filters.extend(scope_filters)
+        params.extend(scope_params)
         if parsed_since:
             filters.append("last_seen >= ?")
             params.append(parsed_since)
+        if parsed_until:
+            filters.append("last_seen <= ?")
+            params.append(parsed_until)
         if mode:
             filters.append("mode = ?")
             params.append(mode)
+        if range_id:
+            filters.append("range_id = ?")
+            params.append(range_id)
         where_clause = f"WHERE {' AND '.join(filters)}"
         rows = conn.execute(
             f"""
@@ -1427,7 +1635,209 @@ def range_search(
         space_min=str(min_space),
         space_max=str(max_space),
         since=since,
+        until=until,
         mode=mode,
+        range_id=range_id,
+        scope=_normalize_scope(scope),
+        machine_id=machine_id,
+    )
+
+
+@app.get(
+    "/v1/dashboard/{slug}/ranges/ids",
+    response_model=RangeIdSummaryResponse,
+    tags=["Admin"],
+    description="List range identifiers and counts for dashboards.",
+)
+def range_id_summary(
+    slug: str,
+    since: Optional[str] = Query(None),
+    until: Optional[str] = Query(None),
+    mode: Optional[str] = Query(None),
+    scope: Optional[str] = Query(None, description="global|user|machine"),
+    machine_id: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
+) -> RangeIdSummaryResponse:
+    parsed_since = _parse_since(since)
+    parsed_until = _parse_until(until)
+    filters = ["range_id IS NOT NULL"]
+    params: List[Any] = []
+    _, scope_filters, scope_params = _scope_filters(
+        current_user=current_user,
+        scope=scope,
+        machine_id=machine_id,
+        machine_column="machine_id",
+        user_column="user_id",
+    )
+    filters.extend(scope_filters)
+    params.extend(scope_params)
+    if parsed_since:
+        filters.append("last_seen >= ?")
+        params.append(parsed_since)
+    if parsed_until:
+        filters.append("last_seen <= ?")
+        params.append(parsed_until)
+    if mode:
+        filters.append("mode = ?")
+        params.append(mode)
+    where_clause = f"WHERE {' AND '.join(filters)}"
+    params.append(limit)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT
+                range_id,
+                COUNT(*) AS count,
+                SUM(match_found) AS match_found,
+                COUNT(DISTINCT seed_fingerprint) AS unique_seed_count,
+                MAX(last_seen) AS last_seen
+            FROM seed_events
+            {where_clause}
+            GROUP BY range_id
+            ORDER BY count DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+    ranges = [
+        RangeIdSummary(
+            range_id=row[0],
+            count=row[1],
+            match_found=row[2] or 0,
+            unique_seed_count=row[3],
+            last_seen=row[4],
+        )
+        for row in rows
+        if row[0]
+    ]
+    return RangeIdSummaryResponse(
+        slug=slug,
+        ranges=ranges,
+        since=since,
+        until=until,
+        mode=mode,
+        scope=_normalize_scope(scope),
+        machine_id=machine_id,
+    )
+
+
+@app.get(
+    "/v1/dashboard/{slug}/metrics/aggregate",
+    response_model=MetricAggregateResponse,
+    tags=["Admin"],
+    description="Aggregate latest dashboard metrics across machines.",
+)
+def metrics_aggregate(
+    slug: str,
+    scope: Optional[str] = Query(None, description="global|user|machine"),
+    machine_id: Optional[str] = Query(None),
+    current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
+) -> MetricAggregateResponse:
+    scope_value, scope_filters, scope_params = _scope_filters(
+        current_user=current_user,
+        scope=scope,
+        machine_id=machine_id,
+        machine_column="machine_id",
+        user_column="user_id",
+    )
+    where_clause = f"WHERE {' AND '.join(scope_filters)}" if scope_filters else ""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT ms.machine_id, ms.timestamp, ms.payload
+            FROM machine_snapshots ms
+            JOIN (
+                SELECT machine_id, MAX(timestamp) AS max_ts
+                FROM machine_snapshots
+                {where_clause}
+                GROUP BY machine_id
+            ) latest
+            ON ms.machine_id = latest.machine_id AND ms.timestamp = latest.max_ts
+            """,
+            scope_params,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    aggregate_maps = {
+        "addresses_checked_today": {},
+        "addresses_checked_lifetime": {},
+        "addresses_generated_today": {},
+        "addresses_generated_lifetime": {},
+        "matches_found_today": {},
+        "matches_found_lifetime": {},
+    }
+    aggregate_numbers = {
+        "keys_generated_today": 0.0,
+        "keys_generated_lifetime": 0.0,
+        "mnemonics_generated_today": 0.0,
+        "mnemonics_generated_lifetime": 0.0,
+        "derived_addresses_today": 0.0,
+        "derived_addresses_lifetime": 0.0,
+        "csv_checked_today": 0.0,
+        "csv_checked_lifetime": 0.0,
+        "btc_only_files_checked_today": 0.0,
+        "btc_only_matches_found_today": 0.0,
+    }
+    total_kps = 0.0
+    latest_ts: Optional[str] = None
+
+    def _accumulate_dict(target: Dict[str, float], source: Any) -> None:
+        if not isinstance(source, dict):
+            return
+        for key, raw in source.items():
+            num = _coerce_metric_number(raw)
+            if num is None:
+                continue
+            target[key] = target.get(key, 0.0) + num
+
+    for machine_id_value, timestamp, payload in rows:
+        if latest_ts is None or (timestamp and timestamp > latest_ts):
+            latest_ts = timestamp
+        payload_dict = _safe_load_dict(payload)
+        metrics = payload_dict.get("metrics")
+        if isinstance(metrics, dict):
+            for key in aggregate_maps:
+                _accumulate_dict(aggregate_maps[key], metrics.get(key))
+            for key in aggregate_numbers:
+                num = _coerce_metric_number(metrics.get(key))
+                if num is not None:
+                    aggregate_numbers[key] += num
+        runtime = payload_dict.get("runtime") if isinstance(payload_dict, dict) else None
+        if isinstance(runtime, dict):
+            kps_value = _coerce_metric_number(runtime.get("keys_per_sec"))
+            if kps_value is not None:
+                total_kps += kps_value
+
+    aggregated_metrics: Dict[str, Any] = {}
+    aggregated_metrics.update(aggregate_maps)
+    aggregated_metrics.update(aggregate_numbers)
+    aggregated_metrics["keys_per_sec"] = round(total_kps, 2)
+
+    btc_type_keys = ["p2pkh", "p2wpkh", "taproot", "p2sh"]
+    btc_today = {
+        key: float(aggregate_maps["addresses_checked_today"].get(key, 0.0))
+        for key in btc_type_keys
+    }
+    btc_lifetime = {
+        key: float(aggregate_maps["addresses_checked_lifetime"].get(key, 0.0))
+        for key in btc_type_keys
+    }
+
+    return MetricAggregateResponse(
+        slug=slug,
+        scope=scope_value,
+        machine_id=machine_id,
+        machines=len(rows),
+        timestamp=latest_ts,
+        metrics=aggregated_metrics,
+        btc_address_types_today=btc_today,
+        btc_address_types_lifetime=btc_lifetime,
     )
 
 

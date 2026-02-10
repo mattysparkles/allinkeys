@@ -175,9 +175,11 @@ graph.
 
 ## Telemetry dashboard endpoints
 
-Dashboard endpoints power the public telemetry UI. If a bearer token is
-present, responses are scoped to the authenticated user; otherwise the results
-aggregate across all users.
+Dashboard endpoints power the public telemetry UI. Responses are global by
+default. Use `scope=user` (requires auth) to scope to the signed-in account or
+`scope=machine` + `machine_id` to scope to a single machine. When browsing with
+the telemetry UI and a `telemetry_token` cookie, the dashboard can request
+scoped data without manually attaching bearer tokens.
 
 ### `GET /v1/dashboard/{slug}/machines`
 
@@ -192,19 +194,35 @@ Returns machine health status and stale markers. Supports
 ### `GET /v1/dashboard/{slug}/ranges/recent`
 
 Returns the most recent ranges, default `limit=50`. The `app_instance_id`
-field is a display label (prefers the human-readable machine name).
+field is a display label (prefers the human-readable machine name). Supports
+`scope` / `machine_id` for scoping.
 
 ### `GET /v1/dashboard/{slug}/ranges/distribution`
 
 Returns the aggregated range distribution (persistent range coverage), default
-`limit=200`.
+`limit=200`. Filters: `mode`, `range_id`, `since`, `until`, `scope`,
+`machine_id`.
 
 ### `GET /v1/dashboard/{slug}/ranges/search`
 
 Locate a seed or keyspace percent inside the persisted range distribution and
 return the closest ranges above/below the target. Accepts `seed`, `input_type`
-(`seed` or `percent`), `neighbors` (per side), plus the usual `since`/`mode`
-filters. Optional `space_min` / `space_max` override the keyspace bounds.
+(`seed` or `percent`), `neighbors` (per side), plus the usual `since`/`until`,
+`mode`, `range_id`, `scope`, and `machine_id` filters. Optional `space_min` /
+`space_max` override the keyspace bounds.
+
+### `GET /v1/dashboard/{slug}/ranges/ids`
+
+Returns a ranked list of `range_id` values with counts, match totals, and
+unique seed totals. Useful for puzzle mode tabs. Supports `since`, `until`,
+`mode`, `scope`, `machine_id`, and `limit`.
+
+### `GET /v1/dashboard/{slug}/metrics/aggregate`
+
+Returns the latest aggregate dashboard metrics (addresses checked/generated,
+matches found, etc.) across the requested scope. Supports `scope` and
+`machine_id`. The response includes BTC address-type breakdowns so the public
+dashboard can render legacy vs bech32 vs taproot splits.
 
 ### `GET /v1/dashboard/{slug}/contributors/top`
 

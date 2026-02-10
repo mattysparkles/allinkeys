@@ -261,6 +261,21 @@
         color: #cbd5f5;
         font-size: 12px;
       }
+      .telemetry-explorer {
+        margin: 12px 0 20px;
+        padding: 14px;
+        border-radius: 14px;
+        border: 1px solid #20263a;
+        background: #121622;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .telemetry-links {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
     </style>
 {% endblock %}
 {% block content %}
@@ -286,6 +301,15 @@
       </div>
     </header>
     <section class="summary-bar" id="summaryBar"></section>
+    <section class="telemetry-explorer">
+      <div class="telemetry-links">
+        <a class="control-link" href="/?scope=global" target="_blank">Global Telemetry</a>
+        <a class="control-link" href="/?scope=user" target="_blank">My Telemetry</a>
+      </div>
+      <p class="subtitle">
+        Explore range coverage, puzzle runs, and address metrics with mode and scope filters.
+      </p>
+    </section>
     <section class="bulk-actions" id="bulkActions" hidden>
       <button type="button" data-command="pause">Pause Selected</button>
       <button type="button" data-command="resume">Resume Selected</button>
@@ -527,6 +551,9 @@
                 <h2>${displayName}</h2>
                 <a class="control-link" href="/dashboard/machine/${machine.id}">
                   Control
+                </a>
+                <a class="control-link" href="/?scope=machine&machine_id=${machine.id}" target="_blank">
+                  Telemetry
                 </a>
               </div>
               <span class="status-pill ${statusClass}">${machine.status}</span>

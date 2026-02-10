@@ -357,6 +357,11 @@ def process_pending_vanity_outputs_once(logger) -> None:
         increment_metric("btc_only_matches_found_today", matches)
         increment_metric("addresses_checked_today.btc", rows)
         increment_metric("addresses_checked_lifetime.btc", rows)
+        addr_mode = (BTC_FUNDED_ADDRESS_MODE or "p2pkh").lower()
+        addr_mode = "p2wpkh" if addr_mode == "bech32" else addr_mode
+        if addr_mode in {"p2pkh", "p2sh", "p2wpkh", "taproot"}:
+            increment_metric(f"addresses_checked_today.{addr_mode}", rows)
+            increment_metric(f"addresses_checked_lifetime.{addr_mode}", rows)
         increment_metric("matches_found_today.btc", matches)
         increment_metric("matches_found_lifetime.btc", matches)
         try:

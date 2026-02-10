@@ -163,6 +163,18 @@ The telemetry dashboard is available publicly at [https://telemetry.sparkleserve
 * Use the global overview to see aggregated stats across all of your machines, issue mass commands (pause/resume/set_mode/set_range), and plot range distributions or search for specific fingerprints.
 * Pair new machines via `/pair` and immediately see them appear in the grid once the session token is active.
 
+Dashboard data can be scoped via query parameters:
+
+- `scope=global` (default) for all users
+- `scope=user` to scope to the signed-in account
+- `scope=machine&machine_id=<id>` to scope to a single machine
+
+Range analytics endpoints also accept `mode`, `range_id` (e.g. `puzzle-71`),
+and `since`/`until` filters. The aggregate metrics endpoint
+`/v1/dashboard/{slug}/metrics/aggregate` summarizes addresses checked today/
+lifetime and provides BTC address-type breakdowns for legacy vs bech32 vs
+taproot splits.
+
 Link back to the [GitHub repository](https://github.com/mattysparkles/allinkeys) from the telemetry site so visitors can clone the project and run the same software themselves.
 ## Token lifecycle
 

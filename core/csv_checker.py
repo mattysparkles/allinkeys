@@ -288,6 +288,7 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
     funded_p2pkh = funded_btc.get('p2pkh', set())
     funded_p2sh = funded_btc.get('p2sh', set())
     funded_bech32 = funded_btc.get('bech32', set())
+    btc_type_counts = {"p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0}
 
     if filename.endswith(".partial.csv"):
         return [], True
@@ -367,6 +368,8 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                                 normalized = normalize_address(addr)
                                 if coin == 'btc':
                                     atype = detect_btc_address_type(normalized)
+                                    if addr and atype in btc_type_counts:
+                                        btc_type_counts[atype] += 1
                                     if atype == 'p2pkh':
                                         in_funded = normalized in funded_p2pkh
                                     elif atype == 'p2sh':
@@ -504,6 +507,10 @@ def check_csv_against_addresses(csv_file, address_sets, recheck=False, safe_mode
                 # Update per-coin address counters to track scanning volume
                 _safe_inc_metric(f"addresses_checked_today.{coin}", rows_scanned)
                 _safe_inc_metric(f"addresses_checked_lifetime.{coin}", rows_scanned)
+        for atype, count in btc_type_counts.items():
+            if count:
+                _safe_inc_metric(f"addresses_checked_today.{atype}", count)
+                _safe_inc_metric(f"addresses_checked_lifetime.{atype}", count)
         update_dashboard_stat("addresses_checked_today", get_metric("addresses_checked_today"))
         update_dashboard_stat("addresses_checked_lifetime", get_metric("addresses_checked_lifetime"))
         rows_per_sec = rows_scanned / duration_sec if duration_sec > 0 else 0

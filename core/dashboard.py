@@ -559,10 +559,12 @@ def _default_metrics():
         "alerts_sent_today": {c: 0 for c in ALERT_CHANNELS},
         "alerts_sent_lifetime": {c: 0 for c in ALERT_CHANNELS},
         "addresses_checked_today": {
-            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
+            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
+            "p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0
         },
         "addresses_checked_lifetime": {
-            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0
+            "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
+            "p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0
         },
         "matches_found_today": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
