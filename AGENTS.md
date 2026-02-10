@@ -18,3 +18,4 @@
 - 2026-02-10 22:32:09Z: Committed/pushed telemetry dashboard updates to GitHub and restarted `allinkeys-telemetry.service` to make the endpoints and UI changes live.
 - 2026-02-10 22:50:31Z: Tightened telemetry dashboard chart zoom limits to the 0–100% keyspace range with dynamic y-bounds, added 401 fallback for aggregate metrics, and refreshed the public dashboard observer script.
 - 2026-02-10 23:40:30Z: Added SQLite busy timeout/connection timeout in telemetry DB connections to reduce "database is locked" 500s affecting dashboard charts.
+- 2026-02-10 23:44:06Z: Moved telemetry DB schema setup behind a one-time init lock to avoid per-request DDL and reduce "database is locked" errors; pushed to GitHub and restarted `allinkeys-telemetry.service`.
