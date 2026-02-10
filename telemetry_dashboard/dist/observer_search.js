@@ -194,6 +194,13 @@
         chart.resetZoom();
       }
     });
+    const bounds = getXAxisBounds();
+    applyAxisBounds(rangeChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: 2 });
+    applyAxisBounds(jitterChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: 1 });
+    applyAxisBounds(densityChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: densityMax });
+    applyAxisBounds(sizeChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: sizeMax });
+    applyAxisBounds(recencyChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: 100 });
+    applyAxisBounds(spanHistChart, { xMin: 0, xMax: 100, yMin: 0, yMax: spanHistMax });
   };
 
   const zoomOptions = {
@@ -235,6 +242,9 @@
   let btcLifetimeChart = null;
   let baseRanges = [];
   let activeRanges = [];
+  let densityMax = 0;
+  let sizeMax = 0;
+  let spanHistMax = 0;
 
   const formatPercent = (value, digits = 2) =>
     typeof value === "number" && !Number.isNaN(value)
@@ -244,6 +254,43 @@
   const parseFloatSafe = (value) => {
     const num = parseFloat(value);
     return Number.isNaN(num) ? null : num;
+  };
+
+  const getXAxisBounds = () => {
+    let min = 0;
+    let max = 100;
+    const filteredMin = parseFloatSafe(filterState.positionMin);
+    const filteredMax = parseFloatSafe(filterState.positionMax);
+    if (filteredMin !== null) {
+      min = Math.max(0, Math.min(100, filteredMin));
+    }
+    if (filteredMax !== null) {
+      max = Math.max(min, Math.min(100, filteredMax));
+    }
+    return { min, max };
+  };
+
+  const applyAxisBounds = (chart, { xMin, xMax, yMin, yMax }) => {
+    if (!chart) return;
+    if (chart.options?.scales?.x) {
+      chart.options.scales.x.min = xMin;
+      chart.options.scales.x.max = xMax;
+    }
+    if (chart.options?.scales?.y) {
+      if (yMin !== undefined && yMin !== null) {
+        chart.options.scales.y.min = yMin;
+      }
+      if (yMax !== undefined && yMax !== null) {
+        chart.options.scales.y.max = yMax;
+      }
+    }
+    if (chart.options?.plugins?.zoom?.limits) {
+      chart.options.plugins.zoom.limits.x = { min: xMin, max: xMax };
+      if (yMin !== undefined || yMax !== undefined) {
+        chart.options.plugins.zoom.limits.y = { min: yMin, max: yMax };
+      }
+    }
+    chart.update("none");
   };
 
   const toDatetimeLocal = (isoValue) => {
@@ -336,6 +383,7 @@
     }));
 
   const renderChart = (target, neighbors) => {
+    const bounds = getXAxisBounds();
     const points = buildBasePoints();
     const maxY = 2;
     const datasets = [
@@ -382,6 +430,7 @@
 
     if (rangeChart) {
       rangeChart.data.datasets = datasets;
+      applyAxisBounds(rangeChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: maxY });
       rangeChart.update();
       return;
     }
@@ -394,8 +443,8 @@
         maintainAspectRatio: false,
         scales: {
           x: {
-            min: 0,
-            max: 100,
+            min: bounds.min,
+            max: bounds.max,
             title: { display: true, text: "Keyspace position (%)" },
             ticks: { color: "#9fb0c6" },
             grid: { color: "rgba(255,255,255,0.05)" },
@@ -409,7 +458,10 @@
           },
         },
         plugins: {
-          zoom: zoomOptions,
+          zoom: {
+            ...zoomOptions,
+            limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: maxY } },
+          },
           tooltip: {
             callbacks: {
               title: (items) =>
@@ -437,6 +489,7 @@
 
   const renderDensityChart = () => {
     if (!densityCanvas) return;
+    const bounds = getXAxisBounds();
     const bins = Math.max(60, Math.min(200, Math.floor(activeRanges.length / 15) || 60));
     const counts = new Array(bins).fill(0);
     activeRanges.forEach((range) => {
@@ -448,9 +501,11 @@
       counts[idx] += 1;
     });
     const labels = counts.map((_, idx) => ((idx + 0.5) * (100 / bins)).toFixed(1));
+    densityMax = Math.max(1, ...counts) * 1.05;
     if (densityChart) {
       densityChart.data.labels = labels;
       densityChart.data.datasets[0].data = counts;
+      applyAxisBounds(densityChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: densityMax });
       densityChart.update();
       return;
     }
@@ -472,18 +527,25 @@
         maintainAspectRatio: false,
         scales: {
           x: {
+            min: bounds.min,
+            max: bounds.max,
             ticks: { color: "#9fb0c6", maxTicksLimit: 8 },
             title: { display: true, text: "Keyspace position (%)" },
             grid: { color: "rgba(255,255,255,0.05)" },
           },
           y: {
             ticks: { color: "#9fb0c6" },
+            min: 0,
+            max: densityMax,
             title: { display: true, text: "Range count" },
             grid: { color: "rgba(255,255,255,0.05)" },
           },
         },
         plugins: {
-          zoom: zoomOptions,
+          zoom: {
+            ...zoomOptions,
+            limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: densityMax } },
+          },
           legend: { display: false },
         },
       },
@@ -493,6 +555,7 @@
 
   const renderJitterChart = () => {
     if (!jitterCanvas) return;
+    const bounds = getXAxisBounds();
     const points = activeRanges
       .filter((range) => typeof range.position === "number")
       .map((range) => {
@@ -506,6 +569,7 @@
       });
     if (jitterChart) {
       jitterChart.data.datasets[0].data = points;
+      applyAxisBounds(jitterChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: 1 });
       jitterChart.update();
       return;
     }
@@ -528,8 +592,8 @@
         maintainAspectRatio: false,
         scales: {
           x: {
-            min: 0,
-            max: 100,
+            min: bounds.min,
+            max: bounds.max,
             title: { display: true, text: "Keyspace position (%)" },
             ticks: { color: "#9fb0c6" },
             grid: { color: "rgba(255,255,255,0.05)" },
@@ -542,7 +606,10 @@
           },
         },
         plugins: {
-          zoom: zoomOptions,
+          zoom: {
+            ...zoomOptions,
+            limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: 1 } },
+          },
           legend: { display: false },
         },
       },
@@ -617,6 +684,7 @@
 
   const renderSizeChart = () => {
     if (!sizeCanvas) return;
+    const bounds = getXAxisBounds();
     const points = activeRanges
       .filter(
         (range) =>
@@ -628,8 +696,10 @@
         x: range.position,
         y: (range.normalized_max - range.normalized_min) * 100,
       }));
+    sizeMax = Math.max(1, ...points.map((point) => point.y || 0)) * 1.05;
     if (sizeChart) {
       sizeChart.data.datasets[0].data = points;
+      applyAxisBounds(sizeChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: sizeMax });
       sizeChart.update();
       return;
     }
@@ -652,20 +722,27 @@
         maintainAspectRatio: false,
         scales: {
           x: {
-            min: 0,
-            max: 100,
+            min: bounds.min,
+            max: bounds.max,
             title: { display: true, text: "Keyspace position (%)" },
             ticks: { color: "#9fb0c6" },
             grid: { color: "rgba(255,255,255,0.05)" },
           },
           y: {
             min: 0,
+            max: sizeMax,
             title: { display: true, text: "Range span (%)" },
             ticks: { color: "#9fb0c6" },
             grid: { color: "rgba(255,255,255,0.05)" },
           },
         },
-        plugins: { zoom: zoomOptions, legend: { display: false } },
+        plugins: {
+          zoom: {
+            ...zoomOptions,
+            limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: sizeMax } },
+          },
+          legend: { display: false },
+        },
       },
     });
     registerZoomable(sizeChart);
@@ -673,6 +750,7 @@
 
   const renderRecencyChart = () => {
     if (!recencyCanvas) return;
+    const bounds = getXAxisBounds();
     const dates = activeRanges
       .map((range) => (range.last_seen ? new Date(range.last_seen) : null))
       .filter((d) => d && !Number.isNaN(d.getTime()));
@@ -696,6 +774,7 @@
       });
     if (recencyChart) {
       recencyChart.data.datasets[0].data = points;
+      applyAxisBounds(recencyChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: 100 });
       recencyChart.update();
       return;
     }
@@ -718,8 +797,8 @@
         maintainAspectRatio: false,
         scales: {
           x: {
-            min: 0,
-            max: 100,
+            min: bounds.min,
+            max: bounds.max,
             title: { display: true, text: "Keyspace position (%)" },
             ticks: { color: "#9fb0c6" },
             grid: { color: "rgba(255,255,255,0.05)" },
@@ -732,7 +811,13 @@
             grid: { color: "rgba(255,255,255,0.05)" },
           },
         },
-        plugins: { zoom: zoomOptions, legend: { display: false } },
+        plugins: {
+          zoom: {
+            ...zoomOptions,
+            limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: 100 } },
+          },
+          legend: { display: false },
+        },
       },
     });
     registerZoomable(recencyChart);
@@ -755,9 +840,11 @@
       counts[idx] += 1;
     });
     const labels = counts.map((_, idx) => ((idx + 0.5) * (100 / bins)).toFixed(1));
+    spanHistMax = Math.max(1, ...counts) * 1.05;
     if (spanHistChart) {
       spanHistChart.data.labels = labels;
       spanHistChart.data.datasets[0].data = counts;
+      applyAxisBounds(spanHistChart, { xMin: 0, xMax: 100, yMin: 0, yMax: spanHistMax });
       spanHistChart.update();
       return;
     }
@@ -779,17 +866,24 @@
         maintainAspectRatio: false,
         scales: {
           x: {
+            min: 0,
+            max: 100,
             ticks: { color: "#9fb0c6", maxTicksLimit: 8 },
             title: { display: true, text: "Range span (%)" },
             grid: { color: "rgba(255,255,255,0.05)" },
           },
           y: {
             ticks: { color: "#9fb0c6" },
+            min: 0,
+            max: spanHistMax,
             title: { display: true, text: "Count" },
             grid: { color: "rgba(255,255,255,0.05)" },
           },
         },
-        plugins: { zoom: zoomOptions, legend: { display: false } },
+        plugins: {
+          zoom: { ...zoomOptions, limits: { x: { min: 0, max: 100 }, y: { min: 0, max: spanHistMax } } },
+          legend: { display: false },
+        },
       },
     });
     registerZoomable(spanHistChart);
@@ -890,8 +984,17 @@
     try {
       const response = await fetch(
         `/v1/dashboard/${slug}/metrics/aggregate${buildQuery()}`,
+        { credentials: "same-origin" },
       );
       if (!response.ok) {
+        if (response.status === 401 && (filterState.scope || "") !== "global") {
+          metricsStatusEl.textContent =
+            "Sign in to view user/machine metrics. Showing global data.";
+          scopeSelect.value = "global";
+          filterState.scope = "global";
+          syncUrl();
+          return loadMetrics();
+        }
         throw new Error(`Request failed: ${response.status}`);
       }
       const data = await response.json();
