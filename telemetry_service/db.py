@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 
 
 DB_PATH = os.getenv(
@@ -60,6 +61,9 @@ TABLE_COLUMN_DEFINITIONS = {
     },
 }
 
+_SCHEMA_LOCK = threading.Lock()
+_SCHEMA_READY = False
+
 
 def _ensure_table_columns(
     conn: sqlite3.Connection, table: str, columns: dict[str, str]
@@ -72,11 +76,7 @@ def _ensure_table_columns(
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
 
 
-def get_db_connection() -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout=5000;")
+def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS seed_events (
@@ -257,4 +257,18 @@ def get_db_connection() -> sqlite3.Connection:
         ON machine_snapshots(machine_id, timestamp)
         """
     )
+    conn.commit()
+
+
+def get_db_connection() -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
+    global _SCHEMA_READY
+    if not _SCHEMA_READY:
+        with _SCHEMA_LOCK:
+            if not _SCHEMA_READY:
+                _ensure_schema(conn)
+                _SCHEMA_READY = True
     return conn
