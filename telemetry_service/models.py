@@ -154,7 +154,15 @@ class AdminKeyspaceProgress(BaseModel):
 
 
 class ControlCommandRequest(BaseModel):
-    command: Literal["pause", "resume", "stop", "restart", "set_mode", "set_range"]
+    command: Literal[
+        "pause",
+        "resume",
+        "stop",
+        "restart",
+        "set_mode",
+        "set_range",
+        "queue_seed",
+    ]
     value: Optional[str] = None
 
 
@@ -173,6 +181,60 @@ class ControlCommandList(BaseModel):
 
 class ControlAckRequest(BaseModel):
     command_id: int
+
+
+class SeedQueueCreateRequest(BaseModel):
+    name: str
+
+
+class SeedQueueList(BaseModel):
+    id: int
+    name: str
+    created_at: str
+    updated_at: str
+    item_count: int = 0
+
+
+class SeedQueueListResponse(BaseModel):
+    queues: List[SeedQueueList]
+
+
+class SeedQueueItemCreateRequest(BaseModel):
+    range_id: Optional[str] = None
+    range_value: Optional[str] = None
+    seed_start: Optional[str] = None
+    seed_end: Optional[str] = None
+    position_percent: Optional[float] = None
+
+
+class SeedQueueItem(BaseModel):
+    id: int
+    queue_id: int
+    range_id: Optional[str] = None
+    range_value: Optional[str] = None
+    seed_start: Optional[str] = None
+    seed_end: Optional[str] = None
+    position_percent: Optional[float] = None
+    created_at: str
+
+
+class SeedQueueItemList(BaseModel):
+    queue_id: int
+    items: List[SeedQueueItem]
+
+
+class SeedQueuePushRequest(BaseModel):
+    mode: Literal["single", "split"]
+    machine_id: Optional[str] = None
+    machine_ids: Optional[List[str]] = None
+    clear_after: bool = False
+
+
+class SeedQueuePushResponse(BaseModel):
+    queue_id: int
+    mode: str
+    dispatched: int
+    machines: List[str]
 
 
 class TimeSeriesPoint(BaseModel):

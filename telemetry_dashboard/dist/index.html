@@ -210,6 +210,125 @@
         font-size: 12px;
         color: #9fb0c6;
       }
+      .observer-focus-grid {
+        margin-top: 28px;
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      }
+      .observer-focus-card,
+      .observer-queue-card {
+        background: #0f1424;
+        border: 1px solid #1d2642;
+        border-radius: 14px;
+        padding: 16px;
+      }
+      .observer-focus-card h3,
+      .observer-queue-card h3 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: #93a7c1;
+      }
+      .observer-focus-details {
+        font-size: 13px;
+        color: #d2d9e6;
+        line-height: 1.5;
+      }
+      .observer-focus-actions {
+        margin-top: 12px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .observer-focus-actions button,
+      .observer-queue-controls button,
+      .observer-queue-actions button {
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: none;
+        background: #3dd5f2;
+        color: #0b1020;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .observer-focus-actions button:disabled,
+      .observer-queue-actions button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .observer-queue-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .observer-queue-controls select,
+      .observer-queue-actions select {
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid #243050;
+        background: #0f1424;
+        color: #e2e8f0;
+        font-size: 13px;
+      }
+      .observer-queue-items {
+        list-style: none;
+        padding: 0;
+        margin: 0 0 12px;
+        display: grid;
+        gap: 8px;
+        max-height: 240px;
+        overflow: auto;
+      }
+      .observer-queue-items li {
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: #0b1224;
+        border: 1px solid #1d2642;
+        font-size: 12px;
+        color: #d2d9e6;
+        display: grid;
+        gap: 6px;
+      }
+      .observer-queue-items button {
+        justify-self: start;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid #334155;
+        background: transparent;
+        color: #93c5fd;
+        cursor: pointer;
+        font-size: 11px;
+      }
+      .observer-queue-actions {
+        display: grid;
+        gap: 10px;
+      }
+      .observer-queue-status,
+      .observer-focus-status {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #93a7c1;
+      }
+      .chart-scrollbars {
+        margin-top: 10px;
+        display: grid;
+        gap: 6px;
+      }
+      .chart-scrollbars label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #93a7c1;
+        display: grid;
+        gap: 6px;
+      }
+      .chart-scrollbars input[type="range"] {
+        width: 100%;
+        accent-color: #3dd5f2;
+      }
       .hub-link {
         position: fixed;
         top: 16px;

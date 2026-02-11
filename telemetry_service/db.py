@@ -257,6 +257,45 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         ON machine_snapshots(machine_id, timestamp)
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seed_queue_lists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_seed_queue_user
+        ON seed_queue_lists(user_id)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seed_queue_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            queue_id INTEGER NOT NULL,
+            range_id TEXT,
+            range_value TEXT,
+            seed_start TEXT,
+            seed_end TEXT,
+            position_percent REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(queue_id) REFERENCES seed_queue_lists(id)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_seed_queue_items_queue
+        ON seed_queue_items(queue_id)
+        """
+    )
     conn.commit()
 
 

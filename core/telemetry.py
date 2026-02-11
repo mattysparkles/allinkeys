@@ -68,6 +68,7 @@ from config.telemetry import (
     TELEMETRY_SNAPSHOT_SECONDS,
 )
 from core.logger import get_logger, log_with_context
+from core.seed_queue import enqueue_many, parse_queue_value, size as seed_queue_size
 from core.worker_bootstrap import _safe_inc_metric, _safe_set_metric
 from utils.thread_guard import can_spawn_thread
 from utils.machine_identity import (
@@ -1057,6 +1058,38 @@ class TelemetryClient:
             except Exception:
                 pass
             return True
+        if cmd == "queue_seed":
+            entries = parse_queue_value(value)
+            added = enqueue_many(entries)
+            self._update_control_state(
+                {
+                    "seed_queue_depth": seed_queue_size(),
+                    "last_command": cmd,
+                    "last_value": value,
+                }
+            )
+            if added:
+                try:
+                    log_with_context(
+                        logger,
+                        "INFO",
+                        "[Telemetry] Seed queue updated | added=%s",
+                        added,
+                        **_telemetry_log_context(endpoint=self.endpoint),
+                    )
+                except Exception:
+                    pass
+                return True
+            try:
+                log_with_context(
+                    logger,
+                    "WARNING",
+                    "[Telemetry] Seed queue command ignored; no entries parsed",
+                    **_telemetry_log_context(endpoint=self.endpoint),
+                )
+            except Exception:
+                pass
+            return False
         try:
             log_with_context(
                 logger,

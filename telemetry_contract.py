@@ -15,6 +15,7 @@ class ControlCapabilities(BaseModel):
     restart: bool = True
     set_mode: bool = True
     set_range: bool = True
+    queue_seed: bool = True
 
 
 class MachineIdentity(BaseModel):

@@ -89,6 +89,46 @@
           <ul id="observerUpperList"></ul>
         </div>
       </div>
+      <div class="observer-focus-grid">
+        <div class="observer-focus-card">
+          <h3>Range Inspector</h3>
+          <div class="observer-focus-details" id="observerFocusDetails">
+            Click a point on the range chart to inspect its seed range.
+          </div>
+          <div class="observer-focus-actions">
+            <button type="button" id="observerAddToQueue" disabled>
+              Add seed to queue
+            </button>
+            <button type="button" id="observerCopyRange" disabled>
+              Copy range
+            </button>
+          </div>
+          <div class="observer-focus-status" id="observerFocusStatus"></div>
+        </div>
+        <div class="observer-queue-card">
+          <h3>Seed Queue</h3>
+          <div class="observer-queue-controls">
+            <select id="observerQueueSelect"></select>
+            <button type="button" id="observerQueueCreate">New queue</button>
+          </div>
+          <ul class="observer-queue-items" id="observerQueueItems"></ul>
+          <div class="observer-queue-actions">
+            <label>
+              Push mode
+              <select id="observerQueuePushMode">
+                <option value="single">Send to one machine</option>
+                <option value="split">Split across machines</option>
+              </select>
+            </label>
+            <label>
+              Target machine
+              <select id="observerQueueMachineTarget"></select>
+            </label>
+            <button type="button" id="observerQueuePush">Push queue</button>
+          </div>
+          <div class="observer-queue-status" id="observerQueueStatus"></div>
+        </div>
+      </div>
       <div class="observer-visuals">
         <div class="observer-visual-card">
           <h3>Density Histogram</h3>
@@ -168,6 +208,17 @@
   const btcTodayCanvas = document.getElementById("observerBtcTypeTodayChart");
   const btcLifetimeCanvas = document.getElementById("observerBtcTypeLifetimeChart");
   const metricsStatusEl = document.getElementById("observerMetricsStatus");
+  const focusDetailsEl = document.getElementById("observerFocusDetails");
+  const focusStatusEl = document.getElementById("observerFocusStatus");
+  const addToQueueBtn = document.getElementById("observerAddToQueue");
+  const copyRangeBtn = document.getElementById("observerCopyRange");
+  const queueSelectEl = document.getElementById("observerQueueSelect");
+  const queueCreateBtn = document.getElementById("observerQueueCreate");
+  const queueItemsEl = document.getElementById("observerQueueItems");
+  const queuePushModeEl = document.getElementById("observerQueuePushMode");
+  const queueMachineTargetEl = document.getElementById("observerQueueMachineTarget");
+  const queuePushBtn = document.getElementById("observerQueuePush");
+  const queueStatusEl = document.getElementById("observerQueueStatus");
 
   if (!window.Chart) {
     statusEl.textContent = "Chart.js unavailable; cannot render range chart.";
@@ -187,6 +238,185 @@
       zoomableCharts.push(chart);
     }
   };
+
+  const scrollableCharts = new Set();
+
+  const safeNumber = (value, fallback) =>
+    typeof value === "number" && !Number.isNaN(value) ? value : fallback;
+
+  const getScaleBounds = (chart) => {
+    const xScale = chart?.scales?.x;
+    const yScale = chart?.scales?.y;
+    const xLimit = chart?.options?.plugins?.zoom?.limits?.x || {};
+    const yLimit = chart?.options?.plugins?.zoom?.limits?.y || {};
+    const baseXMin = safeNumber(xLimit.min, safeNumber(xScale?.min, 0));
+    const baseXMax = safeNumber(xLimit.max, safeNumber(xScale?.max, 100));
+    const baseYMin = safeNumber(yLimit.min, safeNumber(yScale?.min, 0));
+    const baseYMax = safeNumber(yLimit.max, safeNumber(yScale?.max, 1));
+    const viewXMin = safeNumber(xScale?.min, baseXMin);
+    const viewXMax = safeNumber(xScale?.max, baseXMax);
+    const viewYMin = safeNumber(yScale?.min, baseYMin);
+    const viewYMax = safeNumber(yScale?.max, baseYMax);
+    return {
+      baseXMin,
+      baseXMax,
+      baseYMin,
+      baseYMax,
+      viewXMin,
+      viewXMax,
+      viewYMin,
+      viewYMax,
+    };
+  };
+
+  const syncScrollbars = (chart) => {
+    if (!chart || !chart.$scrollbars) return;
+    const { baseXMin, baseXMax, baseYMin, baseYMax, viewXMin, viewXMax, viewYMin, viewYMax } =
+      getScaleBounds(chart);
+    const xSpan = viewXMax - viewXMin;
+    const ySpan = viewYMax - viewYMin;
+    const xBaseSpan = baseXMax - baseXMin;
+    const yBaseSpan = baseYMax - baseYMin;
+    const xSlider = chart.$scrollbars.x;
+    const ySlider = chart.$scrollbars.y;
+    if (xSlider) {
+      if (xBaseSpan > xSpan + 1e-6) {
+        const ratio = (viewXMin - baseXMin) / (xBaseSpan - xSpan);
+        xSlider.disabled = false;
+        xSlider.value = Math.max(0, Math.min(100, ratio * 100)).toFixed(2);
+      } else {
+        xSlider.disabled = true;
+        xSlider.value = "0";
+      }
+    }
+    if (ySlider) {
+      if (yBaseSpan > ySpan + 1e-6) {
+        const ratio = (viewYMin - baseYMin) / (yBaseSpan - ySpan);
+        ySlider.disabled = false;
+        ySlider.value = Math.max(0, Math.min(100, ratio * 100)).toFixed(2);
+      } else {
+        ySlider.disabled = true;
+        ySlider.value = "0";
+      }
+    }
+  };
+
+  const attachScrollbars = (chart) => {
+    if (!chart || !chart.canvas) return;
+    if (chart.$scrollbars) return;
+    const wrapper = chart.canvas.parentElement;
+    if (!wrapper) return;
+    const container = document.createElement("div");
+    container.className = "chart-scrollbars";
+
+    const buildSlider = (label, axis) => {
+      const wrapperLabel = document.createElement("label");
+      wrapperLabel.textContent = label;
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = "0";
+      slider.max = "100";
+      slider.step = "0.1";
+      slider.dataset.axis = axis;
+      wrapperLabel.appendChild(slider);
+      return { wrapperLabel, slider };
+    };
+
+    const { wrapperLabel: xLabel, slider: xSlider } = buildSlider("X scroll", "x");
+    const { wrapperLabel: yLabel, slider: ySlider } = buildSlider("Y scroll", "y");
+
+    xSlider.addEventListener("input", () => {
+      if (!chart) return;
+      const bounds = getScaleBounds(chart);
+      const xSpan = bounds.viewXMax - bounds.viewXMin;
+      const xBaseSpan = bounds.baseXMax - bounds.baseXMin;
+      if (xBaseSpan <= xSpan + 1e-6) return;
+      const ratio = parseFloat(xSlider.value) / 100;
+      const nextMin = bounds.baseXMin + ratio * (xBaseSpan - xSpan);
+      const nextMax = nextMin + xSpan;
+      if (chart.options?.scales?.x) {
+        chart.options.scales.x.min = nextMin;
+        chart.options.scales.x.max = nextMax;
+      }
+      chart.update("none");
+      syncScrollbars(chart);
+    });
+
+    ySlider.addEventListener("input", () => {
+      if (!chart) return;
+      const bounds = getScaleBounds(chart);
+      const ySpan = bounds.viewYMax - bounds.viewYMin;
+      const yBaseSpan = bounds.baseYMax - bounds.baseYMin;
+      if (yBaseSpan <= ySpan + 1e-6) return;
+      const ratio = parseFloat(ySlider.value) / 100;
+      const nextMin = bounds.baseYMin + ratio * (yBaseSpan - ySpan);
+      const nextMax = nextMin + ySpan;
+      if (chart.options?.scales?.y) {
+        chart.options.scales.y.min = nextMin;
+        chart.options.scales.y.max = nextMax;
+      }
+      chart.update("none");
+      syncScrollbars(chart);
+    });
+
+    container.appendChild(xLabel);
+    container.appendChild(yLabel);
+    wrapper.appendChild(container);
+    chart.$scrollbars = { container, x: xSlider, y: ySlider };
+    syncScrollbars(chart);
+  };
+
+  const registerScrollable = (chart) => {
+    if (!chart) return;
+    attachScrollbars(chart);
+    scrollableCharts.add(chart);
+  };
+
+  const crosshairPlugin = {
+    id: "crosshair",
+    afterEvent(chart, args) {
+      const options = chart?.options?.plugins?.crosshair;
+      if (!options || !options.enabled) return;
+      const event = args?.event;
+      if (!event) return;
+      const crosshair = chart.$crosshair || { visible: false, pinned: false };
+      if (event.type === "mousemove") {
+        if (crosshair.pinned) return;
+        crosshair.x = event.x;
+        crosshair.y = event.y;
+        crosshair.visible = true;
+        chart.$crosshair = crosshair;
+        chart.draw();
+      } else if (event.type === "mouseout") {
+        if (crosshair.pinned) return;
+        crosshair.visible = false;
+        chart.$crosshair = crosshair;
+        chart.draw();
+      }
+    },
+    afterDraw(chart) {
+      const options = chart?.options?.plugins?.crosshair;
+      if (!options || !options.enabled) return;
+      const crosshair = chart.$crosshair;
+      if (!crosshair || !crosshair.visible) return;
+      const { x, y } = crosshair;
+      if (typeof x !== "number" || typeof y !== "number") return;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = options.color || "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x, chart.chartArea.top);
+      ctx.lineTo(x, chart.chartArea.bottom);
+      ctx.moveTo(chart.chartArea.left, y);
+      ctx.lineTo(chart.chartArea.right, y);
+      ctx.stroke();
+      ctx.restore();
+    },
+  };
+
+  window.Chart.register(crosshairPlugin);
 
   const resetZoom = () => {
     zoomableCharts.forEach((chart) => {
@@ -208,11 +438,13 @@
       enabled: true,
       mode: "xy",
       modifierKey: "shift",
+      onPanComplete: ({ chart }) => syncScrollbars(chart),
     },
     zoom: {
       wheel: { enabled: true },
       pinch: { enabled: true },
       mode: "xy",
+      onZoomComplete: ({ chart }) => syncScrollbars(chart),
     },
   };
 
@@ -245,6 +477,14 @@
   let densityMax = 0;
   let sizeMax = 0;
   let spanHistMax = 0;
+  let selectedRange = null;
+  let selectedPoint = null;
+  let userMachines = [];
+  const queueState = {
+    queues: [],
+    activeId: null,
+    items: [],
+  };
 
   const formatPercent = (value, digits = 2) =>
     typeof value === "number" && !Number.isNaN(value)
@@ -254,6 +494,92 @@
   const parseFloatSafe = (value) => {
     const num = parseFloat(value);
     return Number.isNaN(num) ? null : num;
+  };
+
+  const formatSeedHex = (value) => {
+    const hex = value.toString(16);
+    return `0x${hex.padStart(64, "0")}`;
+  };
+
+  const parseRangeBounds = (value) => {
+    if (!value) return null;
+    const match = value.trim().match(/^0x([0-9a-fA-F]+)-0x([0-9a-fA-F]+)$/);
+    if (!match) return null;
+    let start = BigInt(`0x${match[1]}`);
+    let end = BigInt(`0x${match[2]}`);
+    if (end < start) {
+      const tmp = start;
+      start = end;
+      end = tmp;
+    }
+    return { start, end };
+  };
+
+  const pickClosestRange = (percent) => {
+    if (!Array.isArray(activeRanges) || !activeRanges.length) return null;
+    let closest = null;
+    let bestDiff = Number.POSITIVE_INFINITY;
+    activeRanges.forEach((range) => {
+      if (typeof range.position !== "number") return;
+      const diff = Math.abs(range.position - percent);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        closest = range;
+      }
+    });
+    return closest;
+  };
+
+  const buildQueuePayload = (range) => {
+    if (!range) return null;
+    const rangeValue = range.range_value || range.range_id;
+    const bounds = parseRangeBounds(rangeValue || "");
+    if (!bounds) return null;
+    return {
+      range_id: range.range_id || null,
+      range_value: rangeValue || null,
+      seed_start: formatSeedHex(bounds.start),
+      seed_end: formatSeedHex(bounds.end),
+      position_percent: typeof range.position === "number" ? range.position : null,
+    };
+  };
+
+  const renderSelectedRange = (range, point) => {
+    selectedRange = range;
+    selectedPoint = point || null;
+    if (!focusDetailsEl) return;
+    if (!range) {
+      focusDetailsEl.textContent =
+        "Click a point on the range chart to inspect its seed range.";
+      if (addToQueueBtn) addToQueueBtn.disabled = true;
+      if (copyRangeBtn) copyRangeBtn.disabled = true;
+      return;
+    }
+    const rangeValue = range.range_value || range.range_id || "unknown";
+    const position = typeof range.position === "number"
+      ? formatPercent(range.position, 3)
+      : "n/a";
+    const span =
+      typeof range.normalized_min === "number" && typeof range.normalized_max === "number"
+        ? formatPercent((range.normalized_max - range.normalized_min) * 100, 4)
+        : "n/a";
+    const lastSeen = range.last_seen
+      ? new Date(range.last_seen).toLocaleString()
+      : "n/a";
+    const clickInfo =
+      point && typeof point.x === "number" && typeof point.y === "number"
+        ? `Clicked: ${formatPercent(point.x, 3)} / ${point.y.toFixed(2)}`
+        : null;
+    focusDetailsEl.innerHTML = `
+      <div><strong>${rangeValue}</strong></div>
+      <div>Position: ${position}</div>
+      <div>Span: ${span}</div>
+      <div>Last seen: ${lastSeen}</div>
+      ${clickInfo ? `<div>${clickInfo}</div>` : ""}
+    `;
+    const payload = buildQueuePayload(range);
+    if (addToQueueBtn) addToQueueBtn.disabled = !payload;
+    if (copyRangeBtn) copyRangeBtn.disabled = !rangeValue;
   };
 
   const getXAxisBounds = () => {
@@ -291,6 +617,7 @@
       }
     }
     chart.update("none");
+    syncScrollbars(chart);
   };
 
   const toDatetimeLocal = (isoValue) => {
@@ -345,6 +672,222 @@
     const qs = query.toString();
     const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     window.history.replaceState({}, "", next);
+  };
+
+  let queueEnabled = false;
+
+  const setQueueStatus = (message) => {
+    if (queueStatusEl) {
+      queueStatusEl.textContent = message || "";
+    }
+  };
+
+  const updateQueueMachineTargets = () => {
+    if (!queueMachineTargetEl) return;
+    queueMachineTargetEl.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = userMachines.length ? "Select machine" : "No machines";
+    queueMachineTargetEl.appendChild(placeholder);
+    userMachines.forEach((machine) => {
+      const option = document.createElement("option");
+      option.value = machine.id;
+      option.textContent = machine.machine_name || machine.id;
+      queueMachineTargetEl.appendChild(option);
+    });
+  };
+
+  const updateQueueSelect = () => {
+    if (!queueSelectEl) return;
+    queueSelectEl.innerHTML = "";
+    queueState.queues.forEach((queue) => {
+      const option = document.createElement("option");
+      option.value = queue.id;
+      option.textContent = `${queue.name} (${queue.item_count || 0})`;
+      queueSelectEl.appendChild(option);
+    });
+    if (queueState.activeId) {
+      queueSelectEl.value = String(queueState.activeId);
+    } else if (queueState.queues.length) {
+      queueState.activeId = queueState.queues[0].id;
+      queueSelectEl.value = String(queueState.activeId);
+    }
+  };
+
+  const renderQueueItems = () => {
+    if (!queueItemsEl) return;
+    if (!queueState.items.length) {
+      queueItemsEl.innerHTML = "<li>No queued ranges yet.</li>";
+      return;
+    }
+    queueItemsEl.innerHTML = queueState.items
+      .map((item) => {
+        const rangeLabel = item.range_value || item.range_id || "unknown";
+        const seedStart = item.seed_start || "n/a";
+        const seedEnd = item.seed_end || "n/a";
+        return `
+          <li>
+            <div><strong>${rangeLabel}</strong></div>
+            <div>Start: ${seedStart}</div>
+            <div>End: ${seedEnd}</div>
+            <button type="button" data-item-id="${item.id}">Remove</button>
+          </li>
+        `;
+      })
+      .join("");
+    queueItemsEl.querySelectorAll("button[data-item-id]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const itemId = button.getAttribute("data-item-id");
+        if (!itemId || !queueState.activeId) return;
+        try {
+          const response = await fetch(
+            `/v1/seed/queues/${queueState.activeId}/items/${itemId}`,
+            { method: "DELETE" },
+          );
+          if (!response.ok) {
+            throw new Error("Delete failed");
+          }
+          await loadQueueItems(queueState.activeId);
+        } catch (error) {
+          console.error(error);
+          setQueueStatus("Unable to remove queue item.");
+        }
+      });
+    });
+  };
+
+  const loadQueueItems = async (queueId) => {
+    if (!queueId) return;
+    try {
+      const response = await fetch(`/v1/seed/queues/${queueId}/items`);
+      if (!response.ok) {
+        throw new Error(`Queue items request failed: ${response.status}`);
+      }
+      const data = await response.json();
+      queueState.items = Array.isArray(data.items) ? data.items : [];
+      renderQueueItems();
+      setQueueStatus(queueState.items.length ? "" : "Queue is empty.");
+    } catch (error) {
+      console.error(error);
+      setQueueStatus("Unable to load queue items.");
+    }
+  };
+
+  const loadQueues = async () => {
+    if (!queueSelectEl) return false;
+    try {
+      const response = await fetch("/v1/seed/queues");
+      if (!response.ok) {
+        throw new Error(`Queue request failed: ${response.status}`);
+      }
+      const data = await response.json();
+      queueState.queues = Array.isArray(data.queues) ? data.queues : [];
+      queueState.activeId = queueState.queues.length ? queueState.queues[0].id : null;
+      queueEnabled = true;
+      updateQueueSelect();
+      if (queueState.activeId) {
+        await loadQueueItems(queueState.activeId);
+      }
+      setQueueStatus("");
+      return true;
+    } catch (error) {
+      queueEnabled = false;
+      setQueueStatus("Sign in to manage seed queues.");
+      if (queueSelectEl) {
+        queueSelectEl.innerHTML = "";
+      }
+      if (queueItemsEl) {
+        queueItemsEl.innerHTML = "<li>Queue unavailable.</li>";
+      }
+      return false;
+    }
+  };
+
+  const createQueue = async () => {
+    if (!queueEnabled) return;
+    const name = window.prompt("Queue name (e.g. Frosted Quartz targets):");
+    if (!name) return;
+    try {
+      const response = await fetch("/v1/seed/queues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!response.ok) {
+        throw new Error("Queue create failed");
+      }
+      const queue = await response.json();
+      queueState.queues.push(queue);
+      queueState.activeId = queue.id;
+      updateQueueSelect();
+      await loadQueueItems(queueState.activeId);
+    } catch (error) {
+      console.error(error);
+      setQueueStatus("Unable to create queue.");
+    }
+  };
+
+  const addSelectedRangeToQueue = async () => {
+    if (!queueEnabled || !queueState.activeId) return;
+    if (!selectedRange) {
+      setQueueStatus("Select a range first.");
+      return;
+    }
+    const payload = buildQueuePayload(selectedRange);
+    if (!payload) {
+      setQueueStatus("Selected range does not include seed bounds.");
+      return;
+    }
+    try {
+      const response = await fetch(`/v1/seed/queues/${queueState.activeId}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        const detail = data?.detail || "Unable to add queue item.";
+        throw new Error(detail);
+      }
+      await loadQueueItems(queueState.activeId);
+      setQueueStatus("Added range to queue.");
+    } catch (error) {
+      console.error(error);
+      setQueueStatus(error.message || "Unable to add queue item.");
+    }
+  };
+
+  const pushQueueToMachines = async () => {
+    if (!queueEnabled || !queueState.activeId) return;
+    const mode = queuePushModeEl ? queuePushModeEl.value : "single";
+    const machineId = queueMachineTargetEl ? queueMachineTargetEl.value : "";
+    const payload = { mode };
+    if (mode === "single") {
+      if (!machineId) {
+        setQueueStatus("Select a target machine.");
+        return;
+      }
+      payload.machine_id = machineId;
+    }
+    try {
+      const response = await fetch(`/v1/seed/queues/${queueState.activeId}/push`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        const detail = data?.detail || "Queue push failed.";
+        throw new Error(detail);
+      }
+      const result = await response.json();
+      setQueueStatus(
+        `Dispatched ${result.dispatched} item(s) to ${result.machines.length} machine(s).`,
+      );
+    } catch (error) {
+      console.error(error);
+      setQueueStatus(error.message || "Queue push failed.");
+    }
   };
 
   const applyPositionFilter = () => {
@@ -462,6 +1005,10 @@
             ...zoomOptions,
             limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: maxY } },
           },
+          crosshair: {
+            enabled: true,
+            color: "rgba(148, 163, 184, 0.5)",
+          },
           tooltip: {
             callbacks: {
               title: (items) =>
@@ -477,6 +1024,24 @@
       },
     });
     registerZoomable(rangeChart);
+    registerScrollable(rangeChart);
+  };
+
+  const handleRangeChartClick = (event) => {
+    if (!rangeChart || !chartCanvas) return;
+    const rect = chartCanvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const xValue = rangeChart.scales?.x?.getValueForPixel(x);
+    const yValue = rangeChart.scales?.y?.getValueForPixel(y);
+    if (typeof xValue !== "number" || Number.isNaN(xValue)) return;
+    rangeChart.$crosshair = { x, y, visible: true, pinned: true };
+    rangeChart.draw();
+    const picked = pickClosestRange(xValue);
+    renderSelectedRange(picked, {
+      x: xValue,
+      y: typeof yValue === "number" && !Number.isNaN(yValue) ? yValue : 0,
+    });
   };
 
   const hashString = (value) => {
@@ -551,6 +1116,7 @@
       },
     });
     registerZoomable(densityChart);
+    registerScrollable(densityChart);
   };
 
   const renderJitterChart = () => {
@@ -615,6 +1181,7 @@
       },
     });
     registerZoomable(jitterChart);
+    registerScrollable(jitterChart);
   };
 
   const drawSpanChart = () => {
@@ -746,6 +1313,7 @@
       },
     });
     registerZoomable(sizeChart);
+    registerScrollable(sizeChart);
   };
 
   const renderRecencyChart = () => {
@@ -821,6 +1389,7 @@
       },
     });
     registerZoomable(recencyChart);
+    registerScrollable(recencyChart);
   };
 
   const renderSpanHistogram = () => {
@@ -887,6 +1456,7 @@
       },
     });
     registerZoomable(spanHistChart);
+    registerScrollable(spanHistChart);
   };
 
   const renderNeighborList = (container, items) => {
@@ -1093,6 +1663,7 @@
       renderSizeChart();
       renderRecencyChart();
       renderSpanHistogram();
+      renderSelectedRange(null);
     } catch (error) {
       console.error(error);
       statusEl.textContent = "Unable to load distribution data.";
@@ -1144,14 +1715,18 @@
         throw new Error("No session");
       }
       const machines = await response.json();
-      machines.forEach((machine) => {
+      userMachines = Array.isArray(machines) ? machines : [];
+      userMachines.forEach((machine) => {
         const option = document.createElement("option");
         option.value = machine.id;
         option.textContent = machine.machine_name || machine.id;
         machineSelect.appendChild(option);
       });
+      updateQueueMachineTargets();
       return true;
     } catch (error) {
+      userMachines = [];
+      updateQueueMachineTargets();
       return false;
     }
   };
@@ -1273,7 +1848,61 @@
     });
   }
 
-  initializeFilters().then(() => {
+  if (chartCanvas) {
+    chartCanvas.addEventListener("click", handleRangeChartClick);
+  }
+
+  if (addToQueueBtn) {
+    addToQueueBtn.addEventListener("click", addSelectedRangeToQueue);
+  }
+
+  if (copyRangeBtn) {
+    copyRangeBtn.addEventListener("click", async () => {
+      if (!selectedRange) return;
+      const value = selectedRange.range_value || selectedRange.range_id;
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        if (focusStatusEl) focusStatusEl.textContent = "Range copied to clipboard.";
+      } catch (error) {
+        if (focusStatusEl) focusStatusEl.textContent = "Unable to copy range.";
+      }
+    });
+  }
+
+  if (queueCreateBtn) {
+    queueCreateBtn.addEventListener("click", createQueue);
+  }
+
+  if (queueSelectEl) {
+    queueSelectEl.addEventListener("change", async () => {
+      queueState.activeId = queueSelectEl.value ? parseInt(queueSelectEl.value, 10) : null;
+      if (queueState.activeId) {
+        await loadQueueItems(queueState.activeId);
+      }
+    });
+  }
+
+  const updatePushMode = () => {
+    if (!queuePushModeEl || !queueMachineTargetEl) return;
+    if (queuePushModeEl.value === "split") {
+      queueMachineTargetEl.disabled = true;
+    } else {
+      queueMachineTargetEl.disabled = false;
+    }
+  };
+
+  if (queuePushModeEl) {
+    queuePushModeEl.addEventListener("change", updatePushMode);
+    updatePushMode();
+  }
+
+  if (queuePushBtn) {
+    queuePushBtn.addEventListener("click", pushQueueToMachines);
+  }
+
+  initializeFilters().then(async () => {
+    await loadQueues();
     loadDistribution();
     loadMetrics();
   });

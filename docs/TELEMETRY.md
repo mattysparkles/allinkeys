@@ -248,3 +248,15 @@ fetch the closest ranges above and below the target for observer lookups.
   distribution and return the closest `n` submissions (default 5, max 50)
   ordered by distance inside the normalized space. Accepts `seed_fingerprint`,
   `limit`, and `since`.
+
+Seed queue helpers let authenticated users build and dispatch curated ranges:
+
+* `GET /v1/seed/queues` – list queues (auto-creates `Default` when empty).
+* `POST /v1/seed/queues` – create a queue with `{name}`.
+* `GET /v1/seed/queues/{queue_id}/items` – list queue entries.
+* `POST /v1/seed/queues/{queue_id}/items` – add a range with
+  `{range_id?, range_value?, seed_start?, seed_end?, position_percent?}`.
+* `DELETE /v1/seed/queues/{queue_id}/items/{item_id}` – remove an entry.
+* `POST /v1/seed/queues/{queue_id}/push` – dispatch queued ranges using
+  `{mode: "single"|"split", machine_id?}` and emit `queue_seed` control
+  commands for the target machines.

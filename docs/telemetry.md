@@ -173,6 +173,24 @@ The response includes the requested seed plus a list of neighbors with
 absolute Δ values (percent) so the dashboards can emphasize proximity on the
 graph.
 
+### Seed queue endpoints
+
+Authenticated users can create named queues of seed ranges (max 100 entries
+per queue) and dispatch them to machines.
+
+* `GET /v1/seed/queues` → list queues (auto-creates `Default` if none exist).
+* `POST /v1/seed/queues` with `{name}` → create a new queue.
+* `GET /v1/seed/queues/{queue_id}/items` → list queue entries.
+* `POST /v1/seed/queues/{queue_id}/items` with
+  `{range_id?, range_value?, seed_start?, seed_end?, position_percent?}` →
+  add a queued range.
+* `DELETE /v1/seed/queues/{queue_id}/items/{item_id}` → remove an entry.
+* `POST /v1/seed/queues/{queue_id}/push` with
+  `{mode: "single"|"split", machine_id?}` → enqueue `queue_seed` control
+  commands for the selected machines.
+
+Queued ranges are delivered to the client via the `queue_seed` control command.
+
 ## Telemetry dashboard endpoints
 
 Dashboard endpoints power the public telemetry UI. Responses are global by

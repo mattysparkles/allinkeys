@@ -36,6 +36,14 @@ from telemetry_service.routes.pairing import router as pairing_router
 from telemetry_service.routes.pairing import ui_router as pairing_ui_router
 from telemetry_service.models import (
     IngestResponse,
+    SeedQueueCreateRequest,
+    SeedQueueItem,
+    SeedQueueItemCreateRequest,
+    SeedQueueItemList,
+    SeedQueueList,
+    SeedQueueListResponse,
+    SeedQueuePushRequest,
+    SeedQueuePushResponse,
     TelemetryItem,
     TokenResponse,
     UserCreate,
@@ -1245,6 +1253,404 @@ def seed_positions(
         for row in rows
     ]
     return SeedPositionResponse(limit=limit_value, seeds=seeds)
+
+
+def _get_seed_queue_list(
+    conn: sqlite3.Connection, queue_id: int, user_id: int
+) -> sqlite3.Row | tuple:
+    row = conn.execute(
+        """
+        SELECT id, name, created_at, updated_at
+        FROM seed_queue_lists
+        WHERE id = ? AND user_id = ?
+        """,
+        (queue_id, user_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Seed queue not found",
+        )
+    return row
+
+
+@app.get(
+    "/v1/seed/queues",
+    response_model=SeedQueueListResponse,
+    tags=["Seeds"],
+    description="List seed queues for the current user.",
+)
+def list_seed_queues(
+    current_user: UserPublic = Depends(get_ui_current_user),
+) -> SeedQueueListResponse:
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                q.id,
+                q.name,
+                q.created_at,
+                q.updated_at,
+                (
+                    SELECT COUNT(*)
+                    FROM seed_queue_items i
+                    WHERE i.queue_id = q.id
+                ) AS item_count
+            FROM seed_queue_lists q
+            WHERE q.user_id = ?
+            ORDER BY q.created_at ASC
+            """,
+            (current_user.id,),
+        ).fetchall()
+        if not rows:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO seed_queue_lists (user_id, name)
+                    VALUES (?, ?)
+                    """,
+                    (current_user.id, "Default"),
+                )
+            rows = conn.execute(
+                """
+                SELECT
+                    q.id,
+                    q.name,
+                    q.created_at,
+                    q.updated_at,
+                    (
+                        SELECT COUNT(*)
+                        FROM seed_queue_items i
+                        WHERE i.queue_id = q.id
+                    ) AS item_count
+                FROM seed_queue_lists q
+                WHERE q.user_id = ?
+                ORDER BY q.created_at ASC
+                """,
+                (current_user.id,),
+            ).fetchall()
+    finally:
+        conn.close()
+
+    queues = [
+        SeedQueueList(
+            id=row[0],
+            name=row[1],
+            created_at=row[2],
+            updated_at=row[3],
+            item_count=row[4] or 0,
+        )
+        for row in rows
+    ]
+    return SeedQueueListResponse(queues=queues)
+
+
+@app.post(
+    "/v1/seed/queues",
+    response_model=SeedQueueList,
+    tags=["Seeds"],
+    description="Create a new seed queue for the current user.",
+)
+def create_seed_queue(
+    payload: SeedQueueCreateRequest,
+    current_user: UserPublic = Depends(get_ui_current_user),
+) -> SeedQueueList:
+    name = payload.name.strip() if payload.name else ""
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Queue name is required",
+        )
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO seed_queue_lists (user_id, name)
+                VALUES (?, ?)
+                """,
+                (current_user.id, name),
+            )
+        row = conn.execute(
+            """
+            SELECT id, name, created_at, updated_at
+            FROM seed_queue_lists
+            WHERE id = ?
+            """,
+            (cursor.lastrowid,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return SeedQueueList(
+        id=row[0],
+        name=row[1],
+        created_at=row[2],
+        updated_at=row[3],
+        item_count=0,
+    )
+
+
+@app.get(
+    "/v1/seed/queues/{queue_id}/items",
+    response_model=SeedQueueItemList,
+    tags=["Seeds"],
+    description="List items in a seed queue.",
+)
+def list_seed_queue_items(
+    queue_id: int,
+    current_user: UserPublic = Depends(get_ui_current_user),
+) -> SeedQueueItemList:
+    conn = get_db_connection()
+    try:
+        _get_seed_queue_list(conn, queue_id, current_user.id)
+        rows = conn.execute(
+            """
+            SELECT id, queue_id, range_id, range_value, seed_start, seed_end,
+                   position_percent, created_at
+            FROM seed_queue_items
+            WHERE queue_id = ?
+            ORDER BY created_at DESC
+            """,
+            (queue_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    items = [
+        SeedQueueItem(
+            id=row[0],
+            queue_id=row[1],
+            range_id=row[2],
+            range_value=row[3],
+            seed_start=row[4],
+            seed_end=row[5],
+            position_percent=row[6],
+            created_at=row[7],
+        )
+        for row in rows
+    ]
+    return SeedQueueItemList(queue_id=queue_id, items=items)
+
+
+@app.post(
+    "/v1/seed/queues/{queue_id}/items",
+    response_model=SeedQueueItem,
+    tags=["Seeds"],
+    description="Add a seed range to a queue.",
+)
+def add_seed_queue_item(
+    queue_id: int,
+    payload: SeedQueueItemCreateRequest,
+    current_user: UserPublic = Depends(get_ui_current_user),
+) -> SeedQueueItem:
+    range_id = payload.range_id.strip() if payload.range_id else None
+    range_value = payload.range_value.strip() if payload.range_value else None
+    seed_start = payload.seed_start.strip() if payload.seed_start else None
+    seed_end = payload.seed_end.strip() if payload.seed_end else None
+    if not any([range_id, range_value, seed_start, seed_end]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Queue item must include a range or seed value",
+        )
+    conn = get_db_connection()
+    try:
+        _get_seed_queue_list(conn, queue_id, current_user.id)
+        count_row = conn.execute(
+            "SELECT COUNT(*) FROM seed_queue_items WHERE queue_id = ?",
+            (queue_id,),
+        ).fetchone()
+        if count_row and count_row[0] >= 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Queue already has 100 items",
+            )
+        with conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO seed_queue_items (
+                    queue_id, range_id, range_value, seed_start, seed_end, position_percent
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    queue_id,
+                    range_id,
+                    range_value,
+                    seed_start,
+                    seed_end,
+                    payload.position_percent,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE seed_queue_lists
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (queue_id,),
+            )
+        row = conn.execute(
+            """
+            SELECT id, queue_id, range_id, range_value, seed_start, seed_end,
+                   position_percent, created_at
+            FROM seed_queue_items
+            WHERE id = ?
+            """,
+            (cursor.lastrowid,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return SeedQueueItem(
+        id=row[0],
+        queue_id=row[1],
+        range_id=row[2],
+        range_value=row[3],
+        seed_start=row[4],
+        seed_end=row[5],
+        position_percent=row[6],
+        created_at=row[7],
+    )
+
+
+@app.delete(
+    "/v1/seed/queues/{queue_id}/items/{item_id}",
+    tags=["Seeds"],
+    description="Remove a seed range from a queue.",
+)
+def delete_seed_queue_item(
+    queue_id: int,
+    item_id: int,
+    current_user: UserPublic = Depends(get_ui_current_user),
+) -> Dict[str, str]:
+    conn = get_db_connection()
+    try:
+        _get_seed_queue_list(conn, queue_id, current_user.id)
+        with conn:
+            conn.execute(
+                """
+                DELETE FROM seed_queue_items
+                WHERE id = ? AND queue_id = ?
+                """,
+                (item_id, queue_id),
+            )
+            conn.execute(
+                """
+                UPDATE seed_queue_lists
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (queue_id,),
+            )
+    finally:
+        conn.close()
+    return {"status": "ok"}
+
+
+@app.post(
+    "/v1/seed/queues/{queue_id}/push",
+    response_model=SeedQueuePushResponse,
+    tags=["Seeds"],
+    description="Dispatch queued seed ranges to one or more machines.",
+)
+def push_seed_queue(
+    queue_id: int,
+    payload: SeedQueuePushRequest,
+    current_user: UserPublic = Depends(get_ui_current_user),
+) -> SeedQueuePushResponse:
+    conn = get_db_connection()
+    try:
+        _get_seed_queue_list(conn, queue_id, current_user.id)
+        items = conn.execute(
+            """
+            SELECT range_id, range_value, seed_start, seed_end, position_percent
+            FROM seed_queue_items
+            WHERE queue_id = ?
+            ORDER BY created_at ASC
+            """,
+            (queue_id,),
+        ).fetchall()
+        if not items:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Queue has no items to dispatch",
+            )
+        machines: List[str] = []
+        if payload.mode == "single":
+            if not payload.machine_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="machine_id is required for single mode",
+                )
+            _get_machine_for_user(payload.machine_id, current_user)
+            machines = [payload.machine_id]
+        else:
+            if payload.machine_ids:
+                machines = list(payload.machine_ids)
+            else:
+                machine_rows = conn.execute(
+                    """
+                    SELECT id
+                    FROM machines
+                    WHERE user_id = ?
+                    ORDER BY machine_name ASC, id ASC
+                    """,
+                    (current_user.id,),
+                ).fetchall()
+                machines = [row[0] for row in machine_rows]
+            if not machines:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No machines available to receive queue",
+                )
+            for machine_id in machines:
+                _get_machine_for_user(machine_id, current_user)
+
+        dispatches: List[tuple[str, str, str]] = []
+        for idx, item in enumerate(items):
+            target_machine = (
+                machines[0] if payload.mode == "single" else machines[idx % len(machines)]
+            )
+            value_payload = json.dumps(
+                {
+                    "range_id": item[0],
+                    "range_value": item[1],
+                    "seed_start": item[2],
+                    "seed_end": item[3],
+                    "position_percent": item[4],
+                }
+            )
+            dispatches.append((target_machine, "queue_seed", value_payload))
+
+        with conn:
+            conn.executemany(
+                """
+                INSERT INTO pending_control (machine_id, command, value)
+                VALUES (?, ?, ?)
+                """,
+                dispatches,
+            )
+            if payload.clear_after:
+                conn.execute(
+                    "DELETE FROM seed_queue_items WHERE queue_id = ?",
+                    (queue_id,),
+                )
+            conn.execute(
+                """
+                UPDATE seed_queue_lists
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (queue_id,),
+            )
+    finally:
+        conn.close()
+
+    return SeedQueuePushResponse(
+        queue_id=queue_id,
+        mode=payload.mode,
+        dispatched=len(dispatches),
+        machines=machines,
+    )
 
 
 @app.get(

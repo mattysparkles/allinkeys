@@ -34,6 +34,7 @@ from core.seed_tracker import (
     record_seed_range,
     get_condensed_ranges,
 )
+from core.seed_queue import dequeue as dequeue_seed_queue
 from core.telemetry import (
     _get_app_id,
     check_seed_seen,
@@ -366,6 +367,30 @@ def generate_random_seed(min_bits=128):
                     )
                 except Exception:
                     pass
+                continue
+            return seed
+
+        queued_entry = dequeue_seed_queue()
+        while queued_entry is not None:
+            seed = int(queued_entry.seed_start)
+            if seed < (1 << min_bits):
+                queued_entry = dequeue_seed_queue()
+                continue
+            if seed_in_used_range(seed):
+                queued_entry = dequeue_seed_queue()
+                continue
+            if telemetry_enabled() and _central_seen(seed):
+                try:
+                    record_seed_event(
+                        int(seed).to_bytes(32, "big"),
+                        mode=_telemetry_context()[0],
+                        range_id=_telemetry_context()[1],
+                        used=True,
+                        match_found=False,
+                    )
+                except Exception:
+                    pass
+                queued_entry = dequeue_seed_queue()
                 continue
             return seed
 
