@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v0.1.1]
+
 - Added privacy-safe central telemetry with durable seed queue
 - Enforced puzzle mode range validation and hardened seed tracker
 - Added rolling metrics and mode-aware GUI for real-time insights
@@ -16,4 +18,3 @@
 - Added processing throughput metrics and SQLite fallback for funded address lookup
 - Stream VanitySearch output to track seeds and expanded binary detection
 - Enhanced mnemonic mode with full BIP-39 language support and multilingual output
-

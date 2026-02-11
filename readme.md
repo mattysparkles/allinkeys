@@ -429,7 +429,7 @@ PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
 
 ## 📦 Building into `.exe`
 
-You can download the Windows installer from GitHub Releases (starting with `v0.1.0`).
+You can download the Windows installer from GitHub Releases (starting with `v0.1.1`).
 The release build bundles all required assets (VanitySearch binaries, wordlists,
 sounds, plugins, etc.) so it runs out of the box.
 
@@ -457,6 +457,8 @@ For the official Windows installer, the GitHub Actions workflow packages a full
 ## 📝 Changelog
 
 ### [Unreleased]
+
+### v0.1.1
 
 - Added privacy-safe central telemetry with durable seed queue
 - Enforced puzzle mode range validation and hardened seed tracker
