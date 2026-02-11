@@ -155,6 +155,8 @@
       .observer-search-chart {
         margin-top: 24px;
         height: 320px;
+        position: relative;
+        padding-right: 42px;
       }
       .observer-visuals {
         margin-top: 28px;
@@ -167,6 +169,8 @@
         border: 1px solid #1d2642;
         border-radius: 14px;
         padding: 16px;
+        position: relative;
+        padding-right: 42px;
       }
       .observer-visual-card h3 {
         margin: 0 0 10px;
@@ -327,6 +331,23 @@
       }
       .chart-scrollbars input[type="range"] {
         width: 100%;
+        accent-color: #3dd5f2;
+      }
+      .chart-scroll-y {
+        position: absolute;
+        right: 10px;
+        top: 48px;
+        height: 220px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: auto;
+      }
+      .chart-scroll-y input[type="range"] {
+        width: 12px;
+        height: 100%;
+        writing-mode: bt-lr;
+        -webkit-appearance: slider-vertical;
         accent-color: #3dd5f2;
       }
       .hub-link {

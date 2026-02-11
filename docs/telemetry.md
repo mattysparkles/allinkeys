@@ -238,8 +238,9 @@ unique seed totals. Useful for puzzle mode tabs. Supports `since`, `until`,
 ### `GET /v1/dashboard/{slug}/metrics/aggregate`
 
 Returns the latest aggregate dashboard metrics (addresses checked/generated,
-matches found, etc.) across the requested scope. Supports `scope` and
-`machine_id`. The response includes BTC address-type breakdowns so the public
+matches found, etc.) across the requested scope. Supports `scope`,
+`machine_id`, and optional `since` / `until` to bound the snapshots used for
+aggregation. The response includes BTC address-type breakdowns so the public
 dashboard can render legacy vs bech32 vs taproot splits.
 
 ### `GET /v1/dashboard/{slug}/contributors/top`

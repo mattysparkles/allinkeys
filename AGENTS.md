@@ -20,3 +20,4 @@
 - 2026-02-10 23:40:30Z: Added SQLite busy timeout/connection timeout in telemetry DB connections to reduce "database is locked" 500s affecting dashboard charts.
 - 2026-02-10 23:44:06Z: Moved telemetry DB schema setup behind a one-time init lock to avoid per-request DDL and reduce "database is locked" errors; pushed to GitHub and restarted `allinkeys-telemetry.service`.
 - 2026-02-11 00:22:17Z: Added seed-queue tables/endpoints and `queue_seed` control handling (client-side queue consumption in keygen), plus telemetry dashboard crosshair selection, scrollbars, and queue UI updates; refreshed telemetry docs.
+- 2026-02-11 00:50:12Z: Moved chart Y-scrollbars onto the y-axis, enabled crosshair + click-to-queue on position charts, and added since/until support to aggregate metrics; updated telemetry docs.

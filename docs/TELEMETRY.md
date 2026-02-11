@@ -173,7 +173,7 @@ Range analytics endpoints also accept `mode`, `range_id` (e.g. `puzzle-71`),
 and `since`/`until` filters. The aggregate metrics endpoint
 `/v1/dashboard/{slug}/metrics/aggregate` summarizes addresses checked today/
 lifetime and provides BTC address-type breakdowns for legacy vs bech32 vs
-taproot splits.
+taproot splits, with optional `since`/`until` bounds for the snapshot window.
 
 Link back to the [GitHub repository](https://github.com/mattysparkles/allinkeys) from the telemetry site so visitors can clone the project and run the same software themselves.
 ## Token lifecycle

@@ -271,6 +271,9 @@
 
   const syncScrollbars = (chart) => {
     if (!chart || !chart.$scrollbars) return;
+    if (typeof chart.$scrollbars.positionY === "function") {
+      chart.$scrollbars.positionY();
+    }
     const { baseXMin, baseXMax, baseYMin, baseYMax, viewXMin, viewXMax, viewYMin, viewYMax } =
       getScaleBounds(chart);
     const xSpan = viewXMax - viewXMin;
@@ -306,8 +309,10 @@
     if (chart.$scrollbars) return;
     const wrapper = chart.canvas.parentElement;
     if (!wrapper) return;
-    const container = document.createElement("div");
-    container.className = "chart-scrollbars";
+    const xContainer = document.createElement("div");
+    xContainer.className = "chart-scrollbars";
+    const yContainer = document.createElement("div");
+    yContainer.className = "chart-scroll-y";
 
     const buildSlider = (label, axis) => {
       const wrapperLabel = document.createElement("label");
@@ -359,10 +364,19 @@
       syncScrollbars(chart);
     });
 
-    container.appendChild(xLabel);
-    container.appendChild(yLabel);
-    wrapper.appendChild(container);
-    chart.$scrollbars = { container, x: xSlider, y: ySlider };
+    xContainer.appendChild(xLabel);
+    yContainer.appendChild(yLabel);
+    wrapper.appendChild(xContainer);
+    wrapper.appendChild(yContainer);
+    const positionY = () => {
+      const canvas = chart.canvas;
+      if (!canvas || !yContainer) return;
+      yContainer.style.top = `${canvas.offsetTop}px`;
+      yContainer.style.height = `${canvas.clientHeight}px`;
+    };
+    chart.$scrollbars = { xContainer, yContainer, x: xSlider, y: ySlider, positionY };
+    positionY();
+    window.addEventListener("resize", positionY);
     syncScrollbars(chart);
   };
 
@@ -975,6 +989,7 @@
       rangeChart.data.datasets = datasets;
       applyAxisBounds(rangeChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: maxY });
       rangeChart.update();
+      attachPositionClick(rangeChart);
       return;
     }
 
@@ -1025,23 +1040,53 @@
     });
     registerZoomable(rangeChart);
     registerScrollable(rangeChart);
+    attachPositionClick(rangeChart);
   };
 
-  const handleRangeChartClick = (event) => {
-    if (!rangeChart || !chartCanvas) return;
-    const rect = chartCanvas.getBoundingClientRect();
+  const extractPositionPercent = (chart, xValue) => {
+    if (typeof xValue === "number") {
+      const scaleType = chart?.scales?.x?.type;
+      if (scaleType === "category" && Array.isArray(chart.data?.labels)) {
+        const idx = Math.round(xValue);
+        const label = chart.data.labels[idx];
+        const parsed = parseFloat(label);
+        return Number.isNaN(parsed) ? null : parsed;
+      }
+      return xValue;
+    }
+    if (typeof xValue === "string") {
+      const parsed = parseFloat(xValue);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  };
+
+  const handlePositionChartClick = (chart, event) => {
+    if (!chart || !chart.canvas) return;
+    const rect = chart.canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    const xValue = rangeChart.scales?.x?.getValueForPixel(x);
-    const yValue = rangeChart.scales?.y?.getValueForPixel(y);
-    if (typeof xValue !== "number" || Number.isNaN(xValue)) return;
-    rangeChart.$crosshair = { x, y, visible: true, pinned: true };
-    rangeChart.draw();
-    const picked = pickClosestRange(xValue);
+    const xValue = chart.scales?.x?.getValueForPixel(x);
+    const yValue = chart.scales?.y?.getValueForPixel(y);
+    const percent = extractPositionPercent(chart, xValue);
+    if (percent === null || Number.isNaN(percent)) return;
+    const bounded = Math.max(0, Math.min(100, percent));
+    chart.$crosshair = { x, y, visible: true, pinned: true };
+    chart.draw();
+    const picked = pickClosestRange(bounded);
     renderSelectedRange(picked, {
-      x: xValue,
+      x: bounded,
       y: typeof yValue === "number" && !Number.isNaN(yValue) ? yValue : 0,
     });
+    if (queueEnabled) {
+      addSelectedRangeToQueue();
+    }
+  };
+
+  const attachPositionClick = (chart) => {
+    if (!chart || !chart.canvas || chart.$positionClickAttached) return;
+    chart.canvas.addEventListener("click", (event) => handlePositionChartClick(chart, event));
+    chart.$positionClickAttached = true;
   };
 
   const hashString = (value) => {
@@ -1072,6 +1117,7 @@
       densityChart.data.datasets[0].data = counts;
       applyAxisBounds(densityChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: densityMax });
       densityChart.update();
+      attachPositionClick(densityChart);
       return;
     }
     densityChart = new Chart(densityCanvas, {
@@ -1111,12 +1157,17 @@
             ...zoomOptions,
             limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: densityMax } },
           },
+          crosshair: {
+            enabled: true,
+            color: "rgba(148, 163, 184, 0.5)",
+          },
           legend: { display: false },
         },
       },
     });
     registerZoomable(densityChart);
     registerScrollable(densityChart);
+    attachPositionClick(densityChart);
   };
 
   const renderJitterChart = () => {
@@ -1137,6 +1188,7 @@
       jitterChart.data.datasets[0].data = points;
       applyAxisBounds(jitterChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: 1 });
       jitterChart.update();
+      attachPositionClick(jitterChart);
       return;
     }
     jitterChart = new Chart(jitterCanvas, {
@@ -1176,12 +1228,17 @@
             ...zoomOptions,
             limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: 1 } },
           },
+          crosshair: {
+            enabled: true,
+            color: "rgba(148, 163, 184, 0.5)",
+          },
           legend: { display: false },
         },
       },
     });
     registerZoomable(jitterChart);
     registerScrollable(jitterChart);
+    attachPositionClick(jitterChart);
   };
 
   const drawSpanChart = () => {
@@ -1268,6 +1325,7 @@
       sizeChart.data.datasets[0].data = points;
       applyAxisBounds(sizeChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: sizeMax });
       sizeChart.update();
+      attachPositionClick(sizeChart);
       return;
     }
     sizeChart = new Chart(sizeCanvas, {
@@ -1308,12 +1366,17 @@
             ...zoomOptions,
             limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: sizeMax } },
           },
+          crosshair: {
+            enabled: true,
+            color: "rgba(148, 163, 184, 0.5)",
+          },
           legend: { display: false },
         },
       },
     });
     registerZoomable(sizeChart);
     registerScrollable(sizeChart);
+    attachPositionClick(sizeChart);
   };
 
   const renderRecencyChart = () => {
@@ -1344,6 +1407,7 @@
       recencyChart.data.datasets[0].data = points;
       applyAxisBounds(recencyChart, { xMin: bounds.min, xMax: bounds.max, yMin: 0, yMax: 100 });
       recencyChart.update();
+      attachPositionClick(recencyChart);
       return;
     }
     recencyChart = new Chart(recencyCanvas, {
@@ -1384,12 +1448,17 @@
             ...zoomOptions,
             limits: { x: { min: bounds.min, max: bounds.max }, y: { min: 0, max: 100 } },
           },
+          crosshair: {
+            enabled: true,
+            color: "rgba(148, 163, 184, 0.5)",
+          },
           legend: { display: false },
         },
       },
     });
     registerZoomable(recencyChart);
     registerScrollable(recencyChart);
+    attachPositionClick(recencyChart);
   };
 
   const renderSpanHistogram = () => {
@@ -1451,6 +1520,10 @@
         },
         plugins: {
           zoom: { ...zoomOptions, limits: { x: { min: 0, max: 100 }, y: { min: 0, max: spanHistMax } } },
+          crosshair: {
+            enabled: true,
+            color: "rgba(148, 163, 184, 0.5)",
+          },
           legend: { display: false },
         },
       },
@@ -1512,7 +1585,10 @@
             grid: { color: "rgba(255,255,255,0.05)" },
           },
         },
-        plugins: { legend: { display: false } },
+        plugins: {
+          crosshair: { enabled: true, color: "rgba(148, 163, 184, 0.5)" },
+          legend: { display: false },
+        },
       },
     });
     return chart;
@@ -1846,10 +1922,6 @@
       event.preventDefault();
       runSearch();
     });
-  }
-
-  if (chartCanvas) {
-    chartCanvas.addEventListener("click", handleRangeChartClick);
   }
 
   if (addToQueueBtn) {

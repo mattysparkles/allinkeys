@@ -223,6 +223,8 @@ class MetricAggregateResponse(BaseModel):
     machine_id: Optional[str] = None
     machines: int
     timestamp: Optional[str] = None
+    since: Optional[str] = None
+    until: Optional[str] = None
     metrics: Dict[str, Any] = Field(default_factory=dict)
     btc_address_types_today: Dict[str, float] = Field(default_factory=dict)
     btc_address_types_lifetime: Dict[str, float] = Field(default_factory=dict)
@@ -2141,6 +2143,8 @@ def metrics_aggregate(
     slug: str,
     scope: Optional[str] = Query(None, description="global|user|machine"),
     machine_id: Optional[str] = Query(None),
+    since: Optional[str] = Query(None),
+    until: Optional[str] = Query(None),
     current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
 ) -> MetricAggregateResponse:
     scope_value, scope_filters, scope_params = _scope_filters(
@@ -2150,7 +2154,17 @@ def metrics_aggregate(
         machine_column="machine_id",
         user_column="user_id",
     )
-    where_clause = f"WHERE {' AND '.join(scope_filters)}" if scope_filters else ""
+    parsed_since = _parse_since(since)
+    parsed_until = _parse_until(until)
+    filters = list(scope_filters)
+    params = list(scope_params)
+    if parsed_since:
+        filters.append("timestamp >= ?")
+        params.append(parsed_since)
+    if parsed_until:
+        filters.append("timestamp <= ?")
+        params.append(parsed_until)
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     conn = get_db_connection()
     try:
         rows = conn.execute(
@@ -2165,7 +2179,7 @@ def metrics_aggregate(
             ) latest
             ON ms.machine_id = latest.machine_id AND ms.timestamp = latest.max_ts
             """,
-            scope_params,
+            params,
         ).fetchall()
     finally:
         conn.close()
@@ -2241,6 +2255,8 @@ def metrics_aggregate(
         machine_id=machine_id,
         machines=len(rows),
         timestamp=latest_ts,
+        since=since,
+        until=until,
         metrics=aggregated_metrics,
         btc_address_types_today=btc_today,
         btc_address_types_lifetime=btc_lifetime,
