@@ -34,13 +34,14 @@ from core.seed_tracker import (
     record_seed_range,
     get_condensed_ranges,
 )
-from core.seed_queue import dequeue as dequeue_seed_queue
+from core.seed_queue import dequeue as dequeue_seed_queue, size as seed_queue_size
 from core.telemetry import (
     _get_app_id,
     check_seed_seen,
     record_range_event,
     record_seed_event,
 )
+from core.worker_bootstrap import _safe_set_metric
 
 # Runtime trackers / metrics window
 total_keys_generated = 0
@@ -392,6 +393,17 @@ def generate_random_seed(min_bits=128):
                     pass
                 queued_entry = dequeue_seed_queue()
                 continue
+            _safe_set_metric("seed_queue_depth", seed_queue_size())
+            try:
+                log_with_context(
+                    logger,
+                    "INFO",
+                    "[Queue] Using queued seed %s | remaining=%s",
+                    hex(seed),
+                    seed_queue_size(),
+                )
+            except Exception:
+                pass
             return seed
 
         if not _SEED_QUEUE:

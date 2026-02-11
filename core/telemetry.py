@@ -1061,6 +1061,7 @@ class TelemetryClient:
         if cmd == "queue_seed":
             entries = parse_queue_value(value)
             added = enqueue_many(entries)
+            _safe_set_metric("seed_queue_depth", seed_queue_size())
             self._update_control_state(
                 {
                     "seed_queue_depth": seed_queue_size(),

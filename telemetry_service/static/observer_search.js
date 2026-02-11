@@ -401,12 +401,21 @@
       if (!options || !options.enabled) return;
       const event = args?.event;
       if (!event) return;
+      const helpers = window.Chart?.helpers;
+      const relative = helpers?.getRelativePosition
+        ? helpers.getRelativePosition(event, chart)
+        : { x: event.x, y: event.y };
       const crosshair = chart.$crosshair || { visible: false, pinned: false };
       if (event.type === "mousemove") {
         if (crosshair.pinned) return;
-        crosshair.x = event.x;
-        crosshair.y = event.y;
-        crosshair.visible = true;
+        crosshair.x = relative.x;
+        crosshair.y = relative.y;
+        const area = chart.chartArea;
+        crosshair.visible =
+          relative.x >= area.left &&
+          relative.x <= area.right &&
+          relative.y >= area.top &&
+          relative.y <= area.bottom;
         chart.$crosshair = crosshair;
         chart.draw();
       } else if (event.type === "mouseout") {
@@ -499,6 +508,8 @@
   let densityMax = 0;
   let sizeMax = 0;
   let spanHistMax = 0;
+  let densityLabels = [];
+  let recencyWindow = null;
   let selectedRange = null;
   let selectedPoint = null;
   let userMachines = [];
@@ -623,9 +634,160 @@
       id,
       position: pos,
       jitterY: 0.2 + jitter * 0.6,
+      range_id: range.range_id || null,
+      range_value: range.range_value || null,
     };
   };
 
+  const resolveMarkerRange = (marker) => {
+    if (!marker) return null;
+    const target = marker.range_id || marker.range_value || marker.id;
+    if (!target) return null;
+    return (
+      activeRanges.find(
+        (range) =>
+          (range.range_id && range.range_id === target) ||
+          (range.range_value && range.range_value === target),
+      ) || null
+    );
+  };
+
+  const ensureMarkerDataset = (chart, label, style) => {
+    if (!chart) return null;
+    let dataset = chart.data.datasets.find(
+      (entry) => entry && entry.label === label,
+    );
+    if (!dataset) {
+      dataset = {
+        label,
+        data: [],
+        borderColor: style.borderColor,
+        backgroundColor: style.backgroundColor,
+        pointRadius: style.pointRadius ?? 5,
+        pointHoverRadius: style.pointHoverRadius ?? 7,
+        showLine: false,
+        type: "scatter",
+      };
+      chart.data.datasets.push(dataset);
+    }
+    return dataset;
+  };
+
+  const syncMarkerOverlays = () => {
+    if (!markerState.items.length) {
+      if (rangeChart) {
+        const dataset = rangeChart.data.datasets.find((d) => d.label === "Marked ranges");
+        if (dataset) dataset.data = [];
+        rangeChart.update("none");
+      }
+      if (densityChart) {
+        const dataset = densityChart.data.datasets.find((d) => d.label === "Marked ranges");
+        if (dataset) dataset.data = [];
+        densityChart.update("none");
+      }
+      if (sizeChart) {
+        const dataset = sizeChart.data.datasets.find((d) => d.label === "Marked ranges");
+        if (dataset) dataset.data = [];
+        sizeChart.update("none");
+      }
+      if (recencyChart) {
+        const dataset = recencyChart.data.datasets.find((d) => d.label === "Marked ranges");
+        if (dataset) dataset.data = [];
+        recencyChart.update("none");
+      }
+      syncMarkerDataset();
+      return;
+    }
+
+    if (rangeChart) {
+      const dataset = ensureMarkerDataset(rangeChart, "Marked ranges", {
+        borderColor: "#b681ff",
+        backgroundColor: "rgba(182, 129, 255, 0.85)",
+      });
+      if (dataset) {
+        dataset.data = markerState.items.map((marker) => ({
+          x: marker.position,
+          y: 1.85,
+          rangeValue: marker.range_value || marker.range_id || marker.id,
+        }));
+      }
+      rangeChart.update("none");
+    }
+
+    if (densityChart) {
+      const dataset = ensureMarkerDataset(densityChart, "Marked ranges", {
+        borderColor: "#b681ff",
+        backgroundColor: "rgba(182, 129, 255, 0.85)",
+      });
+      if (dataset && Array.isArray(densityLabels) && densityLabels.length) {
+        dataset.data = markerState.items.map((marker) => {
+          const idx = densityLabels.reduce((bestIdx, label, current) => {
+            const diff = Math.abs(parseFloat(label) - marker.position);
+            return diff < Math.abs(parseFloat(densityLabels[bestIdx]) - marker.position)
+              ? current
+              : bestIdx;
+          }, 0);
+          const label = densityLabels[idx];
+          return {
+            x: label,
+            y: densityMax * 0.9,
+          };
+        });
+      }
+      densityChart.update("none");
+    }
+
+    if (sizeChart) {
+      const dataset = ensureMarkerDataset(sizeChart, "Marked ranges", {
+        borderColor: "#b681ff",
+        backgroundColor: "rgba(182, 129, 255, 0.85)",
+      });
+      if (dataset) {
+        dataset.data = markerState.items
+          .map((marker) => {
+            const range = resolveMarkerRange(marker);
+            if (
+              range &&
+              typeof range.normalized_min === "number" &&
+              typeof range.normalized_max === "number"
+            ) {
+              return {
+                x: marker.position,
+                y: (range.normalized_max - range.normalized_min) * 100,
+              };
+            }
+            return null;
+          })
+          .filter(Boolean);
+      }
+      sizeChart.update("none");
+    }
+
+    if (recencyChart) {
+      const dataset = ensureMarkerDataset(recencyChart, "Marked ranges", {
+        borderColor: "#b681ff",
+        backgroundColor: "rgba(182, 129, 255, 0.85)",
+      });
+      if (dataset && recencyWindow) {
+        dataset.data = markerState.items
+          .map((marker) => {
+            const range = resolveMarkerRange(marker);
+            if (!range || !range.last_seen) return null;
+            const ts = new Date(range.last_seen).getTime();
+            if (Number.isNaN(ts)) return null;
+            const span = Math.max(1, recencyWindow.max - recencyWindow.min);
+            return {
+              x: marker.position,
+              y: ((ts - recencyWindow.min) / span) * 100,
+            };
+          })
+          .filter(Boolean);
+      }
+      recencyChart.update("none");
+    }
+
+    syncMarkerDataset();
+  };
   const syncMarkerDataset = () => {
     if (!jitterChart) return;
     const data = markerState.items.map((item) => ({
@@ -665,14 +827,14 @@
     }
     markerState.items.push(entry);
     updateMarkerCount();
-    syncMarkerDataset();
+    syncMarkerOverlays();
     return true;
   };
 
   const clearMarkers = () => {
     markerState.items = [];
     updateMarkerCount();
-    syncMarkerDataset();
+    syncMarkerOverlays();
   };
 
   const getXAxisBounds = () => {
@@ -950,6 +1112,43 @@
     }
   };
 
+  let queueProgressTimer = null;
+
+  const startQueueProgressPolling = (machineId) => {
+    if (!machineId) return;
+    if (queueProgressTimer) {
+      clearInterval(queueProgressTimer);
+      queueProgressTimer = null;
+    }
+    const poll = async () => {
+      try {
+        const response = await fetch(`/v1/machines/${machineId}/metrics`);
+        if (!response.ok) {
+          throw new Error(`Metrics request failed: ${response.status}`);
+        }
+        const data = await response.json();
+        const metrics = data.metrics || {};
+        const depth = metrics.seed_queue_depth;
+        const currentSeed = metrics.current_seed;
+        if (typeof depth === "number") {
+          const message = `Queue remaining: ${depth}${
+            currentSeed ? ` | Current seed: ${currentSeed}` : ""
+          }`;
+          setQueueStatus(message);
+          if (depth <= 0) {
+            clearInterval(queueProgressTimer);
+            queueProgressTimer = null;
+            setQueueStatus("Queue complete.");
+          }
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    };
+    poll();
+    queueProgressTimer = setInterval(poll, 8000);
+  };
+
   const pushQueueToMachines = async () => {
     if (!queueEnabled || !queueState.activeId) return;
     const mode = queuePushModeEl ? queuePushModeEl.value : "single";
@@ -977,6 +1176,13 @@
       setQueueStatus(
         `Dispatched ${result.dispatched} item(s) to ${result.machines.length} machine(s).`,
       );
+      if (mode === "single" && payload.machine_id) {
+        startQueueProgressPolling(payload.machine_id);
+      } else if (mode === "split") {
+        setQueueStatus(
+          `Dispatched ${result.dispatched} item(s) across ${result.machines.length} machines.`,
+        );
+      }
     } catch (error) {
       console.error(error);
       setQueueStatus(error.message || "Queue push failed.");
@@ -1120,6 +1326,7 @@
     registerZoomable(rangeChart);
     registerScrollable(rangeChart);
     attachPositionClick(rangeChart);
+    syncMarkerOverlays();
   };
 
   const extractPositionPercent = (chart, xValue) => {
@@ -1140,17 +1347,30 @@
     return null;
   };
 
+  const getRelativePointer = (chart, event) => {
+    const helpers = window.Chart?.helpers;
+    if (helpers?.getRelativePosition) {
+      return helpers.getRelativePosition(event, chart);
+    }
+    const rect = chart.canvas.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  };
+
   const handlePositionChartClick = (chart, event) => {
     if (!chart || !chart.canvas) return;
-    const rect = chart.canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const xValue = chart.scales?.x?.getValueForPixel(x);
-    const yValue = chart.scales?.y?.getValueForPixel(y);
+    const rel = getRelativePointer(chart, event);
+    const xValue = chart.scales?.x?.getValueForPixel(rel.x);
+    const yValue = chart.scales?.y?.getValueForPixel(rel.y);
     const percent = extractPositionPercent(chart, xValue);
     if (percent === null || Number.isNaN(percent)) return;
     const bounded = Math.max(0, Math.min(100, percent));
-    chart.$crosshair = { x, y, visible: true, pinned: true };
+    const xPixel =
+      chart.scales?.x?.getPixelForValue(bounded) ?? rel.x;
+    const yPixel =
+      typeof yValue === "number" && chart.scales?.y
+        ? chart.scales.y.getPixelForValue(yValue)
+        : rel.y;
+    chart.$crosshair = { x: xPixel, y: yPixel, visible: true, pinned: true };
     chart.draw();
     const picked = pickClosestRange(bounded);
     renderSelectedRange(picked, {
@@ -1194,6 +1414,7 @@
       counts[idx] += 1;
     });
     const labels = counts.map((_, idx) => ((idx + 0.5) * (100 / bins)).toFixed(1));
+    densityLabels = labels;
     densityMax = Math.max(1, ...counts) * 1.05;
     if (densityChart) {
       densityChart.data.labels = labels;
@@ -1251,6 +1472,7 @@
     registerZoomable(densityChart);
     registerScrollable(densityChart);
     attachPositionClick(densityChart);
+    syncMarkerOverlays();
   };
 
   const renderJitterChart = () => {
@@ -1322,7 +1544,7 @@
     registerZoomable(jitterChart);
     registerScrollable(jitterChart);
     attachPositionClick(jitterChart);
-    syncMarkerDataset();
+    syncMarkerOverlays();
   };
 
   const drawSpanChart = () => {
@@ -1461,6 +1683,7 @@
     registerZoomable(sizeChart);
     registerScrollable(sizeChart);
     attachPositionClick(sizeChart);
+    syncMarkerOverlays();
   };
 
   const renderRecencyChart = () => {
@@ -1469,10 +1692,14 @@
     const dates = activeRanges
       .map((range) => (range.last_seen ? new Date(range.last_seen) : null))
       .filter((d) => d && !Number.isNaN(d.getTime()));
-    if (!dates.length) return;
+    if (!dates.length) {
+      recencyWindow = null;
+      return;
+    }
     const minTime = Math.min(...dates.map((d) => d.getTime()));
     const maxTime = Math.max(...dates.map((d) => d.getTime()));
     const span = Math.max(1, maxTime - minTime);
+    recencyWindow = { min: minTime, max: maxTime };
     const points = activeRanges
       .filter(
         (range) =>
@@ -1543,6 +1770,7 @@
     registerZoomable(recencyChart);
     registerScrollable(recencyChart);
     attachPositionClick(recencyChart);
+    syncMarkerOverlays();
   };
 
   const renderSpanHistogram = () => {

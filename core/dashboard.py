@@ -572,6 +572,7 @@ def _default_metrics():
         },
         "telemetry_cache_hits": 0,
         "telemetry_cache_misses": 0,
+        "seed_queue_depth": 0,
         "matches_found_lifetime": {
             "btc": 0, "doge": 0, "ltc": 0, "bch": 0, "rvn": 0, "pep": 0, "dash": 0, "eth": 0,
             "p2pkh": 0, "p2sh": 0, "p2wpkh": 0, "taproot": 0
