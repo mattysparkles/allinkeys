@@ -1522,7 +1522,17 @@ class TelemetryClient:
             enriched.setdefault("range_distribution", [])
             payload.append(enriched)
         if payload:
-            print("DEBUG TELEMETRY PAYLOAD:", payload[0])
+            try:
+                log_with_context(
+                    logger,
+                    "DEBUG",
+                    "[Telemetry] Payload sample | size=%s | first=%s",
+                    len(payload),
+                    payload[0],
+                    **_telemetry_log_context(endpoint=telemetry_url),
+                )
+            except Exception:
+                pass
         response = requests.post(
             telemetry_url,
             json=payload,

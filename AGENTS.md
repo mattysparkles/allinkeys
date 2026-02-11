@@ -28,3 +28,4 @@
 - 2026-02-11 05:10:39Z: Pushed the queue validation fix to GitHub and restarted `allinkeys-telemetry.service`.
 - 2026-02-11 05:20:12Z: Bumped Windows release workflow default tag to v0.1.1 and updated changelogs/readme for v0.1.1 release prep.
 - 2026-02-11 05:25:46Z: Tagged and pushed v0.1.1 to trigger the Windows release workflow.
+- 2026-02-11 06:19:31Z: Routed telemetry payload debug output through logger (DEBUG only) to stop massive stdout dumps during flushes.
