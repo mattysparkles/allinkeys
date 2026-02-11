@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -77,18 +76,28 @@ def _coverage_from_rows(rows: Iterable[tuple[str]]) -> float:
     return sum(end - start for start, end in merged) * 100 if merged else 0
 
 
-RELATIVE_RE = re.compile(r"(\d+)([mh])")
+def _parse_relative_window(value: str) -> Optional[timedelta]:
+    if not value:
+        return None
+    trimmed = value.strip()
+    if len(trimmed) < 2:
+        return None
+    unit = trimmed[-1]
+    if unit not in {"m", "h"}:
+        return None
+    amount_text = trimmed[:-1]
+    if not amount_text.isdigit():
+        return None
+    amount = int(amount_text)
+    return timedelta(minutes=amount) if unit == "m" else timedelta(hours=amount)
 
 
 def _parse_since(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
     value = value.strip()
-    relative_match = RELATIVE_RE.fullmatch(value)
-    if relative_match:
-        amount = int(relative_match.group(1))
-        unit = relative_match.group(2)
-        delta = timedelta(minutes=amount) if unit == "m" else timedelta(hours=amount)
+    delta = _parse_relative_window(value)
+    if delta:
         return datetime.utcnow() - delta
     if value.endswith("Z"):
         value = value[:-1]

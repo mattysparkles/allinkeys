@@ -179,6 +179,84 @@ _LEVEL_MAP = {
     "ALERT": logging.ERROR,
 }
 
+_SENSITIVE_HINTS = (
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "auth",
+    "bearer",
+    "jwt",
+    "session",
+    "cookie",
+)
+
+_BASE64URL_CHARS = set(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
+
+
+def _contains_sensitive_hint(value: str) -> bool:
+    lowered = value.lower()
+    return any(hint in lowered for hint in _SENSITIVE_HINTS)
+
+
+def _looks_like_token_segment(segment: str) -> bool:
+    cleaned = segment.strip(" \t\r\n\"'(),;<>[]{}")
+    if len(cleaned) < 24:
+        return False
+    if cleaned.count(".") == 2:
+        parts = cleaned.split(".")
+        if all(
+            part and all(ch in _BASE64URL_CHARS for ch in part)
+            for part in parts
+        ):
+            return True
+    if all(ch in "0123456789abcdefABCDEF" for ch in cleaned) and len(cleaned) >= 32:
+        return True
+    return False
+
+
+def _looks_sensitive_text(value: str) -> bool:
+    if not _contains_sensitive_hint(value):
+        return False
+    for segment in value.split():
+        if _looks_like_token_segment(segment):
+            return True
+    return False
+
+
+def _redact_text(value: str) -> str:
+    if _looks_sensitive_text(value):
+        return "[redacted]"
+    return value
+
+
+def _redact_args(message: str, args: tuple) -> tuple:
+    if not _contains_sensitive_hint(message):
+        return args
+    redacted = []
+    for arg in args:
+        if isinstance(arg, str) and _looks_like_token_segment(arg):
+            redacted.append("[redacted]")
+        else:
+            redacted.append(arg)
+    return tuple(redacted)
+
+
+def _redact_context(extra: dict) -> dict:
+    redacted = {}
+    for key, value in extra.items():
+        if _contains_sensitive_hint(str(key)):
+            redacted[key] = "[redacted]"
+        elif isinstance(value, str) and _looks_sensitive_text(value):
+            redacted[key] = "[redacted]"
+        else:
+            redacted[key] = value
+    return redacted
+
 class JsonLogFormatter(logging.Formatter):
     """Emit log records as structured JSON with correlation fields."""
 
@@ -224,11 +302,16 @@ def log_with_context(
     **context,
 ) -> None:
     level_value = _LEVEL_MAP.get(level.upper(), logging.INFO) if isinstance(level, str) else level
+    message_text = str(message)
+    safe_message = _redact_text(message_text)
+    safe_args = _redact_args(message_text, args)
     extra = _filter_context(context)
     if extra:
-        logger.log(level_value, message, *args, exc_info=exc_info, extra=extra)
+        extra = _redact_context(extra)
+    if extra:
+        logger.log(level_value, safe_message, *safe_args, exc_info=exc_info, extra=extra)
     else:
-        logger.log(level_value, message, *args, exc_info=exc_info)
+        logger.log(level_value, safe_message, *safe_args, exc_info=exc_info)
 
 
 def log_event(

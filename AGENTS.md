@@ -29,3 +29,4 @@
 - 2026-02-11 05:20:12Z: Bumped Windows release workflow default tag to v0.1.1 and updated changelogs/readme for v0.1.1 release prep.
 - 2026-02-11 05:25:46Z: Tagged and pushed v0.1.1 to trigger the Windows release workflow.
 - 2026-02-11 06:19:31Z: Routed telemetry payload debug output through logger (DEBUG only) to stop massive stdout dumps during flushes.
+- 2026-02-11 08:34:31Z: Addressed CodeQL alerts by hardening redirect sanitization, removing regex-based relative parsing, parameterizing dashboard queries, adding log redaction, and declaring workflow permissions.

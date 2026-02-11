@@ -28,9 +28,15 @@ DEFAULT_DASHBOARD_NEXT = "/dashboard/machines"
 def _sanitize_next(next_path: str | None, default: str = DEFAULT_DASHBOARD_NEXT) -> str:
     if not next_path:
         return default
-    if not next_path.startswith("/") or next_path.startswith("//"):
+    next_path = next_path.strip()
+    parts = urlparse(next_path)
+    if parts.scheme or parts.netloc:
         return default
-    return next_path
+    if not parts.path.startswith("/") or parts.path.startswith("//"):
+        return default
+    if "\\" in parts.path:
+        return default
+    return urlunparse(("", "", parts.path, parts.params, parts.query, parts.fragment))
 
 
 def _with_query(path: str, params: dict[str, str]) -> str:

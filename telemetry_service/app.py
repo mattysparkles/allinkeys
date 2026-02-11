@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import sqlite3
 import time
 from datetime import datetime, timedelta
@@ -625,15 +624,28 @@ def _merge_intervals(intervals: List[tuple[float, float]]) -> List[tuple[float, 
     return merged
 
 
+def _parse_relative_window(value: Optional[str]) -> Optional[timedelta]:
+    if not value:
+        return None
+    trimmed = value.strip()
+    if len(trimmed) < 2:
+        return None
+    unit = trimmed[-1]
+    if unit not in {"m", "h"}:
+        return None
+    amount_text = trimmed[:-1]
+    if not amount_text.isdigit():
+        return None
+    amount = int(amount_text)
+    return timedelta(minutes=amount) if unit == "m" else timedelta(hours=amount)
+
+
 def _parse_since(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
     value = value.strip()
-    relative_match = re.fullmatch(r"(\d+)([mh])", value)
-    if relative_match:
-        amount = int(relative_match.group(1))
-        unit = relative_match.group(2)
-        delta = timedelta(minutes=amount) if unit == "m" else timedelta(hours=amount)
+    delta = _parse_relative_window(value)
+    if delta:
         return (datetime.utcnow() - delta).isoformat() + "Z"
     if value.endswith("Z"):
         try:
@@ -656,11 +668,8 @@ def _parse_until(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
     value = value.strip()
-    relative_match = re.fullmatch(r"(\d+)([mh])", value)
-    if relative_match:
-        amount = int(relative_match.group(1))
-        unit = relative_match.group(2)
-        delta = timedelta(minutes=amount) if unit == "m" else timedelta(hours=amount)
+    delta = _parse_relative_window(value)
+    if delta:
         return (datetime.utcnow() - delta).isoformat() + "Z"
     if value.endswith("Z"):
         try:
@@ -879,24 +888,37 @@ def machine_health(
 ) -> MachineHealthResponse:
     del slug
     cutoff = datetime.utcnow() - timedelta(minutes=stale_minutes)
-    scope_value, scope_filters, scope_params = _scope_filters(
-        current_user=current_user,
-        scope=scope,
-        machine_id=machine_id,
-        machine_column="id",
-        user_column="user_id",
-    )
+    scope_value = _normalize_scope(scope)
+    user_filter: Optional[str] = None
+    machine_filter: Optional[str] = None
+    if scope_value == "user":
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        user_filter = current_user.id
+    elif scope_value == "machine":
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        if not machine_id:
+            raise HTTPException(status_code=400, detail="machine_id is required")
+        if not current_user.is_admin:
+            get_machine_for_user(machine_id, current_user)
+        machine_filter = machine_id
     conn = get_db_connection()
     try:
-        where_clause = f"WHERE {' AND '.join(scope_filters)}" if scope_filters else ""
         rows = conn.execute(
-            f"""
+            """
             SELECT id, machine_name, last_seen
             FROM machines
-            {where_clause}
+            WHERE (? IS NULL OR user_id = ?)
+              AND (? IS NULL OR id = ?)
             ORDER BY last_seen DESC
             """,
-            scope_params,
+            [
+                user_filter,
+                user_filter,
+                machine_filter,
+                machine_filter,
+            ],
         ).fetchall()
     finally:
         conn.close()
@@ -2147,34 +2169,46 @@ def metrics_aggregate(
     until: Optional[str] = Query(None),
     current_user: Optional[UserPublic] = Depends(get_ui_optional_user),
 ) -> MetricAggregateResponse:
-    scope_value, scope_filters, scope_params = _scope_filters(
-        current_user=current_user,
-        scope=scope,
-        machine_id=machine_id,
-        machine_column="machine_id",
-        user_column="user_id",
-    )
+    scope_value = _normalize_scope(scope)
+    user_filter: Optional[str] = None
+    machine_filter: Optional[str] = None
+    if scope_value == "user":
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        user_filter = current_user.id
+    elif scope_value == "machine":
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        if not machine_id:
+            raise HTTPException(status_code=400, detail="machine_id is required")
+        if not current_user.is_admin:
+            get_machine_for_user(machine_id, current_user)
+        machine_filter = machine_id
     parsed_since = _parse_since(since)
     parsed_until = _parse_until(until)
-    filters = list(scope_filters)
-    params = list(scope_params)
-    if parsed_since:
-        filters.append("timestamp >= ?")
-        params.append(parsed_since)
-    if parsed_until:
-        filters.append("timestamp <= ?")
-        params.append(parsed_until)
-    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+    params = [
+        user_filter,
+        user_filter,
+        machine_filter,
+        machine_filter,
+        parsed_since,
+        parsed_since,
+        parsed_until,
+        parsed_until,
+    ]
     conn = get_db_connection()
     try:
         rows = conn.execute(
-            f"""
+            """
             SELECT ms.machine_id, ms.timestamp, ms.payload
             FROM machine_snapshots ms
             JOIN (
                 SELECT machine_id, MAX(timestamp) AS max_ts
                 FROM machine_snapshots
-                {where_clause}
+                WHERE (? IS NULL OR user_id = ?)
+                  AND (? IS NULL OR machine_id = ?)
+                  AND (? IS NULL OR timestamp >= ?)
+                  AND (? IS NULL OR timestamp <= ?)
                 GROUP BY machine_id
             ) latest
             ON ms.machine_id = latest.machine_id AND ms.timestamp = latest.max_ts
