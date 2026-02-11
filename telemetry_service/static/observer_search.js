@@ -405,11 +405,16 @@
       const relative = helpers?.getRelativePosition
         ? helpers.getRelativePosition(event, chart)
         : { x: event.x, y: event.y };
-      const crosshair = chart.$crosshair || { visible: false, pinned: false };
+      const crosshair = chart.$crosshair || { visible: false };
       if (event.type === "mousemove") {
-        if (crosshair.pinned) return;
-        crosshair.x = relative.x;
-        crosshair.y = relative.y;
+        const xValue = chart.scales?.x?.getValueForPixel(relative.x);
+        const yValue = chart.scales?.y?.getValueForPixel(relative.y);
+        const xPixel =
+          chart.scales?.x?.getPixelForValue(xValue) ?? relative.x;
+        const yPixel =
+          chart.scales?.y?.getPixelForValue(yValue) ?? relative.y;
+        crosshair.x = xPixel;
+        crosshair.y = yPixel;
         const area = chart.chartArea;
         crosshair.visible =
           relative.x >= area.left &&
@@ -419,7 +424,6 @@
         chart.$crosshair = crosshair;
         chart.draw();
       } else if (event.type === "mouseout") {
-        if (crosshair.pinned) return;
         crosshair.visible = false;
         chart.$crosshair = crosshair;
         chart.draw();
@@ -1168,9 +1172,18 @@
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        const detail = data?.detail || "Queue push failed.";
-        throw new Error(detail);
+        const text = await response.text().catch(() => "");
+        let detail = text;
+        try {
+          const parsed = text ? JSON.parse(text) : null;
+          detail = parsed?.detail || detail;
+        } catch (error) {
+          // ignore JSON parse errors
+        }
+        const message = detail
+          ? `Queue push failed (${response.status}): ${detail}`
+          : `Queue push failed (${response.status}).`;
+        throw new Error(message);
       }
       const result = await response.json();
       setQueueStatus(
@@ -1370,7 +1383,7 @@
       typeof yValue === "number" && chart.scales?.y
         ? chart.scales.y.getPixelForValue(yValue)
         : rel.y;
-    chart.$crosshair = { x: xPixel, y: yPixel, visible: true, pinned: true };
+    chart.$crosshair = { x: xPixel, y: yPixel, visible: true };
     chart.draw();
     const picked = pickClosestRange(bounded);
     renderSelectedRange(picked, {

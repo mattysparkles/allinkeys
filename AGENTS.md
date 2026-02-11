@@ -23,3 +23,4 @@
 - 2026-02-11 00:50:12Z: Moved chart Y-scrollbars onto the y-axis, enabled crosshair + click-to-queue on position charts, and added since/until support to aggregate metrics; updated telemetry docs.
 - 2026-02-11 02:39:39Z: Added persistent marker dots + counter/clear button for chart clicks, crosshair on metric charts, and y-axis scrollbar positioning tweaks in telemetry dashboard UI.
 - 2026-02-11 03:02:37Z: Fixed crosshair alignment, added purple marker overlays across position charts, and added seed queue progress polling via machine metrics; client now tracks `seed_queue_depth` and logs queued seed consumption.
+- 2026-02-11 03:36:20Z: Improved crosshair cursor tracking, unpinned crosshair after clicks, expanded marker overlays across charts, and enhanced queue push error reporting in the telemetry dashboard UI.
