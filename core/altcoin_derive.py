@@ -1412,7 +1412,17 @@ def convert_txt_to_csv_loop(shared_shutdown_event, shared_metrics=None, pause_ev
                     if proc and not proc.is_alive():
                         proc.join()
                         processes[gid] = None
-                        watchdogs.pop(gid, None)
+                        info = watchdogs.pop(gid, None)
+                        if info:
+                            txt = info.get("txt")
+                            if txt:
+                                log_message(
+                                    f"⚠️ Worker died without result; re-queueing {txt} on GPU {gid}",
+                                    "WARNING",
+                                )
+                                gpu_queues[gid].insert(0, txt)
+                                queued.add(txt)
+                                safe_update_dashboard_stat("current_file", txt)
 
                 _monitor_watchdogs(watchdogs, processes, gpu_queues, backoff)
 

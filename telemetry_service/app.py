@@ -53,6 +53,11 @@ API_KEY_ENV = "TELEMETRY_API_KEY"
 logger = logging.getLogger("telemetry")
 logging.basicConfig(level=os.getenv("TELEMETRY_LOG_LEVEL", "INFO"))
 
+# Metric keys expected in address-check charts.
+ADDRESS_METRIC_COINS = ("btc", "eth", "doge", "ltc", "dash", "bch", "rvn", "pep")
+BTC_ADDRESS_TYPE_KEYS = ("p2pkh", "p2sh", "p2wpkh", "taproot")
+ADDRESS_METRIC_KEYS = ADDRESS_METRIC_COINS + BTC_ADDRESS_TYPE_KEYS
+
 
 class MachineInfo(BaseModel):
     machine_id: Optional[str] = None
@@ -2267,6 +2272,12 @@ def metrics_aggregate(
             kps_value = _coerce_metric_number(runtime.get("keys_per_sec"))
             if kps_value is not None:
                 total_kps += kps_value
+
+    for key in ("addresses_checked_today", "addresses_checked_lifetime"):
+        metric_map = aggregate_maps.get(key)
+        if isinstance(metric_map, dict):
+            for coin_key in ADDRESS_METRIC_KEYS:
+                metric_map.setdefault(coin_key, 0.0)
 
     aggregated_metrics: Dict[str, Any] = {}
     aggregated_metrics.update(aggregate_maps)

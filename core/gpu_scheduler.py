@@ -228,6 +228,17 @@ def monitor_backlog_and_reassign(shared_metrics, vanity_flag, altcoin_flag, assi
                     disable_altcoin = True
                     decision_reason = "backlog under 100 files (fallback threshold)"
 
+            # Safety net: large backlogs should swing even when ETA is missing or
+            # misleadingly small. This prevents a single fast file from pinning
+            # GPUs to vanity while thousands of backlog files accumulate.
+            if backlog_count >= 100 and not enable_altcoin:
+                enable_altcoin = True
+                disable_altcoin = False
+                decision_reason = "100+ backlog files (swing override)"
+            elif backlog_count == 0 and not disable_altcoin and not enable_altcoin:
+                disable_altcoin = True
+                decision_reason = "backlog empty"
+
             can_switch = (now - last_switch_time) >= (
                 GPU_SWING_MIN_INTERVAL_SECONDS or 0
             )

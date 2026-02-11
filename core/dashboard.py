@@ -287,6 +287,10 @@ def load_lifetime_metrics():
             ):
                 if not isinstance(data.get(key), dict):
                     data[key] = {c: 0 for c in defaults[key]}
+                else:
+                    merged = {c: 0 for c in defaults[key]}
+                    merged.update(data[key])
+                    data[key] = merged
             if path != METRICS_LIFETIME_PATH:
                 try:
                     os.makedirs(os.path.dirname(METRICS_LIFETIME_PATH), exist_ok=True)
@@ -373,6 +377,10 @@ def load_daily_metrics():
         ):
             if not isinstance(data.get(key), dict):
                 data[key] = {c: 0 for c in defaults[key]}
+            else:
+                merged = {c: 0 for c in defaults[key]}
+                merged.update(data[key])
+                data[key] = merged
         return data
     except Exception:
         logger.exception("Failed to load daily metrics")
