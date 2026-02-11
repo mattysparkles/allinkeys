@@ -25,3 +25,4 @@
 - 2026-02-11 03:02:37Z: Fixed crosshair alignment, added purple marker overlays across position charts, and added seed queue progress polling via machine metrics; client now tracks `seed_queue_depth` and logs queued seed consumption.
 - 2026-02-11 03:36:20Z: Improved crosshair cursor tracking, unpinned crosshair after clicks, expanded marker overlays across charts, and enhanced queue push error reporting in the telemetry dashboard UI.
 - 2026-02-11 05:05:41Z: Fixed seed queue push validation by using `get_machine_for_user` in queue endpoints to resolve a NameError causing 500s.
+- 2026-02-11 05:10:39Z: Pushed the queue validation fix to GitHub and restarted `allinkeys-telemetry.service`.
