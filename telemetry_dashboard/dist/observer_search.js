@@ -103,6 +103,12 @@
               Copy range
             </button>
           </div>
+          <div class="observer-focus-marker">
+            <div id="observerMarkerCount">0/100 marks</div>
+            <button type="button" id="observerClearMarkers">
+              Clear marks
+            </button>
+          </div>
           <div class="observer-focus-status" id="observerFocusStatus"></div>
         </div>
         <div class="observer-queue-card">
@@ -210,6 +216,8 @@
   const metricsStatusEl = document.getElementById("observerMetricsStatus");
   const focusDetailsEl = document.getElementById("observerFocusDetails");
   const focusStatusEl = document.getElementById("observerFocusStatus");
+  const markerCountEl = document.getElementById("observerMarkerCount");
+  const clearMarkersBtn = document.getElementById("observerClearMarkers");
   const addToQueueBtn = document.getElementById("observerAddToQueue");
   const copyRangeBtn = document.getElementById("observerCopyRange");
   const queueSelectEl = document.getElementById("observerQueueSelect");
@@ -494,6 +502,10 @@
   let selectedRange = null;
   let selectedPoint = null;
   let userMachines = [];
+  const MAX_MARKS = 100;
+  const markerState = {
+    items: [],
+  };
   const queueState = {
     queues: [],
     activeId: null,
@@ -594,6 +606,73 @@
     const payload = buildQueuePayload(range);
     if (addToQueueBtn) addToQueueBtn.disabled = !payload;
     if (copyRangeBtn) copyRangeBtn.disabled = !rangeValue;
+  };
+
+  const updateMarkerCount = () => {
+    if (!markerCountEl) return;
+    markerCountEl.textContent = `${markerState.items.length}/${MAX_MARKS} marks`;
+  };
+
+  const buildMarkerEntry = (range, positionPercent) => {
+    if (!range) return null;
+    const id = range.range_id || range.range_value || "";
+    const pos = typeof positionPercent === "number" ? positionPercent : range.position;
+    if (typeof pos !== "number") return null;
+    const jitter = (hashString(id || `${pos}`) % 1000) / 1000;
+    return {
+      id,
+      position: pos,
+      jitterY: 0.2 + jitter * 0.6,
+    };
+  };
+
+  const syncMarkerDataset = () => {
+    if (!jitterChart) return;
+    const data = markerState.items.map((item) => ({
+      x: item.position,
+      y: item.jitterY,
+    }));
+    const existing = jitterChart.data.datasets.find(
+      (dataset) => dataset && dataset.label === "Selected ranges",
+    );
+    if (existing) {
+      existing.data = data;
+    } else {
+      jitterChart.data.datasets.push({
+        label: "Selected ranges",
+        data,
+        borderColor: "#b681ff",
+        backgroundColor: "rgba(182, 129, 255, 0.8)",
+        pointRadius: 5,
+        pointHoverRadius: 7,
+      });
+    }
+    jitterChart.update("none");
+  };
+
+  const addMarker = (range, positionPercent) => {
+    const entry = buildMarkerEntry(range, positionPercent);
+    if (!entry) return false;
+    if (markerState.items.find((item) => item.id && item.id === entry.id)) {
+      updateMarkerCount();
+      return false;
+    }
+    if (markerState.items.length >= MAX_MARKS) {
+      if (focusStatusEl) {
+        focusStatusEl.textContent = "Marker limit reached (100). Clear marks to add more.";
+      }
+      return false;
+    }
+    markerState.items.push(entry);
+    updateMarkerCount();
+    syncMarkerDataset();
+    return true;
+  };
+
+  const clearMarkers = () => {
+    markerState.items = [];
+    updateMarkerCount();
+    syncMarkerDataset();
   };
 
   const getXAxisBounds = () => {
@@ -1078,6 +1157,10 @@
       x: bounded,
       y: typeof yValue === "number" && !Number.isNaN(yValue) ? yValue : 0,
     });
+    const marked = addMarker(picked, bounded);
+    if (marked && focusStatusEl) {
+      focusStatusEl.textContent = "Marked range.";
+    }
     if (queueEnabled) {
       addSelectedRangeToQueue();
     }
@@ -1239,6 +1322,7 @@
     registerZoomable(jitterChart);
     registerScrollable(jitterChart);
     attachPositionClick(jitterChart);
+    syncMarkerDataset();
   };
 
   const drawSpanChart = () => {
@@ -1928,6 +2012,15 @@
     addToQueueBtn.addEventListener("click", addSelectedRangeToQueue);
   }
 
+  if (clearMarkersBtn) {
+    clearMarkersBtn.addEventListener("click", () => {
+      clearMarkers();
+      if (focusStatusEl) {
+        focusStatusEl.textContent = "Cleared marks.";
+      }
+    });
+  }
+
   if (copyRangeBtn) {
     copyRangeBtn.addEventListener("click", async () => {
       if (!selectedRange) return;
@@ -1972,6 +2065,8 @@
   if (queuePushBtn) {
     queuePushBtn.addEventListener("click", pushQueueToMachines);
   }
+
+  updateMarkerCount();
 
   initializeFilters().then(async () => {
     await loadQueues();
