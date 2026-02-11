@@ -1583,7 +1583,7 @@ def push_seed_queue(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="machine_id is required for single mode",
                 )
-            _get_machine_for_user(payload.machine_id, current_user)
+            get_machine_for_user(payload.machine_id, current_user)
             machines = [payload.machine_id]
         else:
             if payload.machine_ids:
@@ -1605,7 +1605,7 @@ def push_seed_queue(
                     detail="No machines available to receive queue",
                 )
             for machine_id in machines:
-                _get_machine_for_user(machine_id, current_user)
+                get_machine_for_user(machine_id, current_user)
 
         dispatches: List[tuple[str, str, str]] = []
         for idx, item in enumerate(items):
