@@ -331,11 +331,10 @@ def run_all_processes(args, shutdown_events, shared_metrics, pause_events, log_q
         logger.info("🧠 Checkpoint restore enabled.")
 
     if not args.skip_downloads:
-        if should_skip_download_today(DOWNLOAD_DIR):
-            logger.info("🚩 Skipping address downloads — already downloaded today.")
-        else:
-            logger.info("🌐 Downloading address lists...")
-            download_and_compare_address_lists()
+        # Per-coin download checks happen inside the downloader. Avoid a global
+        # "already downloaded today" shortcut so missing coins still fetch.
+        logger.info("🌐 Downloading address lists...")
+        download_and_compare_address_lists()
     else:
         # Ensure test CSV exists even when downloads are skipped
         generate_test_csv()
