@@ -828,8 +828,8 @@ def machine_stats(
     now = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
     window_start = now - timedelta(hours=window_hours - 1)
     filters = [
-        "last_seen >= ?",
-        "COALESCE(machine_id, app_instance_id) IS NOT NULL",
+        "timestamp >= ?",
+        "machine_id IS NOT NULL",
     ]
     params: List[Any] = [window_start.isoformat() + "Z"]
     _, scope_filters, scope_params = _scope_filters(
@@ -847,9 +847,9 @@ def machine_stats(
         rows = conn.execute(
             f"""
             SELECT
-                strftime('%Y-%m-%dT%H:00:00Z', last_seen) AS bucket,
-                COUNT(DISTINCT COALESCE(machine_id, app_instance_id)) AS machines
-            FROM seed_events
+                strftime('%Y-%m-%dT%H:00:00Z', replace(timestamp, 'Z', '')) AS bucket,
+                COUNT(DISTINCT machine_id) AS machines
+            FROM machine_snapshots
             {where_clause}
             GROUP BY bucket
             ORDER BY bucket
