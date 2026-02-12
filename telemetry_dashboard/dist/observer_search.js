@@ -407,12 +407,8 @@
         : { x: event.x, y: event.y };
       const crosshair = chart.$crosshair || { visible: false };
       if (event.type === "mousemove") {
-        const xValue = chart.scales?.x?.getValueForPixel(relative.x);
-        const yValue = chart.scales?.y?.getValueForPixel(relative.y);
-        const xPixel =
-          chart.scales?.x?.getPixelForValue(xValue) ?? relative.x;
-        const yPixel =
-          chart.scales?.y?.getPixelForValue(yValue) ?? relative.y;
+        const xPixel = relative.x;
+        const yPixel = relative.y;
         crosshair.x = xPixel;
         crosshair.y = yPixel;
         const area = chart.chartArea;
