@@ -12,6 +12,7 @@ from config.settings import (
     VANITYSEARCH_AUTOTUNE_GRID,
     VANITYSEARCH_GPU_THREADS,
     VANITYSEARCH_MAX_FOUND,
+    VANITYSEARCH_MAX_FOUND_PER_GB,
 )
 from core.logger import get_logger
 
@@ -23,8 +24,8 @@ except Exception:  # pragma: no cover - optional dependency
 logger = get_logger(__name__)
 
 # Conservative bounds for auto-tuned ``-m`` to avoid runaway memory usage.
-_MAX_FOUND_MIN = 250_000
-_MAX_FOUND_MAX = 5_000_000
+_MAX_FOUND_MIN = 1_000_000
+_MAX_FOUND_MAX = 50_000_000
 
 _TUNING_CACHE: dict[tuple[bool, tuple[int, ...], Optional[str]], Tuple[Optional[int], Optional[int]]] = {}
 _TUNING_LOGGED: set[tuple[bool, tuple[int, ...], Optional[str]]] = set()
@@ -50,8 +51,8 @@ def _gpu_memory_mb(gpu_ids: Sequence[int]) -> Optional[int]:
 
 def _estimate_max_found() -> int:
     total_gb = psutil.virtual_memory().total / (1024 ** 3)
-    # Roughly 125k entries per GiB keeps memory usage conservative.
-    estimate = int(total_gb * 125_000)
+    per_gb = VANITYSEARCH_MAX_FOUND_PER_GB or 1_000_000
+    estimate = int(total_gb * per_gb)
     return _clamp(estimate, _MAX_FOUND_MIN, _MAX_FOUND_MAX)
 
 def _read_help(binary: str) -> str:

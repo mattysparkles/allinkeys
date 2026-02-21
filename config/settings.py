@@ -116,6 +116,9 @@ BTC_MIN_FILE_AGE_SEC = 2.0  # ignore files newer than this
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
 VANITYSEARCH_MAX_FOUND = env_int("ALLINKEYS_VANITYSEARCH_MAX_FOUND", None)
+VANITYSEARCH_MAX_FOUND_PER_GB = env_int(
+    "ALLINKEYS_VANITYSEARCH_MAX_FOUND_PER_GB", 1_000_000
+)
 VANITYSEARCH_GPU_THREADS = env_int("ALLINKEYS_VANITYSEARCH_GPU_THREADS", None)
 VANITYSEARCH_AUTOTUNE = env_flag("ALLINKEYS_VANITYSEARCH_AUTOTUNE", True)
 # Auto-tuning of the grid size (`-g`) is conservative and off by default.
