@@ -9,7 +9,7 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 
-from config.environment import env_int
+from config.environment import env_flag, env_int
 from config.directories import (
     ALERT_SOUND_FILE,
     ALL_BTC_ADDRESSES_DIR,
@@ -115,6 +115,9 @@ BTC_MIN_FILE_AGE_SEC = 2.0  # ignore files newer than this
 
 # --- VanitySearch Settings ---
 VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts with 1)
+VANITYSEARCH_MAX_FOUND = env_int("ALLINKEYS_VANITYSEARCH_MAX_FOUND", None)
+VANITYSEARCH_GPU_THREADS = env_int("ALLINKEYS_VANITYSEARCH_GPU_THREADS", None)
+VANITYSEARCH_AUTOTUNE = env_flag("ALLINKEYS_VANITYSEARCH_AUTOTUNE", True)
 
 # === Puzzle mode defaults ===
 PUZZLE_MODE = False

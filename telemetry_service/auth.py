@@ -24,13 +24,14 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
+    if expires_delta is None and TOKEN_EXPIRY <= 0:
+        to_encode: dict[str, Any] = {"sub": subject}
+        return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
+
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=TOKEN_EXPIRY)
     )
-    to_encode: dict[str, Any] = {
-        "sub": subject,
-        "exp": expire,
-    }
+    to_encode = {"sub": subject, "exp": expire}
     return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
 
 

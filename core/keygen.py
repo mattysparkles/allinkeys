@@ -29,6 +29,7 @@ from core.gpu_selector import (
 from core.logger import get_logger, log_with_context
 import config.settings as settings
 from core.vanity_runner import run_vanitysearch_batch
+from core.vanity_tuning import apply_vanitysearch_tuning_args
 from core.seed_tracker import (
     seed_in_used_range,
     record_seed_range,
@@ -573,6 +574,12 @@ def run_vanitysearch_stream(
         base_args.append("-gpu")  # CUDA acceleration
     if not BTC_COMPRESSED:
         base_args.append("-u")  # uncompressed WIF
+    base_args = apply_vanitysearch_tuning_args(
+        base_args,
+        use_gpu=use_gpu,
+        gpu_ids=selected_gpu_ids,
+        backend="cuda" if use_gpu else "cpu",
+    )
 
     cmd_preview = " ".join(map(str, [exe_path] + base_args + [pattern]))
     log_with_context(

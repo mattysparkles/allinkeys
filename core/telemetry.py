@@ -1672,6 +1672,40 @@ class TelemetryClient:
 
 
 _CLIENT: Optional[TelemetryClient] = None
+_CLIENT_LOCK = threading.Lock()
+_SEED_CLIENT_SHUTDOWN_EVENT: Optional[threading.Event] = None
+
+
+def _is_main_process() -> bool:
+    try:
+        return multiprocessing.current_process().name == "MainProcess"
+    except Exception:
+        return True
+
+
+def _ensure_seed_client() -> Optional[TelemetryClient]:
+    """Ensure a telemetry client exists for seed events in this process."""
+
+    if _CLIENT is not None:
+        return _CLIENT
+    if not SEED_TELEMETRY_ENABLED or telemetry_opted_out():
+        return None
+    auth_token = _resolve_auth_token(None)
+    if not auth_token:
+        return None
+    with _CLIENT_LOCK:
+        if _CLIENT is not None:
+            return _CLIENT
+        db_path = QUEUE_DB
+        if not _is_main_process():
+            db_path = Path(LOG_DIR) / f"telemetry_queue_{os.getpid()}.db"
+        client = TelemetryClient(auth_token=auth_token, db_path=db_path)
+        global _SEED_CLIENT_SHUTDOWN_EVENT
+        if _SEED_CLIENT_SHUTDOWN_EVENT is None:
+            _SEED_CLIENT_SHUTDOWN_EVENT = threading.Event()
+        client.start(_SEED_CLIENT_SHUTDOWN_EVENT)
+        _CLIENT = client
+        return _CLIENT
 
 
 def start_telemetry(
@@ -1915,9 +1949,10 @@ def record_seed_event(
 ) -> None:
     """Record a telemetry event if the global client is active."""
 
-    if _CLIENT is None:
+    client = _ensure_seed_client()
+    if client is None:
         return
-    _CLIENT.record_event(
+    client.record_event(
         seed_bytes,
         mode=mode,
         range_id=range_id,
@@ -1938,9 +1973,10 @@ def record_range_event(
 ) -> Optional[Dict[str, Any]]:
     """Record a range observation for telemetry payload enrichment."""
 
-    if _CLIENT is None:
+    client = _ensure_seed_client()
+    if client is None:
         return None
-    return _CLIENT.record_range_event(
+    return client.record_range_event(
         mode=mode,
         range_id=range_id,
         start=start,

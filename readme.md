@@ -200,6 +200,25 @@ export ALLINKEYS_CSV_DIR=/data/allinkeys/csv
 python main.py
 ```
 
+### ⚙️ VanitySearch Tuning
+
+Use these environment variables to control VanitySearch tuning:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ALLINKEYS_VANITYSEARCH_AUTOTUNE` | `true` | Enable auto-tuning for `-g` and `-m`. |
+| `ALLINKEYS_VANITYSEARCH_MAX_FOUND` | unset | Override `-m` (maxFound) directly. |
+| `ALLINKEYS_VANITYSEARCH_GPU_THREADS` | unset | Override `-g` (GPU threads/grid size) directly. |
+
+Example:
+
+```bash
+export ALLINKEYS_VANITYSEARCH_AUTOTUNE=false
+export ALLINKEYS_VANITYSEARCH_MAX_FOUND=1000000
+export ALLINKEYS_VANITYSEARCH_GPU_THREADS=4096
+python main.py
+```
+
 ---
 
 ## 🖥 Usage

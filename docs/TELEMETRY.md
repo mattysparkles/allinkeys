@@ -178,10 +178,11 @@ taproot splits, with optional `since`/`until` bounds for the snapshot window.
 Link back to the [GitHub repository](https://github.com/mattysparkles/allinkeys) from the telemetry site so visitors can clone the project and run the same software themselves.
 ## Token lifecycle
 
-- Telemetry access tokens are short-lived JWTs issued when you log in, sign up,
-  or approve a pairing request.
-- Tokens are stored locally in `config/.telemetry_token` and expire after the
-  configured `TOKEN_EXPIRY` window.
+- Telemetry access tokens are JWTs issued when you log in, sign up, or approve
+  a pairing request.
+- Tokens are stored locally in `config/.telemetry_token`.
+- `TOKEN_EXPIRY` is measured in minutes. The default is long‑lived (365 days).
+  Set `TOKEN_EXPIRY=0` to issue non‑expiring tokens in self‑hosted deployments.
 - To revoke access, delete the local token file or run with `--no-telemetry`
   and re-run the setup wizard to pair again.
 

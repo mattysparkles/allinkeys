@@ -33,6 +33,7 @@ from core.logger import get_logger
 from core.dashboard import update_dashboard_stat
 from core.vanity_io import ensure_dir
 from core.oclvanity_runner import run_oclvanitygen
+from core.vanity_tuning import apply_vanitysearch_tuning_args
 
 logger = get_logger(__name__)
 logger.info(
@@ -355,6 +356,12 @@ def run_vanitysearch(
     base_args = core_args
     if backend in ("cuda", "opencl") and device_id is not None:
         base_args = base_args + ["-gpu", str(device_id)]
+    base_args = apply_vanitysearch_tuning_args(
+        base_args,
+        use_gpu=backend in ("cuda", "opencl"),
+        gpu_ids=[device_id] if device_id is not None else None,
+        backend=backend,
+    )
 
     output_file, rc, _rotation = run_vanitysearch_batch(
         binary=binary,
@@ -746,6 +753,12 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
 
         for mode_name, mode_flag in modes:
             args_base = base + mode_flag
+            args_base = apply_vanitysearch_tuning_args(
+                args_base,
+                use_gpu=mode_name in ("GPU", "OPENCL"),
+                gpu_ids=None,
+                backend="cuda" if mode_name == "GPU" else "opencl" if mode_name == "OPENCL" else "cpu",
+            )
             current_multi_suffix = list(multi_suffix)
             current_single_suffix = list(single_suffix)
             attempt_fallback = bool(current_multi_suffix)

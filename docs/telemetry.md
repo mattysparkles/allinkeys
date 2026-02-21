@@ -74,6 +74,12 @@ The pairing URL serves a small HTML page at `/pair` that lets a user approve a
 pairing code. Tokens returned from pairing are secrets and should be treated
 like passwords.
 
+## Token lifetime
+
+Telemetry access tokens default to a long lifetime (365 days). The
+`TOKEN_EXPIRY` environment variable is measured in minutes; set
+`TOKEN_EXPIRY=0` to issue non-expiring tokens in self-hosted deployments.
+
 ## Machine snapshots
 
 When the client collects runtime and resource metrics it uploads a snapshot

@@ -355,7 +355,8 @@ def register_user(payload: UserCreate) -> TokenResponse:
     finally:
         conn.close()
     token = create_access_token(subject=payload.username)
-    return TokenResponse(access_token=token, expires_in=TOKEN_EXPIRY * 60)
+    expires_in = max(TOKEN_EXPIRY, 0) * 60
+    return TokenResponse(access_token=token, expires_in=expires_in)
 
 
 @app.post(
@@ -397,7 +398,8 @@ async def login_user(request: Request) -> TokenResponse:
     finally:
         conn.close()
     token = create_access_token(subject=str(username))
-    return TokenResponse(access_token=token, expires_in=TOKEN_EXPIRY * 60)
+    expires_in = max(TOKEN_EXPIRY, 0) * 60
+    return TokenResponse(access_token=token, expires_in=expires_in)
 
 
 @app.get(
