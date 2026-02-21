@@ -118,6 +118,10 @@ VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts
 VANITYSEARCH_MAX_FOUND = env_int("ALLINKEYS_VANITYSEARCH_MAX_FOUND", None)
 VANITYSEARCH_GPU_THREADS = env_int("ALLINKEYS_VANITYSEARCH_GPU_THREADS", None)
 VANITYSEARCH_AUTOTUNE = env_flag("ALLINKEYS_VANITYSEARCH_AUTOTUNE", True)
+# Auto-tuning of the grid size (`-g`) is conservative and off by default.
+VANITYSEARCH_AUTOTUNE_GRID = env_flag(
+    "ALLINKEYS_VANITYSEARCH_AUTOTUNE_GRID", False
+)
 # Some VanitySearch builds expect `-gpu` without an id. Default to no-id.
 VANITYSEARCH_GPU_ID_ARGUMENT = env_flag(
     "ALLINKEYS_VANITYSEARCH_GPU_ID_ARGUMENT", False

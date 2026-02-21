@@ -9,6 +9,7 @@ from pathlib import Path
 
 from config.settings import (
     VANITYSEARCH_AUTOTUNE,
+    VANITYSEARCH_AUTOTUNE_GRID,
     VANITYSEARCH_GPU_THREADS,
     VANITYSEARCH_MAX_FOUND,
 )
@@ -103,7 +104,7 @@ def _resolve_gpu_threads(
 ) -> Optional[int]:
     if VANITYSEARCH_GPU_THREADS is not None:
         return VANITYSEARCH_GPU_THREADS if VANITYSEARCH_GPU_THREADS > 0 else None
-    if not VANITYSEARCH_AUTOTUNE or not use_gpu:
+    if not VANITYSEARCH_AUTOTUNE or not VANITYSEARCH_AUTOTUNE_GRID or not use_gpu:
         return None
     if backend and backend not in ("cuda", "opencl", "auto"):
         return None
