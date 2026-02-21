@@ -118,6 +118,12 @@ VANITY_PATTERN = "1**"  # Change this pattern to match your target (e.g., starts
 VANITYSEARCH_MAX_FOUND = env_int("ALLINKEYS_VANITYSEARCH_MAX_FOUND", None)
 VANITYSEARCH_GPU_THREADS = env_int("ALLINKEYS_VANITYSEARCH_GPU_THREADS", None)
 VANITYSEARCH_AUTOTUNE = env_flag("ALLINKEYS_VANITYSEARCH_AUTOTUNE", True)
+# Some VanitySearch builds expect `-gpu` without an id. Default to no-id.
+VANITYSEARCH_GPU_ID_ARGUMENT = env_flag(
+    "ALLINKEYS_VANITYSEARCH_GPU_ID_ARGUMENT", False
+)
+# Some builds expect a `-gpuId <id>` flag instead of `-gpu <id>`.
+VANITYSEARCH_GPU_ID_FLAG = os.getenv("ALLINKEYS_VANITYSEARCH_GPU_ID_FLAG", "gpuId")
 
 # === Puzzle mode defaults ===
 PUZZLE_MODE = False

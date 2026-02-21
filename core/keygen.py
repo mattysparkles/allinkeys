@@ -571,10 +571,12 @@ def run_vanitysearch_stream(
     if getattr(settings, "VANITY_CASE_INSENSITIVE", False):
         base_args.append("-i")
     if use_gpu:
-        # VanitySearch expects an explicit GPU id when additional flags follow.
-        # Use the first selected GPU (or 0 as a safe default).
-        gpu_id = selected_gpu_ids[0] if selected_gpu_ids else 0
-        base_args += ["-gpu", str(gpu_id)]  # CUDA acceleration
+        # VanitySearch builds vary: some accept `-gpu` only, others accept `-gpuId <id>`.
+        base_args.append("-gpu")
+        if getattr(settings, "VANITYSEARCH_GPU_ID_ARGUMENT", False):
+            gpu_id = selected_gpu_ids[0] if selected_gpu_ids else 0
+            flag = getattr(settings, "VANITYSEARCH_GPU_ID_FLAG", "gpuId")
+            base_args += [f"-{flag}", str(gpu_id)]
     if not BTC_COMPRESSED:
         base_args.append("-u")  # uncompressed WIF
     base_args = apply_vanitysearch_tuning_args(

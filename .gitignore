@@ -17,6 +17,10 @@ venv/
 *.mov
 *.sqlite
 *.db
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
 *.csv
 config/.telemetry_token
 config/local_telemetry.json

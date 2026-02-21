@@ -8,6 +8,7 @@ import uuid
 from typing import Dict, List, Tuple, Optional, Set
 from pathlib import Path
 
+import config.settings as settings
 from config.settings import (
     GPU_BACKEND,
     FORCE_CPU_FALLBACK,
@@ -354,8 +355,11 @@ def run_vanitysearch(
     # Do not introduce Python-side rotation, temp files, or stdout rewriting.
     # VanitySearch must own file creation to avoid repeated regressions.
     base_args = core_args
-    if backend in ("cuda", "opencl") and device_id is not None:
-        base_args = base_args + ["-gpu", str(device_id)]
+    if backend in ("cuda", "opencl"):
+        base_args = base_args + ["-gpu"]
+        if settings.VANITYSEARCH_GPU_ID_ARGUMENT and device_id is not None:
+            flag = getattr(settings, "VANITYSEARCH_GPU_ID_FLAG", "gpuId")
+            base_args += [f"-{flag}", str(device_id)]
     base_args = apply_vanitysearch_tuning_args(
         base_args,
         use_gpu=backend in ("cuda", "opencl"),

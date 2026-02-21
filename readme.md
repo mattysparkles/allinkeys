@@ -209,6 +209,8 @@ Use these environment variables to control VanitySearch tuning:
 | `ALLINKEYS_VANITYSEARCH_AUTOTUNE` | `true` | Enable auto-tuning for `-g` and `-m`. |
 | `ALLINKEYS_VANITYSEARCH_MAX_FOUND` | unset | Override `-m` (maxFound) directly. |
 | `ALLINKEYS_VANITYSEARCH_GPU_THREADS` | unset | Override `-g` (GPU threads/grid size) directly. |
+| `ALLINKEYS_VANITYSEARCH_GPU_ID_ARGUMENT` | `false` | Enable passing a GPU id flag (see `ALLINKEYS_VANITYSEARCH_GPU_ID_FLAG`). |
+| `ALLINKEYS_VANITYSEARCH_GPU_ID_FLAG` | `gpuId` | GPU id flag name, e.g. `gpuId` for `-gpuId <id>`. |
 
 Example:
 

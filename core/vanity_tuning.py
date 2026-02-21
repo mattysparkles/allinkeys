@@ -74,17 +74,16 @@ def _resolve_gpu_threads(
     if mem_mb is None:
         return None
 
-    if mem_mb >= 24000:
-        return 8192
+    # Keep grid sizes conservative for broader binary compatibility.
     if mem_mb >= 16000:
-        return 6144
-    if mem_mb >= 12000:
-        return 4096
+        return 1024
     if mem_mb >= 8000:
-        return 3072
+        return 512
     if mem_mb >= 6000:
-        return 2048
-    return 1024
+        return 512
+    if mem_mb >= 4000:
+        return 256
+    return 128
 
 
 def resolve_vanitysearch_tuning(
