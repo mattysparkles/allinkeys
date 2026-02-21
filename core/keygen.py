@@ -29,7 +29,7 @@ from core.gpu_selector import (
 from core.logger import get_logger, log_with_context
 import config.settings as settings
 from core.vanity_runner import run_vanitysearch_batch
-from core.vanity_tuning import apply_vanitysearch_tuning_args
+from core.vanity_tuning import apply_vanitysearch_tuning_args, supports_binary_flag
 from core.seed_tracker import (
     seed_in_used_range,
     record_seed_range,
@@ -573,7 +573,12 @@ def run_vanitysearch_stream(
     if use_gpu:
         # VanitySearch builds vary: some accept `-gpu` only, others accept `-gpuId <id>`.
         base_args.append("-gpu")
-        if getattr(settings, "VANITYSEARCH_GPU_ID_ARGUMENT", False):
+        use_gpu_id_flag = getattr(settings, "VANITYSEARCH_GPU_ID_ARGUMENT", False)
+        if not use_gpu_id_flag:
+            use_gpu_id_flag = supports_binary_flag(
+                exe_path, getattr(settings, "VANITYSEARCH_GPU_ID_FLAG", "gpuId")
+            )
+        if use_gpu_id_flag:
             gpu_id = selected_gpu_ids[0] if selected_gpu_ids else 0
             flag = getattr(settings, "VANITYSEARCH_GPU_ID_FLAG", "gpuId")
             base_args += [f"-{flag}", str(gpu_id)]
@@ -584,6 +589,7 @@ def run_vanitysearch_stream(
         use_gpu=use_gpu,
         gpu_ids=selected_gpu_ids,
         backend="cuda" if use_gpu else "cpu",
+        binary=exe_path,
     )
 
     cmd_preview = " ".join(map(str, [exe_path] + base_args + [pattern]))

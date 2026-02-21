@@ -34,7 +34,7 @@ from core.logger import get_logger
 from core.dashboard import update_dashboard_stat
 from core.vanity_io import ensure_dir
 from core.oclvanity_runner import run_oclvanitygen
-from core.vanity_tuning import apply_vanitysearch_tuning_args
+from core.vanity_tuning import apply_vanitysearch_tuning_args, supports_binary_flag
 
 logger = get_logger(__name__)
 logger.info(
@@ -357,14 +357,19 @@ def run_vanitysearch(
     base_args = core_args
     if backend in ("cuda", "opencl"):
         base_args = base_args + ["-gpu"]
-        if settings.VANITYSEARCH_GPU_ID_ARGUMENT and device_id is not None:
+        if device_id is not None:
+            use_gpu_id_flag = settings.VANITYSEARCH_GPU_ID_ARGUMENT
             flag = getattr(settings, "VANITYSEARCH_GPU_ID_FLAG", "gpuId")
-            base_args += [f"-{flag}", str(device_id)]
+            if not use_gpu_id_flag:
+                use_gpu_id_flag = supports_binary_flag(binary, flag)
+            if use_gpu_id_flag:
+                base_args += [f"-{flag}", str(device_id)]
     base_args = apply_vanitysearch_tuning_args(
         base_args,
         use_gpu=backend in ("cuda", "opencl"),
         gpu_ids=[device_id] if device_id is not None else None,
         backend=backend,
+        binary=binary,
     )
 
     output_file, rc, _rotation = run_vanitysearch_batch(
@@ -762,6 +767,7 @@ def run_vanity_generator(seed_start: int, patterns: List[str], stop_event=None) 
                 use_gpu=mode_name in ("GPU", "OPENCL"),
                 gpu_ids=None,
                 backend="cuda" if mode_name == "GPU" else "opencl" if mode_name == "OPENCL" else "cpu",
+                binary=exe,
             )
             current_multi_suffix = list(multi_suffix)
             current_single_suffix = list(single_suffix)

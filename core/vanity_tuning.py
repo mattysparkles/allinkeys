@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Optional, Sequence, Tuple
 
 import psutil
+import re
+import subprocess
+from pathlib import Path
 
 from config.settings import (
     VANITYSEARCH_AUTOTUNE,
@@ -24,6 +27,7 @@ _MAX_FOUND_MAX = 5_000_000
 
 _TUNING_CACHE: dict[tuple[bool, tuple[int, ...], Optional[str]], Tuple[Optional[int], Optional[int]]] = {}
 _TUNING_LOGGED: set[tuple[bool, tuple[int, ...], Optional[str]]] = set()
+_FLAG_SUPPORT_CACHE: dict[tuple[str, str], bool] = {}
 
 
 def _clamp(value: int, minimum: int, maximum: int) -> int:
@@ -48,6 +52,40 @@ def _estimate_max_found() -> int:
     # Roughly 125k entries per GiB keeps memory usage conservative.
     estimate = int(total_gb * 125_000)
     return _clamp(estimate, _MAX_FOUND_MIN, _MAX_FOUND_MAX)
+
+def _read_help(binary: str) -> str:
+    if not binary or not Path(binary).exists():
+        return ""
+    for arg in ("-h", "--help", "-help"):
+        try:
+            proc = subprocess.run(
+                [binary, arg],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            return (proc.stdout or "") + (proc.stderr or "")
+        except Exception:
+            continue
+    return ""
+
+
+def supports_binary_flag(binary: str, flag: str) -> bool:
+    """Return True when the binary help mentions ``-<flag>``."""
+    if not binary:
+        return False
+    key = (binary, flag)
+    cached = _FLAG_SUPPORT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    help_text = _read_help(binary)
+    if not help_text:
+        _FLAG_SUPPORT_CACHE[key] = False
+        return False
+    pattern = re.compile(rf"(?<!\\w)-{re.escape(flag)}(?!\\w)")
+    supported = bool(pattern.search(help_text))
+    _FLAG_SUPPORT_CACHE[key] = supported
+    return supported
 
 
 def _resolve_max_found() -> Optional[int]:
@@ -118,6 +156,7 @@ def apply_vanitysearch_tuning_args(
     use_gpu: bool,
     gpu_ids: Optional[Sequence[int]] = None,
     backend: Optional[str] = None,
+    binary: Optional[str] = None,
 ) -> list[str]:
     """Return args with optional ``-m`` and ``-g`` tuning flags applied."""
     tuned = list(args)
@@ -127,9 +166,18 @@ def apply_vanitysearch_tuning_args(
         backend=backend,
     )
 
-    if max_found is not None and "-m" not in tuned:
+    if (
+        max_found is not None
+        and "-m" not in tuned
+        and (not binary or supports_binary_flag(binary, "m"))
+    ):
         tuned += ["-m", str(max_found)]
-    if use_gpu and gpu_threads is not None and "-g" not in tuned:
+    if (
+        use_gpu
+        and gpu_threads is not None
+        and "-g" not in tuned
+        and (not binary or supports_binary_flag(binary, "g"))
+    ):
         tuned += ["-g", str(gpu_threads)]
 
     return tuned
