@@ -187,6 +187,18 @@ def _telemetry_context():
     if getattr(settings, "PUZZLE_MODE", False):
         num = getattr(settings, "PUZZLE_NUMBER", None)
         return "puzzle", (f"puzzle-{num}" if num is not None else "puzzle")
+    try:
+        from core.dashboard import get_metric
+
+        active_mode = get_metric("active_mode")
+        if isinstance(active_mode, str) and active_mode.strip():
+            normalized = active_mode.strip().lower()
+            if normalized == "only_btc":
+                normalized = "btc_only"
+            if normalized in {"btc_only", "vanity", "mnemonic"}:
+                return normalized, "default"
+    except Exception:
+        pass
     return "vanity", "default"
 
 
@@ -733,6 +745,24 @@ def run_vanitysearch_stream(
                         )
                     except Exception:
                         pass
+            if telemetry_enabled() and range_observation is None:
+                try:
+                    mode, _ = _telemetry_context()
+                    space_min, space_max = _range_space()
+                    fallback_seed = int(initial_seed_int)
+                    range_id_override = range_id_override or _format_range_id(
+                        fallback_seed, fallback_seed
+                    )
+                    range_observation = record_range_event(
+                        mode=mode,
+                        range_id=range_id_override,
+                        start=fallback_seed,
+                        end=fallback_seed,
+                        space_min=space_min,
+                        space_max=space_max,
+                    )
+                except Exception:
+                    pass
 
             if telemetry_enabled():
                 try:
