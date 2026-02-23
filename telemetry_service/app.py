@@ -4,9 +4,10 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
@@ -52,6 +53,13 @@ from telemetry_service.models import (
 API_KEY_ENV = "TELEMETRY_API_KEY"
 logger = logging.getLogger("telemetry")
 logging.basicConfig(level=os.getenv("TELEMETRY_LOG_LEVEL", "INFO"))
+
+# Keep dashboard caching lightweight to avoid repeated heavy aggregations.
+_DASHBOARD_CACHE_LOCK = threading.Lock()
+_DASHBOARD_CACHE: Dict[str, tuple[float, Any]] = {}
+_DASHBOARD_CACHE_TTL_SECONDS = int(
+    os.getenv("TELEMETRY_DASHBOARD_CACHE_SECONDS", "10") or 10
+)
 
 # Metric keys expected in address-check charts.
 ADDRESS_METRIC_COINS = ("btc", "eth", "doge", "ltc", "dash", "bch", "rvn", "pep")
@@ -436,6 +444,65 @@ def _safe_load_json(payload: Optional[str]) -> List[Dict[str, Any]]:
     return []
 
 
+def _safe_load_recent_tail(payload: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not payload:
+        return None
+    text = payload.strip()
+    if not text or text == "[]":
+        return None
+    if len(text) <= 4096:
+        parsed = _safe_load_json(text)
+        return parsed[-1] if parsed else None
+    if not text.startswith("["):
+        parsed = _safe_load_json(text)
+        return parsed[-1] if parsed else None
+    idx = len(text) - 1
+    while idx >= 0 and text[idx].isspace():
+        idx -= 1
+    if idx < 0 or text[idx] != "]":
+        parsed = _safe_load_json(text)
+        return parsed[-1] if parsed else None
+    idx -= 1
+    while idx >= 0 and text[idx].isspace():
+        idx -= 1
+    if idx >= 0 and text[idx] == "[":
+        return None
+    in_string = False
+    escape = False
+    depth = 0
+    end = None
+    for pos in range(idx, -1, -1):
+        ch = text[pos]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "}":
+            if depth == 0:
+                end = pos
+            depth += 1
+            continue
+        if ch == "{":
+            if depth == 0:
+                continue
+            depth -= 1
+            if depth == 0 and end is not None:
+                snippet = text[pos : end + 1]
+                try:
+                    parsed = json.loads(snippet)
+                except json.JSONDecodeError:
+                    return None
+                return parsed if isinstance(parsed, dict) else None
+    return None
+
+
 def _safe_load_dict(payload: Optional[str]) -> Dict[str, Any]:
     if not payload:
         return {}
@@ -502,7 +569,7 @@ def _derive_range_id(entry: Dict[str, Any]) -> tuple[Optional[str], Optional[str
 
 
 def _aggregate_range_distribution(
-    rows: List[tuple[Any, Any, Any]],
+    rows: Iterable[tuple[Any, Any, Any]],
 ) -> tuple[Dict[str, Dict[str, Any]], int, Optional[int], Optional[int]]:
     distribution_map: Dict[str, Dict[str, Any]] = {}
     total_submissions = 0
@@ -589,10 +656,10 @@ def _aggregate_range_distribution(
                     count_hint=count_value,
                     last_seen_value=str(last_seen) if last_seen else None,
                 )
-        recent_entries = _safe_load_json(recent_payload)
-        if recent_entries:
+        recent_entry = _safe_load_recent_tail(recent_payload)
+        if recent_entry:
             _update_summary(
-                recent_entries[-1],
+                recent_entry,
                 count_hint=1,
                 last_seen_value=str(last_seen) if last_seen else None,
             )
@@ -1810,6 +1877,19 @@ def range_distribution(
     """
     parsed_since = _parse_since(since)
     parsed_until = _parse_until(until)
+    scope_value = _normalize_scope(scope)
+    cache_key = None
+    if current_user is None and scope_value == "global":
+        cache_key = (
+            "range_distribution"
+            f"|{since or ''}|{until or ''}|{mode or ''}|{range_id or ''}"
+            f"|{machine_id or ''}|{limit}"
+        )
+        now = time.time()
+        with _DASHBOARD_CACHE_LOCK:
+            cached = _DASHBOARD_CACHE.get(cache_key)
+            if cached and cached[0] > now:
+                return cached[1]
     conn = get_db_connection()
     try:
         filters = ["range_distribution IS NOT NULL"]
@@ -1844,7 +1924,7 @@ def range_distribution(
             ORDER BY last_seen DESC
             """,
             params,
-        ).fetchall()
+        )
         distribution_map, total_submissions, _, _ = _aggregate_range_distribution(rows)
         sorted_ranges = sorted(
             distribution_map.values(),
@@ -1884,7 +1964,7 @@ def range_distribution(
         ]
         merged = _merge_intervals(intervals)
         coverage = sum(end - start for start, end in merged) * 100 if merged else 0
-        return RangeDistributionResponse(
+        response = RangeDistributionResponse(
             slug=slug,
             total_submissions=total_submissions,
             unique_ranges=len(ranges),
@@ -1898,6 +1978,13 @@ def range_distribution(
             machine_id=machine_id,
             until=until,
         )
+        if cache_key:
+            with _DASHBOARD_CACHE_LOCK:
+                _DASHBOARD_CACHE[cache_key] = (
+                    time.time() + _DASHBOARD_CACHE_TTL_SECONDS,
+                    response,
+                )
+        return response
     finally:
         conn.close()
 
@@ -1975,11 +2062,10 @@ def range_search(
             ORDER BY last_seen DESC
             """,
             params,
-        ).fetchall()
+        )
+        distribution_map, total_submissions, min_space, max_space = _aggregate_range_distribution(rows)
     finally:
         conn.close()
-
-    distribution_map, total_submissions, min_space, max_space = _aggregate_range_distribution(rows)
     if space_min:
         min_space = _parse_seed_number(space_min)
     if space_max:

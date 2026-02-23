@@ -197,11 +197,107 @@ def register_machine(
     payload: MachineRegisterRequest,
     current_user: UserPublic = Depends(get_ui_current_user),
 ) -> MachineRegisterResponse:
-    machine_id = str(uuid4())
     now = datetime.utcnow().isoformat() + "Z"
     conn = get_db_connection()
     payload_data = payload.dict()
-    machine_identity = generate_machine_name(machine_id)
+    requested_id = (
+        payload.machine_id.strip()
+        if isinstance(payload.machine_id, str) and payload.machine_id.strip()
+        else None
+    )
+    requested_identity = (
+        payload.machine_identity.strip()
+        if isinstance(payload.machine_identity, str) and payload.machine_identity.strip()
+        else None
+    )
+    existing_row = None
+    if requested_identity:
+        existing_row = conn.execute(
+            """
+            SELECT id, machine_name, machine_identity
+            FROM machines
+            WHERE machine_identity = ? AND user_id = ?
+            LIMIT 1
+            """,
+            (requested_identity, current_user.id),
+        ).fetchone()
+    if existing_row is None and requested_id:
+        existing_row = conn.execute(
+            """
+            SELECT id, machine_name, machine_identity
+            FROM machines
+            WHERE id = ? AND user_id = ?
+            LIMIT 1
+            """,
+            (requested_id, current_user.id),
+        ).fetchone()
+    if existing_row:
+        machine_id, existing_name, existing_identity = existing_row
+        machine_identity = requested_identity or existing_identity
+        machine_display_name = (
+            payload.machine_name
+            or existing_name
+            or machine_identity
+            or generate_machine_name(machine_id)
+        )
+        try:
+            conn.execute(
+                """
+                UPDATE machines
+                SET machine_name = COALESCE(?, machine_name),
+                    machine_identity = COALESCE(?, machine_identity),
+                    gpu_info = COALESCE(?, gpu_info),
+                    version = COALESCE(?, version),
+                    status = 'online',
+                    last_seen = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (
+                    payload.machine_name,
+                    requested_identity,
+                    payload.gpu_info,
+                    payload.version,
+                    now,
+                    machine_id,
+                    current_user.id,
+                ),
+            )
+            conn.commit()
+        except Exception as exc:  # pragma: no cover (guards unexpected failures)
+            log_ingest_error(
+                context="register_machine",
+                exc=exc,
+                payload=payload_data,
+                tables=["machines"],
+                conn=conn,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Machine registration failed",
+            ) from exc
+        finally:
+            conn.close()
+
+        with MACHINE_REGISTRY_LOCK:
+            MACHINE_REGISTRY[(current_user.id, machine_id)] = {
+                "user_id": current_user.id,
+                "machine_id": machine_id,
+                "machine_name": machine_display_name,
+                "machine_identity": machine_identity,
+                "last_seen": now,
+                "cpu_percent": None,
+                "ram_percent": None,
+                "disk_free_percent": None,
+                "gpu_load_percent": None,
+                "gpu_name": payload.gpu_info,
+                "time_to_disk_full": None,
+            }
+        return MachineRegisterResponse(
+            machine_id=machine_id, message="Machine registered"
+        )
+
+    machine_id = str(uuid4())
+    machine_identity = requested_identity or generate_machine_name(machine_id)
     machine_display_name = payload.machine_name or machine_identity
     try:
         conn.execute(
@@ -291,6 +387,17 @@ def _persist_snapshot(
         if isinstance(range_distribution, list)
         else None
     )
+    # Avoid overwriting existing range data with empty lists from snapshots.
+    range_recent_update = (
+        range_recent_json
+        if isinstance(range_recent, list) and range_recent
+        else None
+    )
+    range_distribution_update = (
+        range_distribution_json
+        if isinstance(range_distribution, list) and range_distribution
+        else None
+    )
     insert_sql = """
         INSERT INTO machine_snapshots (
             machine_id, machine_identity, user_id, timestamp, payload,
@@ -340,7 +447,8 @@ def _persist_snapshot(
             last_error = ?,
             last_activity = ?,
             range_recent = COALESCE(?, range_recent),
-            range_distribution = COALESCE(?, range_distribution)
+            range_distribution = COALESCE(?, range_distribution),
+            machine_identity = COALESCE(?, machine_identity)
         WHERE id = ?
         """
     update_params = (
@@ -359,8 +467,9 @@ def _persist_snapshot(
         _safe_float(resources.get("gpu_load_percent")),
         runtime.get("last_error"),
         runtime.get("last_activity_ts"),
-        range_recent_json,
-        range_distribution_json,
+        range_recent_update,
+        range_distribution_update,
+        machine_identity,
         machine_id,
     )
     _record_sql_statement(diagnostics, update_sql, update_params)
@@ -447,6 +556,7 @@ async def ingest_machine_snapshot(
         runtime_data = _ensure_dict(snapshot_dict.get("runtime"))
         resources_data = _ensure_dict(snapshot_dict.get("resources"))
         machine_name = identity_data.get("machine_name") or machine_name
+        machine_identity = identity_data.get("machine_identity") or machine_identity
         gpu_info = resources_data.get("gpu_name") or gpu_info
         version = identity_data.get("client_version") or version
         timestamp_iso = snapshot_dict.get("timestamp_iso") or timestamp_iso

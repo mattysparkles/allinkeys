@@ -436,6 +436,8 @@ def _attempt_machine_registration(
     endpoint: str,
     token: str,
     machine_name: str,
+    machine_id: Optional[str] = None,
+    machine_identity: Optional[str] = None,
     requests_module=requests,
 ) -> tuple[bool, Optional[str], str]:
     register_url = f"{_telemetry_base_url(endpoint)}/machines/register"
@@ -445,6 +447,10 @@ def _attempt_machine_registration(
         "gpu_info": metrics.get("gpu_name"),
         "version": CLIENT_VERSION,
     }
+    if machine_id:
+        payload["machine_id"] = machine_id
+    if machine_identity:
+        payload["machine_identity"] = machine_identity
     try:
         response = requests_module.post(
             register_url,
@@ -538,6 +544,8 @@ def run_telemetry_setup(
 
     _print_disclosure(output_func, endpoint)
     machine_name = _maybe_prompt_machine_name(input_func, output_func)
+    existing_machine_id = _load_machine_id()
+    machine_identity = get_machine_identity()
 
     while True:
         output_func("")
@@ -569,6 +577,8 @@ def run_telemetry_setup(
                 endpoint=endpoint,
                 token=token,
                 machine_name=machine_name,
+                machine_id=existing_machine_id,
+                machine_identity=machine_identity,
                 requests_module=requests_module,
             )
             if ok:
@@ -640,6 +650,8 @@ def run_telemetry_setup(
                         endpoint=endpoint,
                         token=str(token),
                         machine_name=machine_name,
+                        machine_id=existing_machine_id,
+                        machine_identity=machine_identity,
                         requests_module=requests_module,
                     )
                     if not ok:
@@ -1180,6 +1192,7 @@ class TelemetryClient:
             "machine_name": self.machine_name,
             "gpu_info": metrics.get("gpu_name"),
             "version": CLIENT_VERSION,
+            "machine_identity": self.machine_identity,
         }
         try:
             response = requests.post(

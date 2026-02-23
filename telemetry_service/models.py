@@ -72,6 +72,8 @@ class IngestResponse(BaseModel):
 
 
 class MachineRegisterRequest(BaseModel):
+    machine_id: Optional[str] = None
+    machine_identity: Optional[str] = None
     machine_name: Optional[str] = None
     gpu_info: Optional[str] = None
     version: Optional[str] = None

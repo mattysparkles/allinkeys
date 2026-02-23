@@ -7,6 +7,11 @@
 
 ## Task Log
 
+- 2026-02-23 20:04:48Z: Started investigation into global telemetry dashboard metrics (total submissions/recent ranges) not updating for live machine `frosted-quartz`.
+- 2026-02-23 20:22:11Z: Diagnosed telemetry ingest stalling after 2026-02-21 (no `/v1/machines/*/telemetry` since then; `seed_events` last_seen 2026-02-21) while snapshots/control/checks continue; updated `telemetry_service/routes/machines.py` to prevent empty snapshot range payloads from overwriting existing range data; attempted `pytest tests/test_telemetry.py -q` (failed: multiprocessing semaphore permission error); restarted `allinkeys-telemetry.service`.
+- 2026-02-23 21:49:41Z: Investigating duplicate `Frosted-Quartz` machine entries after running `--telemetry-setup` (new machine registrations leaving old rows).
+- 2026-02-23 21:57:06Z: Added dedupe-aware machine registration: `MachineRegisterRequest` now accepts `machine_id`/`machine_identity`; server reuses existing machine by identity or id and updates metadata; snapshot ingest now updates `machine_identity`; telemetry setup sends persisted `machine_id` + stable `machine_identity`; TelemetryClient registration includes `machine_identity`. Restarted `allinkeys-telemetry.service`.
+- 2026-02-23 21:59:50Z: Deleted duplicate `Frosted-Quartz` machine rows (`a12f4279-1312-4179-a83c-dcdd8ed1fccd`, `bc9f791b-107e-44fa-a54e-9bd44945d696`) and kept newest `29e3dad7-f86b-49f2-8ee2-b69c41e6a7b5`; restarted `allinkeys-telemetry.service` to clear in-memory registry.
 - 2026-01-18 20:10:18Z: Disambiguated range distribution SQL in `telemetry_service/app.py`, added JWT env keys in `.env`, dropped git stash, created `telemetry.service` alias and reloaded systemd, restarted `allinkeys-telemetry.service`. Tail logs show only 401 responses (no SQL errors); `caddyclient` not present in repo/requirements.
 - 2026-01-18 20:24:23Z: Mounted `telemetry_dashboard/dist` at `/` in `telemetry_service/app.py` so the root UI serves, preserving API routes and static assets.
 - 2026-01-18 20:34:06Z: Added `/api/machines` aliases, a single-machine detail endpoint, and a new machine control page (`telemetry_service/templates/machine.html`), plus a Control link in the machines dashboard.
