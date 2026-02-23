@@ -1010,13 +1010,27 @@ def start_keygen_loop(
                 # Telemetry: record that we are using this seed (post-skip phase)
                 if telemetry_enabled():
                     try:
-                        mode, range_id = _telemetry_context()
+                        mode, default_range_id = _telemetry_context()
+                        pre_range_id = None
+                        pre_range_observation = None
+                        if mode == "btc_only":
+                            space_min, space_max = _range_space()
+                            pre_range_id = _format_range_id(seed, seed)
+                            pre_range_observation = record_range_event(
+                                mode=mode,
+                                range_id=pre_range_id,
+                                start=seed,
+                                end=seed,
+                                space_min=space_min,
+                                space_max=space_max,
+                            )
                         record_seed_event(
                             int(seed).to_bytes(32, "big"),
                             mode=mode,
-                            range_id=range_id,
+                            range_id=pre_range_id or default_range_id,
                             used=False,
                             match_found=False,
+                            range_observation=pre_range_observation,
                         )
                     except Exception:
                         pass
