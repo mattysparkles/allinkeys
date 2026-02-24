@@ -1699,6 +1699,7 @@ def _is_main_process() -> bool:
 def _ensure_seed_client() -> Optional[TelemetryClient]:
     """Ensure a telemetry client exists for seed events in this process."""
 
+    global _CLIENT
     if _CLIENT is not None:
         return _CLIENT
     if not SEED_TELEMETRY_ENABLED or telemetry_opted_out():
