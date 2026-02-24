@@ -56,3 +56,4 @@
 - 2026-02-24 13:09:05Z: Fixed telemetry seed client initialization bug by declaring `global _CLIENT` in `_ensure_seed_client()` (`core/telemetry.py`), which prevents `UnboundLocalError` and allows seed/range events to queue/flush again.
 - 2026-02-24 14:45:36Z: Started release prep for telemetry fix rollout: bumping project version and creating a new GitHub release tag including recent telemetry queue/seed client fixes.
 - 2026-02-24 14:46:37Z: Completed release prep for `v0.1.2`: updated `CHANGELOG.md` + `readme.md` release notes and bumped `.github/workflows/release-windows.yml` dispatch default tag to `v0.1.2`.
+- 2026-02-24 15:15:39Z: Finalized GitHub release cut for telemetry fixes: committed release prep (`d4fe310`), created/pushed tag `v0.1.2`, and pushed `main` so Windows release workflow can publish new assets.
