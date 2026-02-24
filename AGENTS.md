@@ -47,3 +47,4 @@
 - 2026-02-24 12:26:07Z: Sent corrected PowerShell-only diagnostic runbook that excludes prompt text and avoids mixed-shell/here-string continuation issues.
 - 2026-02-24 12:28:15Z: Collected user-provided Windows telemetry logs; observed repeated 2026-02-23 control/snapshot failures (502/read timeout) and started root-cause analysis for missing telemetry ingest.
 - 2026-02-24 12:40:00Z: Added backward-compatible telemetry seed event emitter in `core/keygen.py` to avoid silent drops when `record_seed_event` lacks `range_observation` (fallback strips arg); replaced all direct seed event calls with helper. Validated via `python -m py_compile core/keygen.py`; pytest remains blocked in sandbox by multiprocessing semaphore PermissionError.
+- 2026-02-24 12:40:41Z: Committed/pushed telemetry seed emission compatibility fix (`409a7ca`) to `main` after validating syntax compile (`python -m py_compile core/keygen.py`).
