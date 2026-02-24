@@ -7,12 +7,14 @@ initialize multiprocessing queues as side effects.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import os
 import sqlite3
 import sys
 import json
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,7 +78,56 @@ def _recent_telemetry_log_lines(limit: int = 80) -> list[str]:
     return list(matches)
 
 
+def _queue_db_event_count(path: Path) -> str:
+    try:
+        with sqlite3.connect(path) as conn:
+            tables = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+                ).fetchall()
+            ]
+            if "telemetry" not in tables:
+                return "telemetry table missing"
+            queued = conn.execute("SELECT COUNT(*) FROM telemetry").fetchone()[0]
+            return str(int(queued))
+    except Exception as exc:  # pragma: no cover - diagnostic path
+        return f"error: {exc!r}"
+
+
+def _fmt_mtime(path: Path) -> str:
+    try:
+        ts = path.stat().st_mtime
+    except OSError:
+        return "unknown"
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def _emit_test_event() -> str:
+    try:
+        import time
+        import secrets
+        import core.keygen as keygen
+
+        seed = secrets.randbits(255) | (1 << 128)
+        mode, default_range_id = keygen._telemetry_context()
+        keygen._emit_seed_event(
+            seed,
+            mode=mode,
+            range_id=default_range_id,
+            used=False,
+            match_found=False,
+        )
+        return "ok"
+    except Exception as exc:  # pragma: no cover - runtime diagnostic path
+        return f"error: {exc!r}"
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--emit-test", action="store_true")
+    args, _ = parser.parse_known_args()
+
     keygen_path = ROOT / "core" / "keygen.py"
     telemetry_path = ROOT / "core" / "telemetry.py"
     token_path = ROOT / "config" / ".telemetry_token"
@@ -98,24 +149,19 @@ def main() -> int:
     _print("telemetry_opted_out", _telemetry_opted_out(local_config_path))
     _print("auth_token_present", _auth_token_present(token_path))
 
-    queue_db = Path(directories.LOG_DIR) / "telemetry_queue.db"
-    _print("queue_db", queue_db)
-    _print("queue_db_exists", queue_db.exists())
-    if queue_db.exists():
-        try:
-            with sqlite3.connect(queue_db) as conn:
-                tables = [
-                    row[0]
-                    for row in conn.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-                    ).fetchall()
-                ]
-                _print("queue_tables", tables)
-                if "telemetry" in tables:
-                    queued = conn.execute("SELECT COUNT(*) FROM telemetry").fetchone()[0]
-                    _print("queued_events", queued)
-        except Exception as exc:  # pragma: no cover - diagnostic path
-            _print("queue_db_error", repr(exc))
+    queue_db_paths = sorted(Path(directories.LOG_DIR).glob("telemetry_queue*.db"))
+    _print("queue_db_count", len(queue_db_paths))
+    for path in queue_db_paths:
+        _print("queue_db", path)
+        _print("queue_db_mtime_utc", _fmt_mtime(path))
+        _print("queued_events", _queue_db_event_count(path))
+
+    if args.emit_test:
+        _print("emit_test_event", _emit_test_event())
+        queue_db_paths = sorted(Path(directories.LOG_DIR).glob("telemetry_queue*.db"))
+        for path in queue_db_paths:
+            _print("post_emit_queue_db", path)
+            _print("post_emit_queued_events", _queue_db_event_count(path))
 
     print("recent_telemetry_log_lines:", flush=True)
     for line in _recent_telemetry_log_lines():
