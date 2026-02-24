@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import inspect
 import time
 import hashlib
 import secrets
@@ -59,6 +60,13 @@ TELEMETRY_SEED_CACHE_MAX_SIZE = 10_000
 telemetry_seed_cache: OrderedDict[str, tuple[bool, float]] = OrderedDict()
 _TELEMETRY_SEED_CACHE_LOCK = Lock()
 
+try:
+    _RECORD_SEED_EVENT_SUPPORTS_RANGE_OBSERVATION = (
+        "range_observation" in inspect.signature(record_seed_event).parameters
+    )
+except Exception:
+    _RECORD_SEED_EVENT_SUPPORTS_RANGE_OBSERVATION = True
+
 
 def _seed_in_ranges(seed: int, ranges) -> bool:
     """Return True if ``seed`` falls within any condensed ``ranges``."""
@@ -82,6 +90,40 @@ def telemetry_enabled() -> bool:
     except Exception:
         pass
     return True
+
+
+def _emit_seed_event(
+    seed: int,
+    *,
+    mode: str,
+    range_id,
+    used: bool,
+    match_found: bool,
+    range_observation=None,
+) -> None:
+    """Emit telemetry seed events with backward compatibility for older clients."""
+
+    payload = int(seed).to_bytes(32, "big")
+    kwargs = {
+        "mode": mode,
+        "range_id": range_id,
+        "used": used,
+        "match_found": match_found,
+    }
+    if (
+        _RECORD_SEED_EVENT_SUPPORTS_RANGE_OBSERVATION
+        and range_observation is not None
+    ):
+        kwargs["range_observation"] = range_observation
+    try:
+        record_seed_event(payload, **kwargs)
+    except TypeError as exc:
+        # Backward compatibility: some client builds may have a telemetry module
+        # without the newer ``range_observation`` argument.
+        if "range_observation" not in str(exc):
+            raise
+        kwargs.pop("range_observation", None)
+        record_seed_event(payload, **kwargs)
 
 # Batch progress
 KEYGEN_STATE = {
@@ -316,8 +358,8 @@ def _prefill_seed_queue(min_bits: int = 128) -> None:
                 if seen_centrally:
                     try:
                         mode, range_id = _telemetry_context()
-                        record_seed_event(
-                            int(candidate).to_bytes(32, "big"),
+                        _emit_seed_event(
+                            candidate,
                             mode=mode,
                             range_id=range_id,
                             used=True,
@@ -350,8 +392,8 @@ def generate_random_seed(min_bits=128):
                     continue
                 if telemetry_enabled() and _central_seen(seed):
                     try:
-                        record_seed_event(
-                            int(seed).to_bytes(32, "big"),
+                        _emit_seed_event(
+                            seed,
                             mode=_telemetry_context()[0],
                             range_id=_telemetry_context()[1],
                             used=True,
@@ -372,8 +414,8 @@ def generate_random_seed(min_bits=128):
                 continue
             if telemetry_enabled() and _central_seen(seed):
                 try:
-                    record_seed_event(
-                        int(seed).to_bytes(32, "big"),
+                    _emit_seed_event(
+                        seed,
                         mode=_telemetry_context()[0],
                         range_id=_telemetry_context()[1],
                         used=True,
@@ -395,8 +437,8 @@ def generate_random_seed(min_bits=128):
                 continue
             if telemetry_enabled() and _central_seen(seed):
                 try:
-                    record_seed_event(
-                        int(seed).to_bytes(32, "big"),
+                    _emit_seed_event(
+                        seed,
                         mode=_telemetry_context()[0],
                         range_id=_telemetry_context()[1],
                         used=True,
@@ -767,8 +809,8 @@ def run_vanitysearch_stream(
             if telemetry_enabled():
                 try:
                     mode, default_range_id = _telemetry_context()
-                    record_seed_event(
-                        int(initial_seed_int).to_bytes(32, "big"),
+                    _emit_seed_event(
+                        initial_seed_int,
                         mode=mode,
                         range_id=range_id_override or default_range_id,
                         used=True,
@@ -1024,8 +1066,8 @@ def start_keygen_loop(
                                 space_min=space_min,
                                 space_max=space_max,
                             )
-                        record_seed_event(
-                            int(seed).to_bytes(32, "big"),
+                        _emit_seed_event(
+                            seed,
                             mode=mode,
                             range_id=pre_range_id or default_range_id,
                             used=False,

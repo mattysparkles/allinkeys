@@ -15,6 +15,7 @@
 - 2026-02-23 22:02:30Z: Investigating continued lack of recent range submissions/total submissions updates after client update in btc-only mode.
 - 2026-02-23 22:15:39Z: Verified telemetry service still has no `/v1/machines/*/telemetry` ingest since 2026-02-21; `seed_events` max last_seen remains 2026-02-21T19:06:57Z.
 - 2026-02-23 22:17:28Z: Added btc-only pre-run range telemetry emission in `core/keygen.py` so each file run records a range observation and seed event even when output parsing yields empty ranges; pushed to GitHub.
+- 2026-02-23 22:38:28Z: Confirmed snapshots continue for `Frosted-Quartz` but `range_recent` remains empty and `seed_events` still stale, indicating client telemetry batches are still not being sent.
 - 2026-01-18 20:10:18Z: Disambiguated range distribution SQL in `telemetry_service/app.py`, added JWT env keys in `.env`, dropped git stash, created `telemetry.service` alias and reloaded systemd, restarted `allinkeys-telemetry.service`. Tail logs show only 401 responses (no SQL errors); `caddyclient` not present in repo/requirements.
 - 2026-01-18 20:24:23Z: Mounted `telemetry_dashboard/dist` at `/` in `telemetry_service/app.py` so the root UI serves, preserving API routes and static assets.
 - 2026-01-18 20:34:06Z: Added `/api/machines` aliases, a single-machine detail endpoint, and a new machine control page (`telemetry_service/templates/machine.html`), plus a Control link in the machines dashboard.
@@ -38,3 +39,11 @@
 - 2026-02-11 05:25:46Z: Tagged and pushed v0.1.1 to trigger the Windows release workflow.
 - 2026-02-11 06:19:31Z: Routed telemetry payload debug output through logger (DEBUG only) to stop massive stdout dumps during flushes.
 - 2026-02-11 08:34:31Z: Addressed CodeQL alerts by hardening redirect sanitization, removing regex-based relative parsing, parameterizing dashboard queries, adding log redaction, and declaring workflow permissions.
+- 2026-02-23 23:02:59Z: Started packaging a single copy/paste PowerShell diagnostic script for Windows client telemetry checks (auth token, endpoint, queue DB, and telemetry logs) to avoid multiline quoting failures.
+- 2026-02-23 23:03:05Z: Delivered a one-shot PowerShell script flow that writes/runs `diag.py`, prints telemetry config + queue state, and dumps recent `[Telemetry]` log lines.
+- 2026-02-24 12:22:54Z: Started follow-up Windows diagnostics support after user reported the one-shot script appeared to do nothing; likely stuck in an unclosed PowerShell here-string due indented terminator.
+- 2026-02-24 12:22:59Z: Provided a no-here-string fallback PowerShell script generator (`$lines` array -> `diag.py`) plus combined output capture to avoid multiline paste/terminator issues.
+- 2026-02-24 12:25:30Z: Began remediation for mixed-shell copy/paste failures after user pasted PowerShell commands containing a Linux prompt token; preparing shell-safe diagnostics instructions.
+- 2026-02-24 12:26:07Z: Sent corrected PowerShell-only diagnostic runbook that excludes prompt text and avoids mixed-shell/here-string continuation issues.
+- 2026-02-24 12:28:15Z: Collected user-provided Windows telemetry logs; observed repeated 2026-02-23 control/snapshot failures (502/read timeout) and started root-cause analysis for missing telemetry ingest.
+- 2026-02-24 12:40:00Z: Added backward-compatible telemetry seed event emitter in `core/keygen.py` to avoid silent drops when `record_seed_event` lacks `range_observation` (fallback strips arg); replaced all direct seed event calls with helper. Validated via `python -m py_compile core/keygen.py`; pytest remains blocked in sandbox by multiprocessing semaphore PermissionError.
