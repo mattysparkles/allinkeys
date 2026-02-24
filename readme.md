@@ -452,7 +452,7 @@ PGP_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "my_pgp_key.asc")
 
 ## 📦 Building into `.exe`
 
-You can download the Windows installer from GitHub Releases (starting with `v0.1.1`).
+You can download the Windows installer from GitHub Releases (starting with `v0.1.2`).
 The release build bundles all required assets (VanitySearch binaries, wordlists,
 sounds, plugins, etc.) so it runs out of the box.
 
@@ -480,6 +480,13 @@ For the official Windows installer, the GitHub Actions workflow packages a full
 ## 📝 Changelog
 
 ### [Unreleased]
+
+### v0.1.2
+
+- Fixed telemetry seed client initialization so queued telemetry submissions resume and dashboard totals/ranges update correctly.
+- Added BTC-only range telemetry fallback events to keep global telemetry metrics current during file runs.
+- Added machine registration dedupe by stable machine identity to prevent duplicate machine entries after telemetry re-setup.
+- Added `tools/telemetry_diag.py` for one-command telemetry diagnostics on Windows clients.
 
 ### v0.1.1
 

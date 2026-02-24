@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [v0.1.2]
+
+- Fixed telemetry seed client initialization (`_CLIENT` scope) so seed/range events queue and flush correctly again.
+- Added BTC-only pre-run range telemetry emission fallback for accurate recent range and total submission metrics.
+- Added dedupe-aware machine registration using stable `machine_identity` to prevent duplicate machine rows after telemetry setup/repair.
+- Hardened snapshot ingest updates to avoid empty range payloads overwriting existing machine range telemetry state.
+- Added `tools/telemetry_diag.py` for one-command telemetry diagnostics on client machines.
+
 ## [v0.1.1]
 
 - Added privacy-safe central telemetry with durable seed queue

@@ -54,3 +54,5 @@
 - 2026-02-24 13:01:22Z: Extended `tools/telemetry_diag.py` to enumerate all `telemetry_queue*.db` files (not just `telemetry_queue.db`), report per-DB queued counts/mtimes, and optionally emit a test telemetry event via `--emit-test` for one-command Windows verification.
 - 2026-02-24 13:08:40Z: Isolated root cause for missing telemetry event queueing: `_ensure_seed_client()` in `core/telemetry.py` assigns `_CLIENT` without declaring `global _CLIENT`, causing `UnboundLocalError` on every seed/range event call (silently swallowed by keygen call sites).
 - 2026-02-24 13:09:05Z: Fixed telemetry seed client initialization bug by declaring `global _CLIENT` in `_ensure_seed_client()` (`core/telemetry.py`), which prevents `UnboundLocalError` and allows seed/range events to queue/flush again.
+- 2026-02-24 14:45:36Z: Started release prep for telemetry fix rollout: bumping project version and creating a new GitHub release tag including recent telemetry queue/seed client fixes.
+- 2026-02-24 14:46:37Z: Completed release prep for `v0.1.2`: updated `CHANGELOG.md` + `readme.md` release notes and bumped `.github/workflows/release-windows.yml` dispatch default tag to `v0.1.2`.
